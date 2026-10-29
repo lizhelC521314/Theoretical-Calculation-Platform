@@ -1,0 +1,40 @@
+# === 依赖 ===
+node_modules/
+.pnp/
+.pnp.js
+
+# === 构建产物 ===
+dist/
+release/
+out/
+*.log
+*.tmp
+
+# === Vite / TS ===
+.vite/
+*.tsbuildinfo
+
+# === Electron ===
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# === IDE / Editor ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# === 数据文件（不在源码中） ===
+公式梳理/*_extracted/
+公式梳理/*-unz/
+公式梳理/*.zip
+公式梳理/~$*
+.trae-html-share-packages/
