@@ -18,6 +18,13 @@ export function KnowledgeBasePage({ user }: Props) {
   const [tab, setTab] = useState<Tab>('theory');
   const [ping, setPing] = useState<{ reachable: boolean; kbeRoot: string; kbeTheory: string; kbeDesign: string; kbeFmea: string } | null>(null);
   const [files, setFiles] = useState<DbFile[]>([]);
+  const [toast, setToast] = useState('');
+
+  /** 双击文件卡片：调用系统默认程序打开原文 */
+  const openFile = useCallback(async (f: DbFile) => {
+    const res = await api.app.openPath(f.fullPath);
+    if (!res.ok) setToast(`无法打开：${res.message || '未知错误'}`);
+  }, []);
 
   const refresh = useCallback(async () => {
     const pingRes = await api.db.ping();
@@ -92,7 +99,12 @@ export function KnowledgeBasePage({ user }: Props) {
         {files.map((f) => {
           const p = parseArchiveName(f.name);
           return (
-            <div className="settings-card file-card" key={f.fullPath}>
+            <div
+              className="settings-card file-card"
+              key={f.fullPath}
+              title="双击用本地软件打开"
+              onDoubleClick={() => openFile(f)}
+            >
               <div className="pc-head">
                 <h3>{f.name}</h3>
                 {p.version && <span className="tag light">{p.version}</span>}
@@ -105,6 +117,8 @@ export function KnowledgeBasePage({ user }: Props) {
           );
         })}
       </div>
+
+      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }

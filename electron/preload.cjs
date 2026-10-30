@@ -41,6 +41,7 @@ const bridge = {
   },
   app: {
     info: () => ipcRenderer.invoke('app:info'),
+    openPath: (filePath) => ipcRenderer.invoke('app:openPath', filePath),
   },
 };
 

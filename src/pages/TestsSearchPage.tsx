@@ -158,6 +158,12 @@ export function TestsSearchPage({ user: _user }: Props) {
     }
   }, []);
 
+  /** 双击：调用系统默认程序（如 Acrobat / Excel / WPS）打开原文 */
+  const openFile = useCallback(async (f: DbFile) => {
+    const res = await api.app.openPath(f.fullPath);
+    if (!res.ok) setError(`无法用本地程序打开：${res.message || '未知错误'}`);
+  }, []);
+
   // 列表/预览水平拖动
   const handleListResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -220,7 +226,7 @@ export function TestsSearchPage({ user: _user }: Props) {
               清除
             </button>
           )}
-          <span className="lib-count">筛选结果 {filtered.length} 份</span>
+          <span className="lib-count">筛选结果 {filtered.length} 份 · 双击行可用本地软件打开</span>
         </div>
       </div>
 
@@ -255,6 +261,8 @@ export function TestsSearchPage({ user: _user }: Props) {
                     className={active ? 'active' : ''}
                     onMouseEnter={() => selectFile(f)}
                     onClick={() => selectFile(f)}
+                    onDoubleClick={() => openFile(f)}
+                    title="双击用本地软件打开"
                   >
                     <td>
                       {isP ? (

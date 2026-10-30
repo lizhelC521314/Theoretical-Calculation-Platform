@@ -183,6 +183,12 @@ export function DatabasePage({ user }: Props) {
     }
   };
 
+  /** 双击文件卡片：调用系统默认程序打开原文 */
+  const openFile = useCallback(async (f: DbFile) => {
+    const res = await api.app.openPath(f.fullPath);
+    if (!res.ok) showToast(`无法打开：${res.message || '未知错误'}`);
+  }, []);
+
   const totalMatches = useMemo(() => {
     const calcKeys = new Map<string, number>();
     genKeys.calc.forEach((k) => calcKeys.set(k.key, (calcKeys.get(k.key) ?? 0) + 1));
@@ -225,17 +231,17 @@ export function DatabasePage({ user }: Props) {
       </div>
 
       {tab === 'calc' && (
-        <FileList files={calcFiles} onBuildTrusted={buildTrustedFor} busy={busy} />
+        <FileList files={calcFiles} onBuildTrusted={buildTrustedFor} busy={busy} onOpen={openFile} />
       )}
-      {tab === 'test' && <FileList files={testFiles} busy={busy} />}
-      {tab === 'trusted' && <FileList files={trustedFiles} busy={busy} />}
+      {tab === 'test' && <FileList files={testFiles} busy={busy} onOpen={openFile} />}
+      {tab === 'trusted' && <FileList files={trustedFiles} busy={busy} onOpen={openFile} />}
 
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
 
-function FileList({ files, onBuildTrusted, busy }: { files: DbFile[]; onBuildTrusted?: (f: DbFile) => void; busy: string }) {
+function FileList({ files, onBuildTrusted, busy, onOpen }: { files: DbFile[]; onBuildTrusted?: (f: DbFile) => void; busy: string; onOpen?: (f: DbFile) => void }) {
   return (
     <div className="file-list">
       {files.length === 0 && (
@@ -250,7 +256,12 @@ function FileList({ files, onBuildTrusted, busy }: { files: DbFile[]; onBuildTru
       {files.map((f) => {
         const p = parseArchiveName(f.name);
         return (
-          <div className="settings-card file-card" key={f.fullPath}>
+          <div
+            className="settings-card file-card"
+            key={f.fullPath}
+            title="双击用本地软件打开"
+            onDoubleClick={() => onOpen?.(f)}
+          >
             <div className="pc-head">
               <h3>{f.name}</h3>
               {p.version && <span className="tag light">{p.version}</span>}

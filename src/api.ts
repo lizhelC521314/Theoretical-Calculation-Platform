@@ -104,6 +104,8 @@ interface CtrApi {
   };
   app: {
     info(): Promise<{ version: string; dataDir: string }>;
+    /** 桌面版：用系统默认程序打开文件（支持 UNC 路径） */
+    openPath(filePath: string): Promise<{ ok: boolean; message?: string }>;
   };
 }
 
@@ -196,7 +198,10 @@ const fallback: CtrApi = {
     pdfData: async () => ({ ok: false, message: '浏览器调试模式无法读取 UNC 路径 PDF' }),
     ping: async () => ({ reachable: false, root: '', calc: '', test: '', trusted: '', kbeRoot: '', kbeTheory: '', kbeDesign: '', kbeFmea: '' }),
   },
-  app: { info: async () => ({ version: '0.1.0-browser', dataDir: '(浏览器调试)' }) },
+  app: {
+    info: async () => ({ version: '0.1.0-browser', dataDir: '(浏览器调试)' }),
+    openPath: async () => ({ ok: false, message: '浏览器调试模式无法调用本地程序打开文件' }),
+  },
 };
 
 export const api: CtrApi = (window as unknown as { ctr?: CtrApi }).ctr ?? fallback;

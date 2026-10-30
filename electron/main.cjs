@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
@@ -446,6 +446,18 @@ ipcMain.handle('db:ping', async () => {
     kbeDesign: KBE_DESIGN,
     kbeFmea: KBE_FMEA,
   };
+});
+
+/** 用系统默认程序打开文件（支持本地与 UNC 路径） */
+ipcMain.handle('app:openPath', async (_e, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return { ok: false, message: '文件不存在或无法访问' };
+    const errMsg = await shell.openPath(filePath);
+    if (errMsg) return { ok: false, message: errMsg };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
 });
 
 ipcMain.handle('app:info', () => ({
