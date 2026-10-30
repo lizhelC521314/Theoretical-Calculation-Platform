@@ -127,12 +127,12 @@ export const WOVEN_DIAGRAM = `
   </g>
 
   <!-- 管壁孔隙率说明 -->
-  <text x="72" y="106" text-anchor="start" font-size="12" fill="#222222">微孔阵列（孔隙率 σ）</text>
+  <text x="72" y="106" text-anchor="start" font-size="12" fill="#222222">编织丝网管壁（孔隙率 φ，流阻率 σf）</text>
 
-  <!-- 微孔放大引线：d 与壁厚 t -->
+  <!-- 管壁放大引线：壁厚 t -->
   <line x1="230" y1="118" x2="300" y2="58" stroke="#8a8a8a" stroke-width="1"/>
   <circle cx="230" cy="118" r="4" fill="none" stroke="#8a8a8a" stroke-width="1"/>
-  <text x="304" y="52" text-anchor="start" font-size="12" fill="#222222">微孔等效直径 d</text>
+  <text x="304" y="52" text-anchor="start" font-size="12" fill="#222222">编织管壁（JCA 等效流体层）</text>
   <text x="304" y="70" text-anchor="start" font-size="12" fill="#222222">管壁厚度 t</text>
 
   <!-- 内径 D 尺寸：竖向尺寸线置于管左侧 -->
