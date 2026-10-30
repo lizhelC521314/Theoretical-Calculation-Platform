@@ -347,22 +347,22 @@ for (let i = 1; i <= CAVITY_MAX; i++) {
     {
       key: `Lc${i}`, label: `腔${i} 长度`, symbol: `L_c${i}`, unit: 'mm', unitGroup: 'length',
       default: CAVITY_LC_DEFAULT[i - 1], min: 6, max: 50, required: true, showIf: { key: 'n', min: i },
-      description: `第 ${i} 腔沿轴向的宽度，PPT 范围 0.006~0.050 m，属设计变量；算例取 ${CAVITY_LC_DEFAULT[i - 1]} mm`,
+      description: `第 ${i} 腔沿轴向的宽度，建议范围 0.006~0.050 m，属设计变量；算例取 ${CAVITY_LC_DEFAULT[i - 1]} mm`,
     },
     {
       key: `dout${i}`, label: `腔${i} 外径`, symbol: `d_out${i}`, unit: 'mm', unitGroup: 'length',
       default: 69, min: 52, max: 160, required: true, showIf: { key: 'n', min: i },
-      description: `第 ${i} 腔的腔体外径，PPT 要求 1.3~2.0 倍主管内径；算例取 69 mm`,
+      description: `第 ${i} 腔的腔体外径，建议范围 1.3~2.0 倍主管内径；算例取 69 mm`,
     },
     {
       key: `dh${i}`, label: `腔${i} 开孔直径`, symbol: `d_h${i}`, unit: 'mm', unitGroup: 'length',
       default: 3.1, min: 2, max: 4, required: true, showIf: { key: 'n', min: i },
-      description: `第 ${i} 腔的单孔直径，PPT 范围 0.002~0.004 m，属设计变量；算例取 3.1 mm`,
+      description: `第 ${i} 腔的单孔直径，建议范围 0.002~0.004 m，属设计变量；算例取 3.1 mm`,
     },
     {
       key: `nh${i}`, label: `腔${i} 开孔数量`, symbol: `n_h${i}`, unit: '个',
       default: 36, min: 20, max: 60, required: true, showIf: { key: 'n', min: i },
-      description: `第 ${i} 腔的穿孔个数，PPT 范围 20~60，属设计变量；算例取 36`,
+      description: `第 ${i} 腔的穿孔个数，建议范围 20~60，属设计变量；算例取 36`,
     },
   );
 }
@@ -392,18 +392,18 @@ export const multiCavitySilencer: FormulaSpec = {
   description:
     '多腔宽频消声器由主管穿孔段与串联腔体构成，PPT 采用一维传递矩阵法：各腔按自身几何（L_c,i、d_out,i、d_h,i、n_h,i）单独按式(1) 算穿孔率 σ_i，按式(3)~(6) 算穿孔阻抗 ξ（含 M1=0 与 M1>0 两种工况及端部修正 α0、CG），耦合项按 σ_i·P/(S·ξ) 计入（式8/10/12，P2 取内壁 πd_in），再按式(12) 构造 4×4 系统矩阵 A，取 Φ = exp(A·Lc) 并按式(14) 压缩为单腔 2×2 传递矩阵，按式(15) 将各腔串联（相邻腔间按式(16) 插入隔板直管段），最后由式(18) TL(f) = 20lg(|T11+T12+T21+T22|/2) 得到传递损失。结果区给出频带平均 TL、峰值 TL、峰值频率以及各腔穿孔率，并绘制 TL - Frequency 曲线。',
   inputs: [
-    { key: 'din', label: '主管内径', symbol: 'd_in', unit: 'mm', unitGroup: 'length', default: 41.6, min: 40, max: 80, required: true, description: '主管（穿孔段）内径，PPT 范围 0.040~0.080 m；算例（图表中记号 d_in）取 41.6 mm' },
-    { key: 'tw', label: '穿孔壁厚（孔深）', symbol: 't_w', unit: 'mm', unitGroup: 'length', default: 2.8, min: 1.5, max: 3, required: true, description: '穿孔板厚度，即孔的有效深度，PPT 范围 0.0015~0.003 m；算例取 2.8 mm' },
-    { key: 'n', label: '腔数', symbol: 'n', unit: '个', default: 5, min: 3, max: 6, required: true, description: '串联腔体数量，PPT 范围 3~6；算例取 5 腔，改动后下方逐腔输入按腔数依次展开' },
+    { key: 'din', label: '主管内径', symbol: 'd_in', unit: 'mm', unitGroup: 'length', default: 41.6, min: 40, max: 80, required: true, description: '主管（穿孔段）内径，建议范围 0.040~0.080 m；算例（图表中记号 d_in）取 41.6 mm' },
+    { key: 'tw', label: '穿孔壁厚（孔深）', symbol: 't_w', unit: 'mm', unitGroup: 'length', default: 2.8, min: 1.5, max: 3, required: true, description: '穿孔板厚度，即孔的有效深度，建议范围 0.0015~0.003 m；算例取 2.8 mm' },
+    { key: 'n', label: '腔数', symbol: 'n', unit: '个', default: 5, min: 3, max: 6, required: true, description: '串联腔体数量，建议范围 3~6；算例取 5 腔，改动后下方逐腔输入按腔数依次展开' },
     ...cavityInputs,
-    { key: 'ct', label: '隔板厚度', symbol: 'c_t', unit: 'mm', unitGroup: 'length', default: 2, min: 1, max: 3, required: true, description: '相邻腔之间的隔板（环形叶片）厚度，按式(16)作为直管段插入，PPT 范围 0.001~0.003 m；算例取 2 mm' },
+    { key: 'ct', label: '隔板厚度', symbol: 'c_t', unit: 'mm', unitGroup: 'length', default: 2, min: 1, max: 3, required: true, description: '相邻腔之间的隔板（环形叶片）厚度，按式(16)作为直管段插入，建议范围 0.001~0.003 m；算例取 2 mm' },
     { key: 'rho0', label: '空气密度', symbol: 'ρ0', unit: 'kg/m³', unitGroup: 'density', default: 1.205, min: 0, required: true, description: '常温常压空气密度，20℃ 取 1.205 kg/m³' },
     { key: 'c0v', label: '空气声速', symbol: 'c0', unit: 'm/s', default: 343, min: 0, required: true, description: '常温常压声速，20℃ 取 343 m/s' },
-    { key: 'M1', label: '主管马赫数', symbol: 'M1', unit: '-', default: 0, min: 0, max: 0.15, required: true, description: '主管流速马赫数，PPT 范围 0~0.15；默认 0（无气流，按式3），有气流时按式(4)~式(6)计算' },
+    { key: 'M1', label: '主管马赫数', symbol: 'M1', unit: '-', default: 0, min: 0, max: 0.15, required: true, description: '主管流速马赫数，建议范围 0~0.15；默认 0（无气流，按式3），有气流时按式(4)~式(6)计算' },
     { key: 'R0', label: '阻性常数', symbol: 'R0', unit: '-', default: 0.0055, min: 0, required: true, description: '穿孔阻抗实部经验常数，PPT 取值 0.0055（±20%，需标定）' },
     { key: 'fmin', label: '频率最小值', symbol: 'f_min', unit: 'Hz', default: 100, min: 0, required: true, description: 'TL 曲线扫描下限，PPT 默认 100 Hz' },
     { key: 'fmax', label: '频率最大值', symbol: 'f_max', unit: 'Hz', default: 5000, min: 0, required: true, description: 'TL 曲线扫描上限，PPT 默认 5000 Hz' },
-    { key: 'df', label: '频率步长', symbol: 'Δf', unit: 'Hz', default: 10, min: 1, required: true, description: '频率扫描步长，PPT 建议 5~10 Hz' },
+    { key: 'df', label: '频率步长', symbol: 'Δf', unit: 'Hz', default: 10, min: 1, required: true, description: '频率扫描步长，建议范围 5~10 Hz' },
   ],
   outputs: [
     { key: 'tl_avg', label: '频带平均传递损失', symbol: 'TL_avg', unit: 'dB', primary: true, group: '声学特性', description: '在 [f_min, f_max] 内按 Δf 扫描得到的 TL 平均值' },
