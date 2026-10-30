@@ -3,6 +3,7 @@ import { listFormulas } from '../src/formula/registry';
 import { helmholtzMuffler } from '../src/domains/acoustics/helmholtzMuffler';
 import { expansionMuffler } from '../src/domains/acoustics/expansionMuffler';
 import { quarterWaveTube } from '../src/domains/acoustics/quarterWaveTube';
+import { multiCavitySilencer } from '../src/domains/acoustics/multiCavitySilencer';
 
 /**
  * 公式基准算例回归测试
@@ -195,5 +196,52 @@ describe('四分之一波长管消音器 TL 曲线', () => {
     expect(byArea.m).toBeCloseTo(byDiameter.m, 12);
     expect(byArea.fc).toBeCloseTo(byDiameter.fc, 10);
     expect(byArea.tl).toBeCloseTo(byDiameter.tl, 10);
+  });
+});
+
+/**
+ * 多腔穿孔消音器：郭荣论文算例校验
+ *
+ * 参数取自参考图表（PPT 末页）：d_in=41.6mm、d_out=69mm、d_h=3.1mm、n_h=36、
+ * t_w=2.8mm、5 腔、L_c=8/10/13/17/23.8mm、c_t=2mm。
+ * PPT 给出 500 Hz≈1 dB、1.7 kHz≈26 dB、2.3 kHz≈42 dB、3.2 kHz≈4 dB（带通特性），
+ * 用于确认「耦合项乘逐腔穿孔率 σ_i、P2=πd_in」的实现与文献一致。
+ */
+describe('多腔穿孔消音器 郭荣算例校验', () => {
+  const input: Record<string, number> = {
+    din: 0.0416, tw: 0.0028, n: 5, ct: 0.002,
+    rho0: 1.205, c0v: 343, M1: 0, R0: 0.0055, fmin: 100, fmax: 5000, df: 10,
+  };
+  const Lc = [0.008, 0.01, 0.013, 0.017, 0.0238];
+  for (let i = 1; i <= 5; i++) {
+    input[`Lc${i}`] = Lc[i - 1];
+    input[`dout${i}`] = 0.069;
+    input[`dh${i}`] = 0.0031;
+    input[`nh${i}`] = 36;
+  }
+  const pts = multiCavitySilencer.curve!.compute(input);
+  const at = (f: number) => pts.find((p) => Math.abs(p.x - f) < 1e-6)!.y;
+
+  it('各腔穿孔率按腔宽各自计算（L_c 越宽 σ 越小）', () => {
+    const out = multiCavitySilencer.solve(input);
+    expect(out.sigma1).toBeGreaterThan(out.sigma2);
+    expect(out.sigma2).toBeGreaterThan(out.sigma3);
+    expect(out.sigma3).toBeGreaterThan(out.sigma4);
+    expect(out.sigma4).toBeGreaterThan(out.sigma5);
+  });
+
+  it('500 Hz / 1.7k / 2.3k / 3.2k 处 TL 与 PPT 文献值（≈1/26/42/4 dB）相差不超过 5 dB', () => {
+    expect(Math.abs(at(500) - 1)).toBeLessThan(5);
+    expect(Math.abs(at(1700) - 26)).toBeLessThan(5);
+    expect(Math.abs(at(2300) - 42)).toBeLessThan(5);
+    expect(Math.abs(at(3200) - 4)).toBeLessThan(5);
+  });
+
+  it('低频 TL ≈ 0、峰值位于 2.3 kHz 附近（呈带通，非单调下降）', () => {
+    expect(at(100)).toBeLessThan(1);
+    const peak = pts.reduce((a, b) => (b.y > a.y ? b : a));
+    expect(peak.x).toBeGreaterThan(2000);
+    expect(peak.x).toBeLessThan(2600);
+    expect(peak.y).toBeGreaterThan(30);
   });
 });

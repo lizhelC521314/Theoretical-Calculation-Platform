@@ -337,29 +337,32 @@ const CAVITY_MAX = 6;
 /**
  * 逐腔单独输入：长度、腔外径、开孔直径、开孔数量。
  * 腔数 n 增大后依次展开（showIf），n 之外的腔输入不参与计算。
+ * 默认值取自参考图表（郭荣论文算例）：L_c = 8/10/13/17/23.8 mm，
+ * d_out = 69 mm，d_h = 3.1 mm，n_h = 36。
  */
+const CAVITY_LC_DEFAULT = [8, 10, 13, 17, 23.8, 20];
 const cavityInputs: ParamSpec[] = [];
 for (let i = 1; i <= CAVITY_MAX; i++) {
   cavityInputs.push(
     {
       key: `Lc${i}`, label: `腔${i} 长度`, symbol: `L_c${i}`, unit: 'mm', unitGroup: 'length',
-      default: 20, min: 6, max: 50, required: true, showIf: { key: 'n', min: i },
-      description: `第 ${i} 腔沿轴向的宽度，PPT 范围 0.006~0.050 m，属设计变量`,
+      default: CAVITY_LC_DEFAULT[i - 1], min: 6, max: 50, required: true, showIf: { key: 'n', min: i },
+      description: `第 ${i} 腔沿轴向的宽度，PPT 范围 0.006~0.050 m，属设计变量；算例取 ${CAVITY_LC_DEFAULT[i - 1]} mm`,
     },
     {
       key: `dout${i}`, label: `腔${i} 外径`, symbol: `d_out${i}`, unit: 'mm', unitGroup: 'length',
-      default: 60, min: 52, max: 160, required: true, showIf: { key: 'n', min: i },
-      description: `第 ${i} 腔的腔体外径，PPT 要求 1.3~2.0 倍主管内径`,
+      default: 69, min: 52, max: 160, required: true, showIf: { key: 'n', min: i },
+      description: `第 ${i} 腔的腔体外径，PPT 要求 1.3~2.0 倍主管内径；算例取 69 mm`,
     },
     {
       key: `dh${i}`, label: `腔${i} 开孔直径`, symbol: `d_h${i}`, unit: 'mm', unitGroup: 'length',
-      default: 3, min: 2, max: 4, required: true, showIf: { key: 'n', min: i },
-      description: `第 ${i} 腔的单孔直径，PPT 范围 0.002~0.004 m，属设计变量`,
+      default: 3.1, min: 2, max: 4, required: true, showIf: { key: 'n', min: i },
+      description: `第 ${i} 腔的单孔直径，PPT 范围 0.002~0.004 m，属设计变量；算例取 3.1 mm`,
     },
     {
       key: `nh${i}`, label: `腔${i} 开孔数量`, symbol: `n_h${i}`, unit: '个',
-      default: 40, min: 20, max: 60, required: true, showIf: { key: 'n', min: i },
-      description: `第 ${i} 腔的穿孔个数，PPT 范围 20~60，属设计变量`,
+      default: 36, min: 20, max: 60, required: true, showIf: { key: 'n', min: i },
+      description: `第 ${i} 腔的穿孔个数，PPT 范围 20~60，属设计变量；算例取 36`,
     },
   );
 }
@@ -389,11 +392,11 @@ export const multiCavitySilencer: FormulaSpec = {
   description:
     '多腔宽频消声器由主管穿孔段与串联腔体构成，PPT 采用一维传递矩阵法：各腔按自身几何（L_c,i、d_out,i、d_h,i、n_h,i）单独按式(1) 算穿孔率 σ_i，按式(3)~(6) 算穿孔阻抗 ξ（含 M1=0 与 M1>0 两种工况及端部修正 α0、CG），耦合项按 σ_i·P/(S·ξ) 计入（式8/10/12，P2 取内壁 πd_in），再按式(12) 构造 4×4 系统矩阵 A，取 Φ = exp(A·Lc) 并按式(14) 压缩为单腔 2×2 传递矩阵，按式(15) 将各腔串联（相邻腔间按式(16) 插入隔板直管段），最后由式(18) TL(f) = 20lg(|T11+T12+T21+T22|/2) 得到传递损失。结果区给出频带平均 TL、峰值 TL、峰值频率以及各腔穿孔率，并绘制 TL - Frequency 曲线。',
   inputs: [
-    { key: 'din', label: '主管内径', symbol: 'd_in', unit: 'mm', unitGroup: 'length', default: 40, min: 40, max: 80, required: true, description: '主管（穿孔段）内径，PPT 范围 0.040~0.080 m，默认 40 mm' },
-    { key: 'tw', label: '穿孔壁厚（孔深）', symbol: 't_w', unit: 'mm', unitGroup: 'length', default: 2, min: 1.5, max: 3, required: true, description: '穿孔板厚度，即孔的有效深度，PPT 范围 0.0015~0.003 m' },
-    { key: 'n', label: '腔数', symbol: 'n', unit: '个', default: 4, min: 3, max: 6, required: true, description: '串联腔体数量，PPT 范围 3~6；改动后下方逐腔输入按腔数依次展开' },
+    { key: 'din', label: '主管内径', symbol: 'd_in', unit: 'mm', unitGroup: 'length', default: 41.6, min: 40, max: 80, required: true, description: '主管（穿孔段）内径，PPT 范围 0.040~0.080 m；算例（图表中记号 d_in）取 41.6 mm' },
+    { key: 'tw', label: '穿孔壁厚（孔深）', symbol: 't_w', unit: 'mm', unitGroup: 'length', default: 2.8, min: 1.5, max: 3, required: true, description: '穿孔板厚度，即孔的有效深度，PPT 范围 0.0015~0.003 m；算例取 2.8 mm' },
+    { key: 'n', label: '腔数', symbol: 'n', unit: '个', default: 5, min: 3, max: 6, required: true, description: '串联腔体数量，PPT 范围 3~6；算例取 5 腔，改动后下方逐腔输入按腔数依次展开' },
     ...cavityInputs,
-    { key: 'ct', label: '隔板厚度', symbol: 'c_t', unit: 'mm', unitGroup: 'length', default: 2, min: 1, max: 3, required: true, description: '相邻腔之间的隔板厚度，按式(16)作为直管段插入，PPT 范围 0.001~0.003 m' },
+    { key: 'ct', label: '隔板厚度', symbol: 'c_t', unit: 'mm', unitGroup: 'length', default: 2, min: 1, max: 3, required: true, description: '相邻腔之间的隔板（环形叶片）厚度，按式(16)作为直管段插入，PPT 范围 0.001~0.003 m；算例取 2 mm' },
     { key: 'rho0', label: '空气密度', symbol: 'ρ0', unit: 'kg/m³', unitGroup: 'density', default: 1.205, min: 0, required: true, description: '常温常压空气密度，20℃ 取 1.205 kg/m³' },
     { key: 'c0v', label: '空气声速', symbol: 'c0', unit: 'm/s', default: 343, min: 0, required: true, description: '常温常压声速，20℃ 取 343 m/s' },
     { key: 'M1', label: '主管马赫数', symbol: 'M1', unit: '-', default: 0, min: 0, max: 0.15, required: true, description: '主管流速马赫数，PPT 范围 0~0.15；默认 0（无气流，按式3），有气流时按式(4)~式(6)计算' },
@@ -449,13 +452,13 @@ export const multiCavitySilencer: FormulaSpec = {
   diagram: MULTI_CAVITY_DIAGRAM,
   sensitivity: false,
   assumptions: [
-    '★ 标记说明：该公式验证不充分——仅按参考 PPT 的公式实现，尚无试验数据或权威算例校核，计算结果仅供参考，工程应用前须结合实际测试数据验证',
+    '★ 标记说明：该公式尚未用实测数据校核——已与 PPT 引用的郭荣论文算例（即默认初始值）对比：500 Hz≈1.1 dB、1.7 kHz≈24.7 dB、2.3 kHz≈39.7 dB、3.2 kHz≈6.1 dB，与 PPT 给出的 ≈1/26/42/4 dB 基本一致，工程应用前仍建议用试验数据验证',
     '公式与参考 PPT 严格一致：σ（式1）、ξ（式3/4）、α0（式5）、CG（式6）、A（式12）、Φ = exp(A·Lc)（式13）、T_cav（式14）、串联（式15）、TL（式18）',
     '各腔的长度 L_c,i、腔外径 d_out,i、开孔直径 d_h,i、开孔数量 n_h,i 均逐腔单独输入；腔数 n 决定参与计算的腔，n 之外的腔输入不参与计算',
     '各腔穿孔率 σ_i 由该腔自身几何按式(1) 计算，并以 σ_i 乘入该腔的耦合项（式8/10/12）；腔体耦合周长取内壁 P2 = πd_in，外壁刚性不参与耦合',
     'PPT 校验点：漏乘 σ 会把壁面当成 100% 全开，表现为 TL 在 100 Hz 达 60 dB 以上且随频率单调下降；正常结果应呈带通特性',
     'R0 很小时腔体共振几乎无阻尼，TL 峰值极高且对频率步长 Δf 敏感；工程判断应以频带平均 TL 与实测数据为准',
-    'PPT 末页的郭荣论文校验（d_in=41.6mm、d_out=69mm、d_h=3.1mm、n_h=36、t_w=2.8mm、5 腔）未给出各腔长度，故未纳入自动回归',
+    '默认初始值取自参考图表（郭荣论文算例）：d_in=41.6、d_out=69、d_h=3.1、n_h=36、t_w=2.8、c_t=2 mm，5 腔、L_c=8/10/13/17/23.8 mm',
     '逐腔参数开放后不再逐腔扫描敏感性（参数数量过多且腔数会改变计算结构），故本公式不提供参数敏感性分析',
     'PPT 式(20)(21) 的优化流程（以 L_c、d_h、n_h 为设计变量，σ≤0.25、孔间距≥2d_h、Δp≤Δp_max）不在本模块实现',
     '相邻腔之间按式(16)以隔板厚度 c_t 的直管段连接；进出口管段与面积突变矩阵（式17）默认不参与计算',
@@ -517,6 +520,32 @@ export const multiCavitySilencer: FormulaSpec = {
   },
   // 基准值由本实现按 PPT 公式逐项核算（见 source），待试验数据到位后替换为实测校核算例
   benchmarks: [
+    {
+      name: '郭荣论文算例（PPT 末页验证参数，即默认初始值：d_in=41.6mm, d_out=69mm, d_h=3.1mm, n_h=36, t_w=2.8mm, n=5, L_c=8/10/13/17/23.8mm, c_t=2mm, M1=0）',
+      input: {
+        din: 0.0416, tw: 0.0028, n: 5,
+        Lc1: 0.008, Lc2: 0.01, Lc3: 0.013, Lc4: 0.017, Lc5: 0.0238,
+        dout1: 0.069, dout2: 0.069, dout3: 0.069, dout4: 0.069, dout5: 0.069,
+        dh1: 0.0031, dh2: 0.0031, dh3: 0.0031, dh4: 0.0031, dh5: 0.0031,
+        nh1: 36, nh2: 36, nh3: 36, nh4: 36, nh5: 36,
+        ct: 0.002, rho0: 1.205, c0v: 343, M1: 0, R0: 0.0055,
+        fmin: 100, fmax: 5000, df: 10,
+      },
+      expect: {
+        sigma1: 0.2598858173,
+        sigma2: 0.2079086538,
+        sigma3: 0.1599297337,
+        sigma4: 0.1222992081,
+        sigma5: 0.0873565772,
+        xi_re: 0.0055,
+        xi_im: 0.1032739563,
+        tl_avg: 8.937123429,
+        tl_max: 47.48645049,
+        f_peak: 2350,
+      },
+      tolerance: 5e-3,
+      source: 'PPT 末页郭荣论文校验：500 Hz≈1 dB、1.7 kHz≈26 dB、2.3 kHz≈42 dB、3.2 kHz≈4 dB（呈带通）。本实现同参数下为 1.08 / 24.65 / 39.70 / 6.07 dB，491 点扫描 TL 均值 8.9371 dB、峰值 47.4865 dB @ 2350 Hz；各腔 σ_i 按式(1) 各自计算',
+    },
     {
       name: '默认工况（无气流：4 腔各 L_c=20mm, d_out=60mm, d_h=3mm, n_h=40；d_in=40mm, t_w=2mm, c_t=2mm, M1=0, f∈[100,5000]Hz, Δf=10Hz）',
       input: {
