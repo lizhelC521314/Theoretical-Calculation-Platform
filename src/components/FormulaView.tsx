@@ -12,11 +12,22 @@ function renderTex(tex: string): string {
 }
 
 /** 公式展示区：LaTeX 主公式、符号说明、示意图、适用条件 */
-export function FormulaView({ formula }: { formula: FormulaSpec }) {
+export function FormulaView({
+  formula,
+  values,
+}: {
+  formula: FormulaSpec;
+  /** 当前输入值（界面单位），用于按 showIf 隐藏未参与计算的逐腔符号行；不传则全部显示 */
+  values?: Record<string, number>;
+}) {
   const rendered = useMemo(
     () => formula.latex.map((l) => ({ ...l, html: renderTex(l.tex) })),
     [formula],
   );
+
+  // 与 ParamForm 相同的 showIf 求值：另一参数（如腔数 n）达到下限才显示该行
+  const visible = (s?: { key: string; min?: number }) =>
+    !values || !s || Number(values[s.key]) >= (s.min ?? 0);
 
   return (
     <div className="formula-view">
@@ -55,7 +66,7 @@ export function FormulaView({ formula }: { formula: FormulaSpec }) {
           </tr>
         </thead>
         <tbody>
-          {formula.inputs.map((p) => (
+          {formula.inputs.filter((p) => visible(p.showIf)).map((p) => (
             <tr key={'i' + p.key}>
               <td className="sym">{p.symbol}</td>
               <td>
@@ -65,7 +76,7 @@ export function FormulaView({ formula }: { formula: FormulaSpec }) {
               <td>{p.unitGroup ? p.unit : p.unit}</td>
             </tr>
           ))}
-          {formula.outputs.map((o) => (
+          {formula.outputs.filter((o) => visible(o.showIf)).map((o) => (
             <tr key={'o' + o.key}>
               <td className="sym">{o.symbol}</td>
               <td>

@@ -66,6 +66,12 @@ export interface OutputSpec {
    * 顶部给出分组小标题（如 "Fluent / STAR-CCM+ / 回代校验"）。
    */
   group?: string;
+  /**
+   * 条件显示：仅当某输入参数满足条件时，结果区与符号说明表才显示该输出。
+   * 与 ParamSpec.showIf 同义——用于「按腔数逐腔展开」的逐腔输出，
+   * 腔数 n 之外的腔不参与计算，对应行直接隐藏。
+   */
+  showIf?: { key: string; min?: number };
 }
 
 /** 基准算例：用于自动化回归测试，保证公式实现正确 */

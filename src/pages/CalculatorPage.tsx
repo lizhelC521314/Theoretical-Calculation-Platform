@@ -133,7 +133,11 @@ export function CalculatorPage({ formula, user, project, onBack }: Props) {
     }
     lines.push('');
     lines.push('输出结果,符号,数值,单位,SI值');
-    for (const o of formula.outputs) {
+    // 与结果区一致：按 showIf 隐藏未参与计算的逐腔输出（n 为无量纲参数，SI 值与界面值一致）
+    const visibleOutputs = formula.outputs.filter(
+      (o) => !o.showIf || Number(computed.inputsSI[o.showIf.key]) >= (o.showIf.min ?? 0),
+    );
+    for (const o of visibleOutputs) {
       const raw = computed.outputsSI[o.key];
       const { value, unit } = o.unitGroup ? autoUnit(raw, o.unitGroup) : { value: raw, unit: o.unit };
       lines.push(`${o.label},${o.symbol},${formatNumber(value, o.digits ?? 6)},${unit},${raw}`);
@@ -231,7 +235,7 @@ export function CalculatorPage({ formula, user, project, onBack }: Props) {
         <div className="sidebar-resizer" onMouseDown={handleLeftResize} />
 
         <div className="calc-col middle">
-          <FormulaView formula={formula} />
+          <FormulaView formula={formula} values={values} />
         </div>
 
         <div className="sidebar-resizer" onMouseDown={handleRightResize} />

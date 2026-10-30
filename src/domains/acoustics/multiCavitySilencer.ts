@@ -376,7 +376,7 @@ for (let i = 1; i <= CAVITY_MAX; i++) {
 /**
  * 逐腔穿孔率输出：σ_i = n_h,i·d_h,i²/(4·d_in·L_c,i)（式1），
  * 每个腔的 σ_i 直接乘入该腔的耦合项 σ_i·P/(S·ξ)（式8/10/12）。
- * 腔数之外的腔不参与计算，结果区显示为「—」。
+ * 腔数之外的腔不参与计算，结果区与符号说明表按 showIf 隐藏对应行。
  */
 const cavitySigmaOutputs: OutputSpec[] = Array.from({ length: CAVITY_MAX }, (_, k) => ({
   key: `sigma${k + 1}`,
@@ -384,13 +384,14 @@ const cavitySigmaOutputs: OutputSpec[] = Array.from({ length: CAVITY_MAX }, (_, 
   symbol: `σ${k + 1}`,
   unit: '-',
   group: '各腔穿孔率',
+  showIf: { key: 'n', min: k + 1 },
   description: `第 ${k + 1} 腔的穿孔率 σ = n_h·d_h²/(4·d_in·L_c)（式1），用于该腔的穿孔阻抗修正与耦合项（式8/10/12）`,
 }));
 
 /**
  * 逐腔端部修正系数输出：α0,i 只由该腔自身穿孔率 σ_i 决定（式5，与频率无关），
  * 直接进入该腔穿孔阻抗 ξ_i 的虚部 j·k0(t_w + α0,i·d_h)（式3/4）。
- * 腔数之外的腔不参与计算，结果区显示为「—」。
+ * 腔数之外的腔不参与计算，结果区与符号说明表按 showIf 隐藏对应行。
  */
 const cavityAlphaOutputs: OutputSpec[] = Array.from({ length: CAVITY_MAX }, (_, k) => ({
   key: `alpha${k + 1}`,
@@ -398,6 +399,7 @@ const cavityAlphaOutputs: OutputSpec[] = Array.from({ length: CAVITY_MAX }, (_, 
   symbol: `α0${k + 1}`,
   unit: '-',
   group: '各腔端部修正',
+  showIf: { key: 'n', min: k + 1 },
   description: `第 ${k + 1} 腔按自身穿孔率 σ${k + 1} 按式(5) 计算的端部修正系数 α0 = 0.5×0.8216(1 + 1.5319√σ + 1.4099σ − 0.8780σ^1.5)，仅用于该腔的穿孔阻抗 ξ（式3/式4）`,
 }));
 

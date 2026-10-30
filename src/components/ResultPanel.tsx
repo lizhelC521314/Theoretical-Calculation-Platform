@@ -11,7 +11,7 @@ interface Props {
   sensitivityKey?: string | null;
 }
 
-export function ResultPanel({ formula, outputsSI, onSensitivity, sensitivityKey }: Props) {
+export function ResultPanel({ formula, outputsSI, inputsSI, onSensitivity, sensitivityKey }: Props) {
   if (!outputsSI) {
     return (
       <div className="result-block">
@@ -21,7 +21,16 @@ export function ResultPanel({ formula, outputsSI, onSensitivity, sensitivityKey 
     );
   }
 
-  const rows = formula.outputs.map((o) => {
+  // 按 OutputSpec.showIf 过滤：腔数之外的逐腔输出不参与计算，对应行直接隐藏
+  // （showIf 目前只用于无量纲参数 n，SI 值与界面值一致）
+  const visible =
+    inputsSI == null
+      ? formula.outputs
+      : formula.outputs.filter(
+          (o) => !o.showIf || Number(inputsSI[o.showIf.key]) >= (o.showIf.min ?? 0),
+        );
+
+  const rows = visible.map((o) => {
     const raw = outputsSI[o.key];
     const num = typeof raw === 'number' ? raw : NaN;
     const { value, unit } = o.unitGroup ? autoUnit(num, o.unitGroup) : { value: num, unit: o.unit };
@@ -32,7 +41,7 @@ export function ResultPanel({ formula, outputsSI, onSensitivity, sensitivityKey 
     };
   });
 
-  const hasGroup = formula.outputs.some((o) => o.group);
+  const hasGroup = visible.some((o) => o.group);
 
   return (
     <div className="result-block">
