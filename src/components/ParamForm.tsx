@@ -48,13 +48,20 @@ export function ParamForm({ formula, values, units, onValuesChange, onUnitsChang
     <div className="param-form">
       <h3 className="panel-title">输入参数</h3>
       {formula.inputs
-        .filter((p) => !p.showIf || Number(values[p.showIf.key]) >= (p.showIf.min ?? 0))
+        .filter(
+          (p) =>
+            !p.showIf ||
+            (Number(values[p.showIf.key]) >= (p.showIf.min ?? -Infinity) &&
+              Number(values[p.showIf.key]) <= (p.showIf.max ?? Infinity)),
+        )
         .map((p) => {
         const unitLabel = p.unitGroup ? groupUnit[p.unitGroup] : p.unit;
         const v = values[p.key];
+        const isSelect = p.kind === 'select' && p.options && p.options.length > 0;
         const outOfRange =
-          (p.min !== undefined && typeof v === 'number' && v < p.min) ||
-          (p.max !== undefined && typeof v === 'number' && v > p.max);
+          !isSelect &&
+          ((p.min !== undefined && typeof v === 'number' && v < p.min) ||
+            (p.max !== undefined && typeof v === 'number' && v > p.max));
         return (
           <div className="param-row" key={p.key}>
             <label className="param-label" title={p.description}>
@@ -62,23 +69,39 @@ export function ParamForm({ formula, values, units, onValuesChange, onUnitsChang
               <span className="param-name">{p.label}</span>
             </label>
             <div className="param-input">
-              <input
-                type="number"
-                step="any"
-                value={typeof v === 'number' && !Number.isNaN(v) ? v : ''}
-                onChange={(e) =>
-                  onValuesChange({ ...values, [p.key]: e.target.value === '' ? NaN : Number(e.target.value) })
-                }
-                onFocus={(e) => e.target.select()}
-              />
-              {p.unitGroup ? (
-                <UnitSelect
-                  group={p.unitGroup}
-                  value={unitLabel}
-                  onChange={(u) => onUnitsChange({ ...units, [p.unitGroup!]: u })}
-                />
+              {isSelect ? (
+                <select
+                  className="unit-select param-select"
+                  value={typeof v === 'number' && !Number.isNaN(v) ? v : ''}
+                  onChange={(e) => onValuesChange({ ...values, [p.key]: Number(e.target.value) })}
+                >
+                  {p.options!.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
               ) : (
-                <span className="unit-fixed">{p.unit}</span>
+                <>
+                  <input
+                    type="number"
+                    step="any"
+                    value={typeof v === 'number' && !Number.isNaN(v) ? v : ''}
+                    onChange={(e) =>
+                      onValuesChange({ ...values, [p.key]: e.target.value === '' ? NaN : Number(e.target.value) })
+                    }
+                    onFocus={(e) => e.target.select()}
+                  />
+                  {p.unitGroup ? (
+                    <UnitSelect
+                      group={p.unitGroup}
+                      value={unitLabel}
+                      onChange={(u) => onUnitsChange({ ...units, [p.unitGroup!]: u })}
+                    />
+                  ) : (
+                    <span className="unit-fixed">{p.unit}</span>
+                  )}
+                </>
               )}
             </div>
             {p.description && <div className="param-desc">{p.description}</div>}

@@ -135,7 +135,10 @@ export function CalculatorPage({ formula, user, project, onBack }: Props) {
     lines.push('输出结果,符号,数值,单位,SI值');
     // 与结果区一致：按 showIf 隐藏未参与计算的逐腔输出（n 为无量纲参数，SI 值与界面值一致）
     const visibleOutputs = formula.outputs.filter(
-      (o) => !o.showIf || Number(computed.inputsSI[o.showIf.key]) >= (o.showIf.min ?? 0),
+      (o) =>
+        !o.showIf ||
+        (Number(computed.inputsSI[o.showIf.key]) >= (o.showIf.min ?? -Infinity) &&
+          Number(computed.inputsSI[o.showIf.key]) <= (o.showIf.max ?? Infinity)),
     );
     for (const o of visibleOutputs) {
       const raw = computed.outputsSI[o.key];

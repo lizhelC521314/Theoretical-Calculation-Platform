@@ -25,9 +25,11 @@ export function FormulaView({
     [formula],
   );
 
-  // 与 ParamForm 相同的 showIf 求值：另一参数（如腔数 n）达到下限才显示该行
-  const visible = (s?: { key: string; min?: number }) =>
-    !values || !s || Number(values[s.key]) >= (s.min ?? 0);
+  // 与 ParamForm 相同的 showIf 求值：参数值落在 [min, max] 区间才显示该行
+  const visible = (s?: { key: string; min?: number; max?: number }) =>
+    !values ||
+    !s ||
+    (Number(values[s.key]) >= (s.min ?? -Infinity) && Number(values[s.key]) <= (s.max ?? Infinity));
 
   return (
     <div className="formula-view">

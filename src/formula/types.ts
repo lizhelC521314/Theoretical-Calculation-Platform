@@ -43,9 +43,10 @@ export interface ParamSpec {
   required?: boolean;
   /**
    * 条件显示：仅当另一参数满足条件时在表单中显示。
-   * 用于「按腔数逐腔展开」这类字段——腔数 n 变大后第 i 腔的输入才出现。
+   * 用于「按腔数逐腔展开」这类字段——腔数 n 变大后第 i 腔的输入才出现；
+   * min/max 可同时或单独使用（如结构型式 1/2 切换：max:1 与 min:2）。
    */
-  showIf?: { key: string; min?: number };
+  showIf?: { key: string; min?: number; max?: number };
 }
 
 /** 输出参数定义 */
@@ -69,9 +70,9 @@ export interface OutputSpec {
   /**
    * 条件显示：仅当某输入参数满足条件时，结果区与符号说明表才显示该输出。
    * 与 ParamSpec.showIf 同义——用于「按腔数逐腔展开」的逐腔输出，
-   * 腔数 n 之外的腔不参与计算，对应行直接隐藏。
+   * 腔数 n 之外的腔不参与计算，对应行直接隐藏；min/max 可同时或单独使用。
    */
-  showIf?: { key: string; min?: number };
+  showIf?: { key: string; min?: number; max?: number };
 }
 
 /** 基准算例：用于自动化回归测试，保证公式实现正确 */

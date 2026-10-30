@@ -27,7 +27,10 @@ export function ResultPanel({ formula, outputsSI, inputsSI, onSensitivity, sensi
     inputsSI == null
       ? formula.outputs
       : formula.outputs.filter(
-          (o) => !o.showIf || Number(inputsSI[o.showIf.key]) >= (o.showIf.min ?? 0),
+          (o) =>
+            !o.showIf ||
+            (Number(inputsSI[o.showIf.key]) >= (o.showIf.min ?? -Infinity) &&
+              Number(inputsSI[o.showIf.key]) <= (o.showIf.max ?? Infinity)),
         );
 
   const rows = visible.map((o) => {
