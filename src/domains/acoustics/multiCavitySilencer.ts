@@ -133,6 +133,7 @@ function expm(m: Mat): Mat {
 /** 单频点的腔体中间量（SI 输入） */
 interface CavityAt {
   sigma: number;
+  alpha0: number;
   xi: Cx;
   cavity: Mat;
 }
@@ -163,6 +164,11 @@ function geomsOf(v: Record<string, number>, n: number): CavityGeom[] {
   return out;
 }
 
+/** 式(5)：端部修正系数 α0 —— 仅由本腔自身穿孔率 σ 决定（与频率无关） */
+function alpha0Of(sigma: number): number {
+  return 0.8216 * (1 + 1.5319 * Math.sqrt(sigma) + 1.4099 * sigma - 0.878 * Math.pow(sigma, 1.5));
+}
+
 /** 按式(1)~(14)计算单腔 2×2 传递矩阵 */
 function cavityAt(f: number, p: CommonParams, g: CavityGeom): CavityAt | null {
   const { din, tw, c0v, M1, R0 } = p;
@@ -176,8 +182,8 @@ function cavityAt(f: number, p: CommonParams, g: CavityGeom): CavityAt | null {
   // 式(1)：本腔穿孔率（逐腔各自计算）
   const sigma = (nh * dh * dh) / (4 * din * Lc);
 
-  // 式(5)：端部修正系数
-  const alpha0 = 0.8216 * (1 + 1.5319 * Math.sqrt(sigma) + 1.4099 * sigma - 0.878 * Math.pow(sigma, 1.5));
+  // 式(5)：端部修正系数（按本腔自身 σ_i 计算，仅用于本腔的 ξ 与耦合项）
+  const alpha0 = alpha0Of(sigma);
 
   // 式(3)(4)：穿孔比声阻抗
   let xi: Cx;
@@ -261,7 +267,7 @@ function cavityAt(f: number, p: CommonParams, g: CavityGeom): CavityAt | null {
       cavity[i][j] = [phi11[i][j][0] - corr[0], phi11[i][j][1] - corr[1]];
     }
   }
-  return { sigma, xi, cavity };
+  return { sigma, alpha0, xi, cavity };
 }
 
 /** 式(16)：直管段（长度 L 的隔板段）传递矩阵 */
@@ -381,16 +387,30 @@ const cavitySigmaOutputs: OutputSpec[] = Array.from({ length: CAVITY_MAX }, (_, 
   description: `第 ${k + 1} 腔的穿孔率 σ = n_h·d_h²/(4·d_in·L_c)（式1），用于该腔的穿孔阻抗修正与耦合项（式8/10/12）`,
 }));
 
+/**
+ * 逐腔端部修正系数输出：α0,i 只由该腔自身穿孔率 σ_i 决定（式5，与频率无关），
+ * 直接进入该腔穿孔阻抗 ξ_i 的虚部 j·k0(t_w + α0,i·d_h)（式3/4）。
+ * 腔数之外的腔不参与计算，结果区显示为「—」。
+ */
+const cavityAlphaOutputs: OutputSpec[] = Array.from({ length: CAVITY_MAX }, (_, k) => ({
+  key: `alpha${k + 1}`,
+  label: `端部修正系数（腔${k + 1}）`,
+  symbol: `α0${k + 1}`,
+  unit: '-',
+  group: '各腔端部修正',
+  description: `第 ${k + 1} 腔按自身穿孔率 σ${k + 1} 按式(5) 计算的端部修正系数 α0 = 0.8216(1 + 1.5319√σ + 1.4099σ − 0.8780σ^1.5)，仅用于该腔的穿孔阻抗 ξ（式3/式4）`,
+}));
+
 export const multiCavitySilencer: FormulaSpec = {
   id: 'acoustics.muffler.multiCavity',
   domain: 'acoustics',
   subsystem: '消声器',
   title: '★ 多腔穿孔消音器',
   summary:
-    '按 PPT 的一维传递矩阵（TMM）模型，逐腔输入长度、腔外径、开孔直径与开孔数量，各腔分别按式(1) 计算穿孔率 σ_i 并乘入该腔的耦合项（σ_i·P/(S·ξ)），由穿孔比声阻抗 ξ 构造单腔 4×4 耦合方程，取 Φ = exp(A·Lc) 的矩阵分块得到单腔传递矩阵，多腔串联后给出传递损失 TL 并绘制 TL - Frequency 曲线。★ 公式验证不充分，结果仅供参考。',
+    '按 PPT 的一维传递矩阵（TMM）模型，逐腔输入长度、腔外径、开孔直径与开孔数量，各腔分别按式(1) 计算穿孔率 σ_i、按式(5) 由该腔 σ_i 单独计算端部修正 α0,i，并以 σ_i 乘入该腔的耦合项（σ_i·P/(S·ξ_i)），由穿孔比声阻抗 ξ_i 构造单腔 4×4 耦合方程，取 Φ = exp(A·Lc) 的矩阵分块得到单腔传递矩阵，多腔串联后给出传递损失 TL 并绘制 TL - Frequency 曲线。★ 公式验证不充分，结果仅供参考。',
   tags: ['多腔', '穿孔', '消声器', '消音器', '传递损失', 'TL', 'TMM', '宽频', 'NVH', '进气系统', '排气系统'],
   description:
-    '多腔宽频消声器由主管穿孔段与串联腔体构成，PPT 采用一维传递矩阵法：各腔按自身几何（L_c,i、d_out,i、d_h,i、n_h,i）单独按式(1) 算穿孔率 σ_i，按式(3)~(6) 算穿孔阻抗 ξ（含 M1=0 与 M1>0 两种工况及端部修正 α0、CG），耦合项按 σ_i·P/(S·ξ) 计入（式8/10/12，P2 取内壁 πd_in），再按式(12) 构造 4×4 系统矩阵 A，取 Φ = exp(A·Lc) 并按式(14) 压缩为单腔 2×2 传递矩阵，按式(15) 将各腔串联（相邻腔间按式(16) 插入隔板直管段），最后由式(18) TL(f) = 20lg(|T11+T12+T21+T22|/2) 得到传递损失。结果区给出频带平均 TL、峰值 TL、峰值频率以及各腔穿孔率，并绘制 TL - Frequency 曲线。',
+    '多腔宽频消声器由主管穿孔段与串联腔体构成，PPT 采用一维传递矩阵法：各腔按自身几何（L_c,i、d_out,i、d_h,i、n_h,i）单独按式(1) 算穿孔率 σ_i，按式(5) 由该腔 σ_i 单独算端部修正 α0,i，再按式(3)~(6) 用该腔 α0,i、CG 算穿孔阻抗 ξ_i（含 M1=0 与 M1>0 两种工况），耦合项按 σ_i·P/(S·ξ_i) 计入（式8/10/12，P2 取内壁 πd_in），再按式(12) 构造 4×4 系统矩阵 A，取 Φ = exp(A·Lc) 并按式(14) 压缩为单腔 2×2 传递矩阵，按式(15) 将各腔串联（相邻腔间按式(16) 插入隔板直管段），最后由式(18) TL(f) = 20lg(|T11+T12+T21+T22|/2) 得到传递损失。结果区给出频带平均 TL、峰值 TL、峰值频率、各腔穿孔率与各腔端部修正系数，并绘制 TL - Frequency 曲线。',
   inputs: [
     { key: 'din', label: '主管内径', symbol: 'd_in', unit: 'mm', unitGroup: 'length', default: 41.6, min: 40, max: 80, required: true, description: '主管（穿孔段）内径，建议范围 0.040~0.080 m；算例（图表中记号 d_in）取 41.6 mm' },
     { key: 'tw', label: '穿孔壁厚（孔深）', symbol: 't_w', unit: 'mm', unitGroup: 'length', default: 2.8, min: 1.5, max: 3, required: true, description: '穿孔板厚度，即孔的有效深度，建议范围 0.0015~0.003 m；算例取 2.8 mm' },
@@ -410,6 +430,7 @@ export const multiCavitySilencer: FormulaSpec = {
     { key: 'tl_max', label: '最大传递损失', symbol: 'TL_max', unit: 'dB', primary: true, group: '声学特性', description: '扫描频段内 TL 的最大值（峰值）' },
     { key: 'f_peak', label: '峰值频率', symbol: 'f_p', unit: 'Hz', group: '声学特性', description: 'TL 峰值对应的频率' },
     ...cavitySigmaOutputs,
+    ...cavityAlphaOutputs,
     { key: 'xi_re', label: '穿孔阻抗实部（腔1/示例频率）', symbol: 'Re ξ', unit: '-', group: '中间量', description: '示例频率 √(f_min·f_max) 处第 1 腔穿孔比声阻抗的实部（式3/式4）' },
     { key: 'xi_im', label: '穿孔阻抗虚部（腔1/示例频率）', symbol: 'Im ξ', unit: '-', group: '中间量', description: '示例频率 √(f_min·f_max) 处第 1 腔穿孔比声阻抗的虚部（式3/式4）' },
   ],
@@ -418,15 +439,15 @@ export const multiCavitySilencer: FormulaSpec = {
     { label: '波数与穿孔半径', tex: 'r_h = \\frac{d_h}{2},\\qquad k_0 = \\frac{2\\pi f}{c_0}' },
     {
       label: '穿孔比声阻抗（M1 = 0 / M1 > 0）',
-      tex: '\\xi = R_0 + j k_0\\left(t_w + \\alpha_0 d_h\\right);\\qquad \\xi = R_0 + 0.48\\left|k_0 r_h - M_1\\right| + j k_0\\left(t_w + C_G\\alpha_0 d_h\\right)',
+      tex: '\\xi_i = R_0 + j k_0\\left(t_w + \\alpha_{0,i}\\,d_h\\right);\\qquad \\xi_i = R_0 + 0.48\\left|k_0 r_h - M_1\\right| + j k_0\\left(t_w + C_G\\,\\alpha_{0,i}\\,d_h\\right)',
     },
     {
       label: '端部修正与 CG',
-      tex: '\\alpha_0 = 0.8216\\left(1 + 1.5319\\sqrt{\\sigma} + 1.4099\\sigma - 0.8780\\,\\sigma^{3/2}\\right),\\qquad C_G = \\frac{12}{k_0 r_h/M_1 - 1}\\;(k_0 r_h \\le M_1),\\; C_G = 1\\;(k_0 r_h > M_1)',
+      tex: '\\alpha_{0,i} = 0.8216\\left(1 + 1.5319\\sqrt{\\sigma_i} + 1.4099\\sigma_i - 0.8780\\,\\sigma_i^{3/2}\\right),\\qquad C_G = \\frac{12}{k_0 r_h/M_1 - 1}\\;(k_0 r_h \\le M_1),\\; C_G = 1\\;(k_0 r_h > M_1)',
     },
     {
       label: '单腔耦合方程',
-      tex: '\\frac{dp_1}{dx} = -jk_0 w_1,\\quad \\frac{dw_1}{dx} = -jk_0 p_1 - \\sigma_i\\frac{P_1}{S_1\\xi}(p_1 - p_2),\\quad \\frac{dp_2}{dx} = -jk_0 w_2,\\quad \\frac{dw_2}{dx} = -jk_0 p_2 + \\sigma_i\\frac{P_2}{S_2\\xi}(p_1 - p_2)',
+      tex: '\\frac{dp_1}{dx} = -jk_0 w_1,\\quad \\frac{dw_1}{dx} = -jk_0 p_1 - \\sigma_i\\frac{P_1}{S_1\\xi_i}(p_1 - p_2),\\quad \\frac{dp_2}{dx} = -jk_0 w_2,\\quad \\frac{dw_2}{dx} = -jk_0 p_2 + \\sigma_i\\frac{P_2}{S_2\\xi_i}(p_1 - p_2)',
     },
     {
       label: '周界与面积',
@@ -434,7 +455,7 @@ export const multiCavitySilencer: FormulaSpec = {
     },
     {
       label: '系统矩阵与传播矩阵',
-      tex: 'A = \\begin{bmatrix} 0 & -jk_0 & 0 & 0 \\\\ -jk_0 - \\sigma_i\\frac{P_1}{S_1\\xi} & 0 & \\sigma_i\\frac{P_1}{S_1\\xi} & 0 \\\\ 0 & 0 & 0 & -jk_0 \\\\ \\sigma_i\\frac{P_2}{S_2\\xi} & 0 & -jk_0 - \\sigma_i\\frac{P_2}{S_2\\xi} & 0 \\end{bmatrix},\\qquad \\Phi = e^{A L_c} = \\begin{bmatrix} \\Phi_{11} & \\Phi_{12} \\\\ \\Phi_{21} & \\Phi_{22} \\end{bmatrix}',
+      tex: 'A = \\begin{bmatrix} 0 & -jk_0 & 0 & 0 \\\\ -jk_0 - \\sigma_i\\frac{P_1}{S_1\\xi_i} & 0 & \\sigma_i\\frac{P_1}{S_1\\xi_i} & 0 \\\\ 0 & 0 & 0 & -jk_0 \\\\ \\sigma_i\\frac{P_2}{S_2\\xi_i} & 0 & -jk_0 - \\sigma_i\\frac{P_2}{S_2\\xi_i} & 0 \\end{bmatrix},\\qquad \\Phi = e^{A L_c} = \\begin{bmatrix} \\Phi_{11} & \\Phi_{12} \\\\ \\Phi_{21} & \\Phi_{22} \\end{bmatrix}',
     },
     {
       label: '单腔传递矩阵',
@@ -453,7 +474,8 @@ export const multiCavitySilencer: FormulaSpec = {
   sensitivity: false,
   assumptions: [
     '★ 标记说明：该公式尚未用实测数据校核——已与 PPT 引用的郭荣论文算例（即默认初始值）对比：500 Hz≈1.1 dB、1.7 kHz≈24.7 dB、2.3 kHz≈39.7 dB、3.2 kHz≈6.1 dB，与 PPT 给出的 ≈1/26/42/4 dB 基本一致，工程应用前仍建议用试验数据验证',
-    '公式与参考 PPT 严格一致：σ（式1）、ξ（式3/4）、α0（式5）、CG（式6）、A（式12）、Φ = exp(A·Lc)（式13）、T_cav（式14）、串联（式15）、TL（式18）',
+    '公式与参考 PPT 严格一致：σ_i（式1）、α0,i（式5）、ξ_i（式3/4）、CG（式6）、A（式12）、Φ = exp(A·Lc)（式13）、T_cav（式14）、串联（式15）、TL（式18）',
+    '端部修正系数 α0,i 逐腔单独按式(5) 由该腔自身穿孔率 σ_i 计算（σ 越大 α0,i 越大），且只用于该腔的穿孔阻抗 ξ_i（式3/式4），不沿用其他腔的值；各腔 α0,i 在结果区「各腔端部修正」分组中给出',
     '各腔的长度 L_c,i、腔外径 d_out,i、开孔直径 d_h,i、开孔数量 n_h,i 均逐腔单独输入；腔数 n 决定参与计算的腔，n 之外的腔输入不参与计算',
     '各腔穿孔率 σ_i 由该腔自身几何按式(1) 计算，并以 σ_i 乘入该腔的耦合项（式8/10/12）；腔体耦合周长取内壁 P2 = πd_in，外壁刚性不参与耦合',
     'PPT 校验点：漏乘 σ 会把壁面当成 100% 全开，表现为 TL 在 100 Hz 达 60 dB 以上且随频率单调下降；正常结果应呈带通特性',
@@ -504,9 +526,11 @@ export const multiCavitySilencer: FormulaSpec = {
       xi_re: at ? at.xi[0] : NaN,
       xi_im: at ? at.xi[1] : NaN,
     };
-    // 逐腔穿孔率：σ_i = n_h,i·d_h,i²/(4·d_in·L_c,i)，即该腔耦合项所用的 σ_i
+    // 逐腔穿孔率与端部修正：σ_i = n_h,i·d_h,i²/(4·d_in·L_c,i)，α0,i 由该腔 σ_i 按式(5) 单独计算
     geoms.forEach((g, i) => {
-      out[`sigma${i + 1}`] = (g.nh * g.dh * g.dh) / (4 * v.din * g.Lc);
+      const sigma = (g.nh * g.dh * g.dh) / (4 * v.din * g.Lc);
+      out[`sigma${i + 1}`] = sigma;
+      out[`alpha${i + 1}`] = alpha0Of(sigma);
     });
     return out;
   },
@@ -537,6 +561,11 @@ export const multiCavitySilencer: FormulaSpec = {
         sigma3: 0.1599297337,
         sigma4: 0.1222992081,
         sigma5: 0.0873565772,
+        alpha1: 1.6686996106,
+        alpha2: 1.5679384637,
+        alpha3: 1.4640545384,
+        alpha4: 1.3725676891,
+        alpha5: 1.2761628113,
         xi_re: 0.0055,
         xi_im: 0.1032739563,
         tl_avg: 8.937123429,
@@ -544,7 +573,7 @@ export const multiCavitySilencer: FormulaSpec = {
         f_peak: 2350,
       },
       tolerance: 5e-3,
-      source: 'PPT 末页郭荣论文校验：500 Hz≈1 dB、1.7 kHz≈26 dB、2.3 kHz≈42 dB、3.2 kHz≈4 dB（呈带通）。本实现同参数下为 1.08 / 24.65 / 39.70 / 6.07 dB，491 点扫描 TL 均值 8.9371 dB、峰值 47.4865 dB @ 2350 Hz；各腔 σ_i 按式(1) 各自计算',
+      source: 'PPT 末页郭荣论文校验：500 Hz≈1 dB、1.7 kHz≈26 dB、2.3 kHz≈42 dB、3.2 kHz≈4 dB（呈带通）。本实现同参数下为 1.08 / 24.65 / 39.70 / 6.07 dB，491 点扫描 TL 均值 8.9371 dB、峰值 47.4865 dB @ 2350 Hz；各腔 σ_i 按式(1) 各自计算，α0,i 按式(5) 由该腔 σ_i 单独计算（1.6687 / 1.5679 / 1.4641 / 1.3726 / 1.2762）',
     },
     {
       name: '默认工况（无气流：4 腔各 L_c=20mm, d_out=60mm, d_h=3mm, n_h=40；d_in=40mm, t_w=2mm, c_t=2mm, M1=0, f∈[100,5000]Hz, Δf=10Hz）',

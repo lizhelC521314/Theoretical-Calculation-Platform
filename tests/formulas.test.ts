@@ -230,6 +230,21 @@ describe('多腔穿孔消音器 郭荣算例校验', () => {
     expect(out.sigma4).toBeGreaterThan(out.sigma5);
   });
 
+  it('各腔端部修正 α0,i 按自身 σ_i 单独计算（逐腔不同，不可沿用第 1 腔）', () => {
+    const out = multiCavitySilencer.solve(input);
+    const alphaOf = (s: number) => 0.8216 * (1 + 1.5319 * Math.sqrt(s) + 1.4099 * s - 0.878 * Math.pow(s, 1.5));
+    for (let i = 1; i <= 5; i++) {
+      expect(out[`alpha${i}`]).toBeCloseTo(alphaOf(out[`sigma${i}`]), 10);
+    }
+    // σ 递减 → α0 递减
+    for (let i = 1; i <= 4; i++) expect(out[`alpha${i}`]).toBeGreaterThan(out[`alpha${i + 1}`]);
+    // 算例参考值：σ1=0.259886 → α0,1≈1.6687；σ5=0.087357 → α0,5≈1.2762
+    expect(out.alpha1).toBeCloseTo(1.6686996106, 8);
+    expect(out.alpha5).toBeCloseTo(1.2761628113, 8);
+    // 未参与计算的腔不给出结果
+    expect(out.alpha6).toBeUndefined();
+  });
+
   it('500 Hz / 1.7k / 2.3k / 3.2k 处 TL 与 PPT 文献值（≈1/26/42/4 dB）相差不超过 5 dB', () => {
     expect(Math.abs(at(500) - 1)).toBeLessThan(5);
     expect(Math.abs(at(1700) - 26)).toBeLessThan(5);
