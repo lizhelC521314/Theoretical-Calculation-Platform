@@ -70,8 +70,8 @@ export const wovenTubeSilencer: FormulaSpec = {
   id: 'acoustics.muffler.wovenTube',
   domain: 'acoustics',
   subsystem: '消声器',
-  title: '编织管消音',
-  summary: '按 PPT 公式计算编织管（穿孔微孔管）的穿孔雷诺数 k、比声阻 R_w、比声抗 X_w 与衰减系数 α，给出总的传递损失并绘制 TL - Frequency 曲线。',
+  title: '★ 编织管消音',
+  summary: '按 PPT 公式计算编织管（穿孔微孔管）的穿孔雷诺数 k、比声阻 R_w、比声抗 X_w 与衰减系数 α，给出总的传递损失并绘制 TL - Frequency 曲线。★ 公式验证不充分，结果仅供参考。',
   tags: ['编织管', '穿孔管', '微穿孔', '消音器', '消声器', '传递损失', 'TL', 'NVH', '进气系统', '排气系统'],
   description:
     '编织管消音器由管壁微孔的粘性耗散与质量惯性共同决定其声学性能。本公式按参考 PPT 严格一致：穿孔雷诺数 k = d√(ωρ/(4μ))，比声阻 R_w = (32μt/(σρcd²))·[√(1+k²/32) + (√2/32)·k·d/t]，比声抗 X_w = (ω/(σc))·[t·(1+1/√(1+k²/32)) + 1.7d]，衰减系数 α(f) = (2/D)·R_w/(R_w²+X_w²)，单频传递损失 TL(f) = 8.686·α(f)·L。结果区输出频带内总的传递损失（400 份平均）与 TL 峰值，并绘制 TL - Frequency 曲线（横轴 Frequency/Hz，纵轴 TL/dB，频带内均分 400 份）。',
@@ -126,6 +126,7 @@ export const wovenTubeSilencer: FormulaSpec = {
   diagram: WOVEN_DIAGRAM,
   sensitivity: true,
   assumptions: [
+    '★ 标记说明：该公式验证不充分——仅按参考 PPT 的公式实现，尚无试验数据或权威算例校核，计算结果仅供参考，工程应用前须结合实际测试数据验证',
     '公式与参考 PPT 严格一致：k = d√(ωρ/(4μ))，R_w = (32μt/(σρcd²))·[√(1+k²/32) + (√2/32)·k·d/t]，X_w = (ω/(σc))·[t·(1+1/√(1+k²/32)) + 1.7d]',
     '衰减系数 α(f) = (2/D)·R_w/(R_w²+X_w²)，传递损失 TL(f) = 8.686·α(f)·L（8.686 为 Np→dB 换算系数）',
     '「总的传递损失」按 PPT 要求：在 f_min ~ f_max 范围内均分 400 份（401 个采样点）后取平均分析值',
