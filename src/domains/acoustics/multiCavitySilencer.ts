@@ -1,4 +1,4 @@
-import type { CurvePoint, FormulaSpec } from '../../formula/types';
+import type { CurvePoint, FormulaSpec, ParamSpec } from '../../formula/types';
 import { MULTI_CAVITY_DIAGRAM } from './diagrams';
 
 /**
@@ -131,9 +131,36 @@ interface CavityAt {
   cavity: Mat;
 }
 
+/** 单腔几何参数（逐腔输入，已换算为 SI） */
+interface CavityGeom {
+  Lc: number;
+  dout: number;
+  dh: number;
+  nh: number;
+}
+
+/** 各腔共用参数 */
+interface CommonParams {
+  din: number;
+  tw: number;
+  c0v: number;
+  M1: number;
+  R0: number;
+}
+
+/** 从入参中取出第 1~n 腔的几何参数 */
+function geomsOf(v: Record<string, number>, n: number): CavityGeom[] {
+  const out: CavityGeom[] = [];
+  for (let i = 1; i <= n; i++) {
+    out.push({ Lc: v[`Lc${i}`], dout: v[`dout${i}`], dh: v[`dh${i}`], nh: v[`nh${i}`] });
+  }
+  return out;
+}
+
 /** 按式(1)~(14)计算单腔 2×2 传递矩阵 */
-function cavityAt(f: number, v: Record<string, number>): CavityAt | null {
-  const { din, dout, tw, dh, nh, Lc, c0v, M1, R0 } = v;
+function cavityAt(f: number, p: CommonParams, g: CavityGeom): CavityAt | null {
+  const { din, tw, c0v, M1, R0 } = p;
+  const { Lc, dout, dh, nh } = g;
   if (!(f > 0) || !(din > 0) || !(dout > din) || !(tw > 0) || !(dh > 0) || !(nh > 0) || !(Lc > 0) || !(c0v > 0) || !(M1 >= 0))
     return null;
 
@@ -237,21 +264,29 @@ function ductMatrix(L: number, k0: number): Mat {
   ];
 }
 
-/** 全模型：多腔串联 → 2×2 总传递矩阵与单腔中间量 */
+/** 全模型：多腔串联 → 2×2 总传递矩阵与第 1 腔中间量 */
 function cascade(f: number, v: Record<string, number>): { T: Mat; ct: CavityAt } | null {
   const n = Math.round(v.n ?? 0);
   if (!(n >= 1)) return null;
-  const at = cavityAt(f, v);
-  if (!at) return null;
+  const p: CommonParams = { din: v.din, tw: v.tw, c0v: v.c0v, M1: v.M1, R0: v.R0 };
+  const geoms = geomsOf(v, n);
+  const mats: Mat[] = [];
+  let first: CavityAt | null = null;
+  for (const g of geoms) {
+    const at = cavityAt(f, p, g);
+    if (!at) return null;
+    if (!first) first = at;
+    mats.push(at.cavity);
+  }
 
   const k0 = (2 * Math.PI * f) / v.c0v;
   // 式(15)：T = Tn·Tn−1·…·T1；相邻腔之间按式(16)插入隔板直管段
-  let T: Mat = at.cavity;
-  for (let i = 1; i < n; i++) {
-    T = v.ct > 0 ? matMul(T, ductMatrix(v.ct, k0)) : T;
-    T = matMul(T, at.cavity);
+  let T: Mat = mats[0];
+  for (let i = 1; i < mats.length; i++) {
+    if (v.ct > 0) T = matMul(T, ductMatrix(v.ct, k0));
+    T = matMul(T, mats[i]);
   }
-  return { T, ct: at };
+  return { T, ct: first! };
 }
 
 /** 式(18)：TL = 20lg(|T11 + T12 + T21 + T22|/2) */
@@ -283,11 +318,44 @@ function sampleCurve(v: Record<string, number>): CurvePoint[] {
   return points;
 }
 
+/** 逐腔输入字段的最大腔数（PPT 腔数 3~6） */
+const CAVITY_MAX = 6;
+
+/**
+ * 逐腔单独输入：长度、腔外径、开孔直径、开孔数量。
+ * 腔数 n 增大后依次展开（showIf），n 之外的腔输入不参与计算。
+ */
+const cavityInputs: ParamSpec[] = [];
+for (let i = 1; i <= CAVITY_MAX; i++) {
+  cavityInputs.push(
+    {
+      key: `Lc${i}`, label: `腔${i} 长度`, symbol: `L_c${i}`, unit: 'mm', unitGroup: 'length',
+      default: 20, min: 6, max: 50, required: true, showIf: { key: 'n', min: i },
+      description: `第 ${i} 腔沿轴向的宽度，PPT 范围 0.006~0.050 m，属设计变量`,
+    },
+    {
+      key: `dout${i}`, label: `腔${i} 外径`, symbol: `d_out${i}`, unit: 'mm', unitGroup: 'length',
+      default: 60, min: 52, max: 160, required: true, showIf: { key: 'n', min: i },
+      description: `第 ${i} 腔的腔体外径，PPT 要求 1.3~2.0 倍主管内径`,
+    },
+    {
+      key: `dh${i}`, label: `腔${i} 开孔直径`, symbol: `d_h${i}`, unit: 'mm', unitGroup: 'length',
+      default: 3, min: 2, max: 4, required: true, showIf: { key: 'n', min: i },
+      description: `第 ${i} 腔的单孔直径，PPT 范围 0.002~0.004 m，属设计变量`,
+    },
+    {
+      key: `nh${i}`, label: `腔${i} 开孔数量`, symbol: `n_h${i}`, unit: '个',
+      default: 40, min: 20, max: 60, required: true, showIf: { key: 'n', min: i },
+      description: `第 ${i} 腔的穿孔个数，PPT 范围 20~60，属设计变量`,
+    },
+  );
+}
+
 export const multiCavitySilencer: FormulaSpec = {
   id: 'acoustics.muffler.multiCavity',
   domain: 'acoustics',
   subsystem: '消声器',
-  title: '★ 多腔穿孔消音',
+  title: '★ 多腔穿孔消音器',
   summary:
     '按 PPT 的一维传递矩阵（TMM）模型，由穿孔率 σ、穿孔比声阻抗 ξ 构造单腔 4×4 耦合方程，取 Φ = exp(A·Lc) 的矩阵分块得到单腔传递矩阵，多腔串联后给出传递损失 TL 并绘制 TL - Frequency 曲线。★ 公式验证不充分，结果仅供参考。',
   tags: ['多腔', '穿孔', '消声器', '消音器', '传递损失', 'TL', 'TMM', '宽频', 'NVH', '进气系统', '排气系统'],
@@ -295,12 +363,9 @@ export const multiCavitySilencer: FormulaSpec = {
     '多腔宽频消声器由主管穿孔段与串联腔体构成，PPT 采用一维传递矩阵法：先按式(1)算穿孔率 σ，按式(3)~(6)算穿孔阻抗 ξ（含 M1=0 与 M1>0 两种工况及端部修正 α0、CG），再按式(12)构造 4×4 系统矩阵 A，取 Φ = exp(A·Lc) 并按式(14)压缩为单腔 2×2 传递矩阵，按式(15)将各腔串联（相邻腔间按式(16)插入隔板直管段），最后由式(18) TL(f) = 20lg(|T11+T12+T21+T22|/2) 得到传递损失。结果区给出频带平均 TL、峰值 TL 与峰值频率，并绘制 TL - Frequency 曲线。',
   inputs: [
     { key: 'din', label: '主管内径', symbol: 'd_in', unit: 'mm', unitGroup: 'length', default: 40, min: 40, max: 80, required: true, description: '主管（穿孔段）内径，PPT 范围 0.040~0.080 m，默认 40 mm' },
-    { key: 'dout', label: '腔体外径', symbol: 'd_out', unit: 'mm', unitGroup: 'length', default: 60, min: 52, max: 160, required: true, description: '消声器腔体外径，PPT 要求 1.3~2.0 倍主管内径，默认 60 mm' },
     { key: 'tw', label: '穿孔壁厚（孔深）', symbol: 't_w', unit: 'mm', unitGroup: 'length', default: 2, min: 1.5, max: 3, required: true, description: '穿孔板厚度，即孔的有效深度，PPT 范围 0.0015~0.003 m' },
-    { key: 'dh', label: '穿孔孔径', symbol: 'd_h', unit: 'mm', unitGroup: 'length', default: 3, min: 2, max: 4, required: true, description: '单孔直径，PPT 范围 0.002~0.004 m，属设计变量' },
-    { key: 'nh', label: '每腔孔数', symbol: 'n_h', unit: '个', default: 40, min: 20, max: 60, required: true, description: '每个腔对应的穿孔个数，PPT 范围 20~60，属设计变量' },
-    { key: 'n', label: '腔数', symbol: 'n', unit: '个', default: 4, min: 3, max: 6, required: true, description: '串联腔体数量，PPT 范围 3~6' },
-    { key: 'Lc', label: '各腔宽度', symbol: 'L_c', unit: 'mm', unitGroup: 'length', default: 20, min: 6, max: 50, required: true, description: '每个腔沿轴向的宽度（各腔统一取值），PPT 范围 0.006~0.050 m，属设计变量' },
+    { key: 'n', label: '腔数', symbol: 'n', unit: '个', default: 4, min: 3, max: 6, required: true, description: '串联腔体数量，PPT 范围 3~6；改动后下方逐腔输入按腔数依次展开' },
+    ...cavityInputs,
     { key: 'ct', label: '隔板厚度', symbol: 'c_t', unit: 'mm', unitGroup: 'length', default: 2, min: 1, max: 3, required: true, description: '相邻腔之间的隔板厚度，按式(16)作为直管段插入，PPT 范围 0.001~0.003 m' },
     { key: 'rho0', label: '空气密度', symbol: 'ρ0', unit: 'kg/m³', unitGroup: 'density', default: 1.205, min: 0, required: true, description: '常温常压空气密度，20℃ 取 1.205 kg/m³' },
     { key: 'c0v', label: '空气声速', symbol: 'c0', unit: 'm/s', default: 343, min: 0, required: true, description: '常温常压声速，20℃ 取 343 m/s' },
@@ -314,9 +379,9 @@ export const multiCavitySilencer: FormulaSpec = {
     { key: 'tl_avg', label: '频带平均传递损失', symbol: 'TL_avg', unit: 'dB', primary: true, group: '声学特性', description: '在 [f_min, f_max] 内按 Δf 扫描得到的 TL 平均值' },
     { key: 'tl_max', label: '最大传递损失', symbol: 'TL_max', unit: 'dB', primary: true, group: '声学特性', description: '扫描频段内 TL 的最大值（峰值）' },
     { key: 'f_peak', label: '峰值频率', symbol: 'f_p', unit: 'Hz', group: '声学特性', description: 'TL 峰值对应的频率' },
-    { key: 'sigma', label: '穿孔率', symbol: 'σ', unit: '-', group: '中间量', description: 'σ = n_h·d_h²/(4·d_in·L_c)（式1），各腔统一参数' },
-    { key: 'xi_re', label: '穿孔阻抗实部（示例）', symbol: 'Re ξ', unit: '-', group: '中间量', description: '示例频率处穿孔比声阻抗的实部（式3/式4）' },
-    { key: 'xi_im', label: '穿孔阻抗虚部（示例）', symbol: 'Im ξ', unit: '-', group: '中间量', description: '示例频率处穿孔比声阻抗的虚部（式3/式4）' },
+    { key: 'sigma', label: '穿孔率（腔1）', symbol: 'σ', unit: '-', group: '中间量', description: 'σ_i = n_h,i·d_h,i²/(4·d_in·L_c,i)（式1），各腔按自身参数各自计算，此处取第 1 腔' },
+    { key: 'xi_re', label: '穿孔阻抗实部（腔1/示例频率）', symbol: 'Re ξ', unit: '-', group: '中间量', description: '示例频率 √(f_min·f_max) 处第 1 腔穿孔比声阻抗的实部（式3/式4）' },
+    { key: 'xi_im', label: '穿孔阻抗虚部（腔1/示例频率）', symbol: 'Im ξ', unit: '-', group: '中间量', description: '示例频率 √(f_min·f_max) 处第 1 腔穿孔比声阻抗的虚部（式3/式4）' },
   ],
   latex: [
     { label: '穿孔率', tex: '\\sigma_i = \\frac{n_{h,i}\\,d_{h,i}^{2}}{4\\,d_{in}\\,L_{c,i}}' },
@@ -355,11 +420,13 @@ export const multiCavitySilencer: FormulaSpec = {
     },
   ],
   diagram: MULTI_CAVITY_DIAGRAM,
-  sensitivity: true,
+  sensitivity: false,
   assumptions: [
     '★ 标记说明：该公式验证不充分——仅按参考 PPT 的公式实现，尚无试验数据或权威算例校核，计算结果仅供参考，工程应用前须结合实际测试数据验证',
     '公式与参考 PPT 严格一致：σ（式1）、ξ（式3/4）、α0（式5）、CG（式6）、A（式12）、Φ = exp(A·Lc)（式13）、T_cav（式14）、串联（式15）、TL（式18）',
-    '各腔采用统一几何参数（L_c、d_h、n_h 全腔相同）；逐腔差异化与式(20)(21)的优化（以 L_c、d_h、n_h 为设计变量，σ≤0.25、孔间距≥2d_h、Δp≤Δp_max）不在本模块实现',
+    '各腔的长度 L_c,i、腔外径 d_out,i、开孔直径 d_h,i、开孔数量 n_h,i 均逐腔单独输入；腔数 n 决定参与计算的腔，n 之外的腔输入不参与计算',
+    '逐腔参数开放后不再逐腔扫描敏感性（参数数量过多且腔数会改变计算结构），故本公式不提供参数敏感性分析',
+    'PPT 式(20)(21) 的优化流程（以 L_c、d_h、n_h 为设计变量，σ≤0.25、孔间距≥2d_h、Δp≤Δp_max）不在本模块实现',
     '相邻腔之间按式(16)以隔板厚度 c_t 的直管段连接；进出口管段与面积突变矩阵（式17）默认不参与计算',
     'TL 采用式(18)：20lg(|T11+T12+T21+T22|/2)。式(19)（含 Z0=ρ0c0/S 的等效定义）未采用，避免与本模型的无量纲化状态变量 w=ρ0c0u 混用',
     'M1 > 0 时 ξ 的实部按 0.48|k0r_h − M1| 计算；CG 按 PPT 式(6) 原式实现（k0r_h/M1 < 1 时 CG 为负、ξ 虚部可为负），分母接近 0 处按最小 |·|=1e-3 截断，未作符号修正',
@@ -370,7 +437,10 @@ export const multiCavitySilencer: FormulaSpec = {
   ],
   solve(v) {
     const empty = { tl_avg: NaN, tl_max: NaN, f_peak: NaN, sigma: NaN, xi_re: NaN, xi_im: NaN };
-    if (!(v.n >= 1) || !(v.din > 0) || !(v.dout > v.din) || !(v.Lc > 0)) return empty;
+    const n = Math.round(v.n ?? 0);
+    if (!(n >= 1) || !(v.din > 0) || !(v.tw > 0)) return empty;
+    const geoms = geomsOf(v, n);
+    if (geoms.some((g) => !(g.Lc > 0) || !(g.dout > v.din) || !(g.dh > 0) || !(g.nh > 0))) return empty;
 
     const pts = sampleCurve(v);
     let tl_avg = NaN;
@@ -388,9 +458,10 @@ export const multiCavitySilencer: FormulaSpec = {
       tl_avg = sum / pts.length;
     }
 
-    // 示例频率处中间量（几何均值）
+    // 示例频率处中间量（取第 1 腔，几何均值频率）
     const fSample = Math.sqrt(Math.max(v.fmin, 1) * Math.max(v.fmax, 1));
-    const at = cavityAt(fSample, v);
+    const p: CommonParams = { din: v.din, tw: v.tw, c0v: v.c0v, M1: v.M1, R0: v.R0 };
+    const at = cavityAt(fSample, p, geoms[0]);
     return {
       tl_avg,
       tl_max,
@@ -411,10 +482,14 @@ export const multiCavitySilencer: FormulaSpec = {
   // 基准值由本实现按 PPT 公式逐项核算（见 source），待试验数据到位后替换为实测校核算例
   benchmarks: [
     {
-      name: '默认工况（无气流：d_in=40mm, d_out=60mm, t_w=2mm, d_h=3mm, n_h=40, n=4, L_c=20mm, c_t=2mm, M1=0, f∈[100,5000]Hz, Δf=10Hz）',
+      name: '默认工况（无气流：4 腔各 L_c=20mm, d_out=60mm, d_h=3mm, n_h=40；d_in=40mm, t_w=2mm, c_t=2mm, M1=0, f∈[100,5000]Hz, Δf=10Hz）',
       input: {
-        din: 0.04, dout: 0.06, tw: 0.002, dh: 0.003, nh: 40, n: 4,
-        Lc: 0.02, ct: 0.002, rho0: 1.205, c0v: 343, M1: 0, R0: 0.0055,
+        din: 0.04, tw: 0.002, n: 4,
+        Lc1: 0.02, Lc2: 0.02, Lc3: 0.02, Lc4: 0.02,
+        dout1: 0.06, dout2: 0.06, dout3: 0.06, dout4: 0.06,
+        dh1: 0.003, dh2: 0.003, dh3: 0.003, dh4: 0.003,
+        nh1: 40, nh2: 40, nh3: 40, nh4: 40,
+        ct: 0.002, rho0: 1.205, c0v: 343, M1: 0, R0: 0.0055,
         fmin: 100, fmax: 5000, df: 10,
       },
       expect: {
@@ -429,10 +504,14 @@ export const multiCavitySilencer: FormulaSpec = {
       source: '按 PPT 式(1)~(18) 核算：σ = 40×0.003²/(4×0.04×0.02) = 0.1125；示例频率 √(100×5000)=707.1 Hz 处 ξ = 0.0055 + j0.078243；491 点扫描 TL 均值 25.3266 dB、峰值 66.7045 dB 出现在 100 Hz',
     },
     {
-      name: '有气流变工况（M1=0.08, d_in=50mm, d_out=80mm, t_w=2.5mm, d_h=4mm, n_h=30, n=3, L_c=30mm, c_t=1.5mm, f∈[100,4000]Hz）',
+      name: '有气流变工况（M1=0.08：3 腔各 L_c=30mm, d_out=80mm, d_h=4mm, n_h=30；d_in=50mm, t_w=2.5mm, c_t=1.5mm, f∈[100,4000]Hz）',
       input: {
-        din: 0.05, dout: 0.08, tw: 0.0025, dh: 0.004, nh: 30, n: 3,
-        Lc: 0.03, ct: 0.0015, rho0: 1.205, c0v: 343, M1: 0.08, R0: 0.0055,
+        din: 0.05, tw: 0.0025, n: 3,
+        Lc1: 0.03, Lc2: 0.03, Lc3: 0.03,
+        dout1: 0.08, dout2: 0.08, dout3: 0.08,
+        dh1: 0.004, dh2: 0.004, dh3: 0.004,
+        nh1: 30, nh2: 30, nh3: 30,
+        ct: 0.0015, rho0: 1.205, c0v: 343, M1: 0.08, R0: 0.0055,
         fmin: 100, fmax: 4000, df: 10,
       },
       expect: {

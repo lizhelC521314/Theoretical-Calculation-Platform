@@ -47,7 +47,9 @@ export function ParamForm({ formula, values, units, onValuesChange, onUnitsChang
   return (
     <div className="param-form">
       <h3 className="panel-title">输入参数</h3>
-      {formula.inputs.map((p) => {
+      {formula.inputs
+        .filter((p) => !p.showIf || Number(values[p.showIf.key]) >= (p.showIf.min ?? 0))
+        .map((p) => {
         const unitLabel = p.unitGroup ? groupUnit[p.unitGroup] : p.unit;
         const v = values[p.key];
         const outOfRange =

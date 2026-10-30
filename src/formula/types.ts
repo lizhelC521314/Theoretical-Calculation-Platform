@@ -41,6 +41,11 @@ export interface ParamSpec {
   max?: number;
   /** 是否必须输入 */
   required?: boolean;
+  /**
+   * 条件显示：仅当另一参数满足条件时在表单中显示。
+   * 用于「按腔数逐腔展开」这类字段——腔数 n 变大后第 i 腔的输入才出现。
+   */
+  showIf?: { key: string; min?: number };
 }
 
 /** 输出参数定义 */
