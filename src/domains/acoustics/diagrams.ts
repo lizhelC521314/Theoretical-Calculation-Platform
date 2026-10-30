@@ -101,3 +101,52 @@ export const QUARTER_WAVE_DIAGRAM = `
   <!-- 主公式 -->
   <text x="260" y="292" text-anchor="middle" font-size="13" fill="#c0392b" font-weight="600">f_c = c/(4L)，TL = 10lg[1 + ¼(m·tan(2πL/λ))²]</text>
 </svg>`;
+
+export const WOVEN_DIAGRAM = `
+<svg viewBox="0 0 520 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="编织管消音器几何示意">
+  <!-- 编织管管壁：上下两条带厚度的壁 -->
+  <rect x="60" y="118" width="400" height="14" fill="#eaeaea" stroke="#222222" stroke-width="1.8"/>
+  <rect x="60" y="196" width="400" height="14" fill="#eaeaea" stroke="#222222" stroke-width="1.8"/>
+
+  <!-- 微孔阵列：沿管壁均匀分布的细孔 -->
+  <g stroke="#222222" stroke-width="1.4">
+    <line x1="80" y1="118" x2="80" y2="132"/><line x1="110" y1="118" x2="110" y2="132"/>
+    <line x1="140" y1="118" x2="140" y2="132"/><line x1="170" y1="118" x2="170" y2="132"/>
+    <line x1="200" y1="118" x2="200" y2="132"/><line x1="230" y1="118" x2="230" y2="132"/>
+    <line x1="260" y1="118" x2="260" y2="132"/><line x1="290" y1="118" x2="290" y2="132"/>
+    <line x1="320" y1="118" x2="320" y2="132"/><line x1="350" y1="118" x2="350" y2="132"/>
+    <line x1="380" y1="118" x2="380" y2="132"/><line x1="410" y1="118" x2="410" y2="132"/>
+    <line x1="440" y1="118" x2="440" y2="132"/>
+    <line x1="80" y1="196" x2="80" y2="210"/><line x1="110" y1="196" x2="110" y2="210"/>
+    <line x1="140" y1="196" x2="140" y2="210"/><line x1="170" y1="196" x2="170" y2="210"/>
+    <line x1="200" y1="196" x2="200" y2="210"/><line x1="230" y1="196" x2="230" y2="210"/>
+    <line x1="260" y1="196" x2="260" y2="210"/><line x1="290" y1="196" x2="290" y2="210"/>
+    <line x1="320" y1="196" x2="320" y2="210"/><line x1="350" y1="196" x2="350" y2="210"/>
+    <line x1="380" y1="196" x2="380" y2="210"/><line x1="410" y1="196" x2="410" y2="210"/>
+    <line x1="440" y1="196" x2="440" y2="210"/>
+  </g>
+
+  <!-- 管壁孔隙率说明 -->
+  <text x="72" y="106" text-anchor="start" font-size="12" fill="#222222">微孔阵列（孔隙率 σ）</text>
+
+  <!-- 微孔放大引线：d 与壁厚 t -->
+  <line x1="230" y1="118" x2="300" y2="58" stroke="#8a8a8a" stroke-width="1"/>
+  <circle cx="230" cy="118" r="4" fill="none" stroke="#8a8a8a" stroke-width="1"/>
+  <text x="304" y="52" text-anchor="start" font-size="12" fill="#222222">微孔等效直径 d</text>
+  <text x="304" y="70" text-anchor="start" font-size="12" fill="#222222">管壁厚度 t</text>
+
+  <!-- 内径 D 尺寸：竖向尺寸线置于管左侧 -->
+  <line x1="44" y1="132" x2="44" y2="196" stroke="#8a8a8a" stroke-width="1"/>
+  <line x1="38" y1="132" x2="50" y2="132" stroke="#8a8a8a" stroke-width="1"/>
+  <line x1="38" y1="196" x2="50" y2="196" stroke="#8a8a8a" stroke-width="1"/>
+  <text x="34" y="168" text-anchor="end" font-size="13" fill="#222222">D</text>
+
+  <!-- 管长 L 尺寸：横向尺寸线置于管下方 -->
+  <line x1="60" y1="228" x2="460" y2="228" stroke="#8a8a8a" stroke-width="1"/>
+  <line x1="60" y1="222" x2="60" y2="234" stroke="#8a8a8a" stroke-width="1"/>
+  <line x1="460" y1="222" x2="460" y2="234" stroke="#8a8a8a" stroke-width="1"/>
+  <text x="260" y="248" text-anchor="middle" font-size="13" fill="#222222">L</text>
+
+  <!-- 主公式 -->
+  <text x="260" y="288" text-anchor="middle" font-size="12" fill="#c0392b" font-weight="600">R_w = 32μt/(σρcd²)·[√(1+k²/32) + (√2/32)·k·d/t]，TL = 8.686·α·L</text>
+</svg>`;
