@@ -150,3 +150,58 @@ export const WOVEN_DIAGRAM = `
   <!-- 主公式 -->
   <text x="260" y="288" text-anchor="middle" font-size="12" fill="#c0392b" font-weight="600">R_w = 32μt/(σρcd²)·[√(1+k²/32) + (√2/32)·k·d/t]，TL = 8.686·α·L</text>
 </svg>`;
+
+export const MULTI_CAVITY_DIAGRAM = `
+<svg viewBox="0 0 520 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="多腔穿孔消声器几何示意">
+  <!-- 外壳 -->
+  <rect x="60" y="96" width="400" height="120" rx="6" fill="#f7f7f7" stroke="#222222" stroke-width="1.8"/>
+
+  <!-- 四腔分隔（三道隔板） -->
+  <line x1="160" y1="96" x2="160" y2="216" stroke="#222222" stroke-width="2.4"/>
+  <line x1="260" y1="96" x2="260" y2="216" stroke="#222222" stroke-width="2.4"/>
+  <line x1="360" y1="96" x2="360" y2="216" stroke="#222222" stroke-width="2.4"/>
+
+  <!-- 腔体标注 -->
+  <text x="110" y="118" text-anchor="middle" font-size="11" fill="#555555">腔 1</text>
+  <text x="210" y="118" text-anchor="middle" font-size="11" fill="#555555">腔 2</text>
+  <text x="310" y="118" text-anchor="middle" font-size="11" fill="#555555">腔 3</text>
+  <text x="410" y="118" text-anchor="middle" font-size="11" fill="#555555">腔 4</text>
+
+  <!-- 主管（含穿孔段） -->
+  <rect x="40" y="140" width="440" height="34" fill="#ffffff" stroke="#222222" stroke-width="1.6"/>
+  <line x1="40" y1="157" x2="480" y2="157" stroke="#c8c8c8" stroke-width="1"/>
+
+  <!-- 穿孔：每腔一组小圆 -->
+  <g fill="#222222">
+    <circle cx="90" cy="157" r="3"/><circle cx="110" cy="157" r="3"/><circle cx="130" cy="157" r="3"/>
+    <circle cx="190" cy="157" r="3"/><circle cx="210" cy="157" r="3"/><circle cx="230" cy="157" r="3"/>
+    <circle cx="290" cy="157" r="3"/><circle cx="310" cy="157" r="3"/><circle cx="330" cy="157" r="3"/>
+    <circle cx="390" cy="157" r="3"/><circle cx="410" cy="157" r="3"/><circle cx="430" cy="157" r="3"/>
+  </g>
+
+  <!-- 进出口 -->
+  <line x1="20" y1="157" x2="40" y2="157" stroke="#222222" stroke-width="3"/>
+  <line x1="480" y1="157" x2="500" y2="157" stroke="#222222" stroke-width="3"/>
+  <text x="22" y="146" text-anchor="middle" font-size="11" fill="#222222">入</text>
+  <text x="498" y="146" text-anchor="middle" font-size="11" fill="#222222">出</text>
+
+  <!-- 尺寸标注：dout（腔体外径）、din（主管内径）、Lc（腔宽）、dh（孔径） -->
+  <line x1="36" y1="96" x2="36" y2="216" stroke="#8a8a8a" stroke-width="1"/>
+  <line x1="30" y1="96" x2="42" y2="96" stroke="#8a8a8a" stroke-width="1"/>
+  <line x1="30" y1="216" x2="42" y2="216" stroke="#8a8a8a" stroke-width="1"/>
+  <text x="26" y="160" text-anchor="end" font-size="12" fill="#222222">d_out</text>
+
+  <line x1="52" y1="140" x2="52" y2="174" stroke="#8a8a8a" stroke-width="1"/>
+  <text x="58" y="136" text-anchor="start" font-size="11" fill="#222222">d_in</text>
+
+  <line x1="160" y1="228" x2="260" y2="228" stroke="#8a8a8a" stroke-width="1"/>
+  <line x1="160" y1="222" x2="160" y2="234" stroke="#8a8a8a" stroke-width="1"/>
+  <line x1="260" y1="222" x2="260" y2="234" stroke="#8a8a8a" stroke-width="1"/>
+  <text x="210" y="247" text-anchor="middle" font-size="12" fill="#222222">L_c,i</text>
+
+  <line x1="110" y1="157" x2="110" y2="190" stroke="#8a8a8a" stroke-width="1"/>
+  <text x="112" y="204" text-anchor="start" font-size="11" fill="#222222">d_h</text>
+
+  <!-- 主公式 -->
+  <text x="260" y="286" text-anchor="middle" font-size="12" fill="#c0392b" font-weight="600">Φ = exp(A·L_c)，T_cav = Φ11 − Φ12[:,1]·Φ21[2,:]/Φ22[2,1]，TL = 20lg(|T11+T12+T21+T22|/2)</text>
+</svg>`;

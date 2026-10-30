@@ -14,6 +14,7 @@ import { helmholtzMuffler } from '../domains/acoustics/helmholtzMuffler';
 import { expansionMuffler } from '../domains/acoustics/expansionMuffler';
 import { quarterWaveTube } from '../domains/acoustics/quarterWaveTube';
 import { wovenTubeSilencer } from '../domains/acoustics/wovenTubeSilencer';
+import { multiCavitySilencer } from '../domains/acoustics/multiCavitySilencer';
 import { pressureCorrection } from '../domains/fluid/pressureCorrection';
 
 const ALL_FORMULAS: FormulaSpec[] = [
@@ -22,6 +23,7 @@ const ALL_FORMULAS: FormulaSpec[] = [
   expansionMuffler,
   quarterWaveTube,
   wovenTubeSilencer,
+  multiCavitySilencer,
   pressureCorrection,
 ];
 
