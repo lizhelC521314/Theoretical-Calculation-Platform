@@ -180,6 +180,52 @@ export const UNIT_GROUPS: Record<string, UnitGroup> = {
     preferred: '-',
     units: [{ label: '-', factor: 1 }],
   },
+  /** 截面二次矩（惯性矩） */
+  secondMomentOfArea: {
+    si: 'm⁴',
+    preferred: 'mm⁴',
+    units: [
+      { label: 'm⁴', factor: 1 },
+      { label: 'cm⁴', factor: 1e-8 },
+      { label: 'mm⁴', factor: 1e-12 },
+    ],
+  },
+  /** 刚度（轴向拉压、弯曲） */
+  stiffness: {
+    si: 'N/m',
+    preferred: 'kN/m',
+    units: [
+      { label: 'N/m', factor: 1 },
+      { label: 'kN/m', factor: 1000 },
+      { label: 'N/mm', factor: 1000 },
+    ],
+  },
+  frequency: {
+    si: 'Hz',
+    preferred: 'Hz',
+    units: [
+      { label: 'Hz', factor: 1 },
+      { label: 'kHz', factor: 1000 },
+    ],
+  },
+  mass: {
+    si: 'kg',
+    preferred: 'kg',
+    units: [
+      { label: 'kg', factor: 1 },
+      { label: 'g', factor: 0.001 },
+      { label: 't', factor: 1000 },
+    ],
+  },
+  /** 面密度（管壁单位面积质量） */
+  surfaceDensity: {
+    si: 'kg/m²',
+    preferred: 'kg/m²',
+    units: [
+      { label: 'kg/m²', factor: 1 },
+      { label: 'g/m²', factor: 0.001 },
+    ],
+  },
   /** 多孔介质渗透率 α（m²） */
   permeability: {
     si: 'm²',
