@@ -22,7 +22,7 @@ export const intakeHose: FormulaSpec = {
   summary: '几何反算：输入橡胶材料参数与性能要求（隔振率、声辐射、拔脱力、真空度），直接输出壁厚 t、波数 N 与软管长度 L，并用正算公式逐项复核余量。',
   tags: ['进气软管', '波纹管', '橡胶软管', 'EPDM', '几何反算', '壁厚', '波数', '爆破', '真空吸扁', '隔振', '拔脱力', '管壁声辐射', 'EJMA', 'SAE J20', 'NVH', '结构设计'],
   description:
-    '乘用车橡胶进气软管（EPDM，带 1~3 层增强层）的几何参数反算设计：① 输入内径 D、波距 w、波高 h、层数 n 与材料参数（E、ρ、σb、ν、ζ、HA）；② 按式(5)~(10) 由爆破、真空塌陷、声辐射三项约束反算壁厚并取大、向上圆整至 0.5 mm（无增强层橡胶 E 低，真空塌陷往往是控制项）；③ 按式(11)(12) 计算单波刚度 K 与整体刚度 Ker = K/N；④ 按式(13)~(17) 由隔振率要求给波数下限、拔脱力要求给波数上限，取 N = ⌈Nmin⌉ 并检查 N ≤ Nmax；⑤ 按式(18)(19) 计算 L = N·w 与总成质量 M（M 与 N 耦合，本实现按二次方程直接求解，等价于迭代 2~3 轮）；⑥ 按式(20)~(25) 正算复核固有频率、隔振率、声压级、拔脱承载、真空与爆破裕度；⑦ 若 R < Rreq 在 N ≤ Nmax 内自动递增 N（阻尼使实际传递率略高于无阻尼近似）；⑧ 若 Nmin > Nmax 则材料/结构无法同时满足，可行区间宽度输出为负，需调整材料或放宽要求。',
+    '乘用车橡胶进气软管（EPDM，带 1~3 层增强层）的几何参数反算设计：① 输入内径 D、波距 w、波高 h、层数 n 与材料参数（E、ρ、σb、ν、ζ、HA）；② 按式(5)~(10) 由爆破、真空塌陷、声辐射三项约束反算壁厚并取大、向上圆整至 0.5 mm（无增强层橡胶 E 低，真空塌陷往往是控制项）；③ 按式(11)(12) 计算单波刚度 K 与整体刚度 Ker = K/N；④ 按式(13)~(17) 由隔振率要求给波数下限、拔脱力要求给波数上限，取 N = ⌈Nmin⌉ 并检查 N ≤ Nmax；⑤ 按式(18)(19) 计算 L = N·w 与总成质量 M（M 与 N 耦合，本实现按二次方程直接求解，等价于迭代 2~3 轮）；⑥ 按式(20)~(25) 正算复核固有频率、隔振率、声压级、拔脱承载、真空与爆破裕度；⑦ 若 R < Rreq 在 N ≤ Nmax 内自动递增 N（阻尼使实际传递率略高于无阻尼近似）；⑧ 按式(26)~(36) 校核运动位移：由 Δx/Δy/Δz 合成轴向位移 Δa 与横向位移 Δl，行程下限 Nmin,Δ 与隔振下限取大后并入 N 的取值，再校核单波行程比、位移应力 σd、组合应力 σeq ≤ [σ]/SFs、疲劳 Δσ ≤ Sf/SFf 与运动轴向力 Fax ≤ Fjoint；⑨ 若 max(Nmin, Nmin,Δ) > Nmax 则材料/结构无法同时满足，可行区间宽度输出为负，需调整材料或放宽要求。',
   inputs: [
     { key: 'D', label: '软管内径', symbol: 'D', unit: 'mm', unitGroup: 'diameter', default: 50, min: 0, required: true, description: '由空间/流量确定，0.03~0.12 m' },
     { key: 'w', label: '波距', symbol: 'w', unit: 'mm', unitGroup: 'length', default: 12, min: 0, required: true, description: '波纹节距，工艺确定，8~15 mm' },
@@ -50,6 +50,16 @@ export const intakeHose: FormulaSpec = {
     { key: 'Mjoint', label: '接头质量', symbol: 'M_j', unit: 'kg', unitGroup: 'mass', default: 0.4, min: 0, required: true, description: '软管两端接头（含卡箍）质量，计入总成质量 M' },
     { key: 'rho0', label: '空气密度', symbol: 'ρ0', unit: 'kg/m³', unitGroup: 'density', default: 1.205, min: 0, required: true, description: '20℃、1 atm 约 1.205 kg/m³' },
     { key: 'c0', label: '空气声速', symbol: 'c0', unit: 'm/s', unitGroup: 'velocity', default: 343, min: 0, required: true, description: '20℃ 约 343 m/s' },
+    { key: 'dx', label: 'X 向位移（轴向）', symbol: 'Δx', unit: 'mm', unitGroup: 'length', default: 2, min: 0, required: true, description: '软管一端固定、另一端运动的三向位移，X 为轴向（式26~27）' },
+    { key: 'dy', label: 'Y 向位移（横向）', symbol: 'Δy', unit: 'mm', unitGroup: 'length', default: 1, min: 0, required: true, description: '横向分量，与 Δz 合成 Δl' },
+    { key: 'dz', label: 'Z 向位移（横向）', symbol: 'Δz', unit: 'mm', unitGroup: 'length', default: 1, min: 0, required: true, description: '横向分量，与 Δy 合成 Δl' },
+    { key: 'epsA', label: '单波轴向允许应变', symbol: 'ε_a', unit: '-', default: 0.15, min: 0, required: true, description: '0.10~0.20，按胶料疲劳数据与 EJMA/FSA 取值（式29）' },
+    { key: 'epsL', label: '单波横向允许应变', symbol: 'ε_l', unit: '-', default: 0.08, min: 0, required: true, description: '0.05~0.10，按胶料疲劳数据与 EJMA/FSA 取值（式29）' },
+    { key: 'SFs', label: '强度安全系数', symbol: 'SF_s', unit: '-', default: 2, min: 0, required: true, description: 'EJMA 常规 1.5~2，橡胶件建议 2~3（式34）' },
+    { key: 'sigmaF', label: '疲劳强度（Nf 次）', symbol: 'S_f', unit: 'MPa', unitGroup: 'stress', default: 3, min: 0, required: true, description: '按 EJMA 疲劳曲线或胶料疲劳试验在设计循环次数 Nf 处取值（式35）' },
+    { key: 'SFf', label: '疲劳安全系数', symbol: 'SF_f', unit: '-', default: 1.5, min: 0, required: true, description: '取 1.5~2（式35）' },
+    { key: 'Nf', label: '设计循环次数', symbol: 'N_f', unit: '-', default: 1e6, min: 0, required: true, description: '如 10⁶ 次；用于确定疲劳强度 Sf 的取点，本身不直接参与计算' },
+    { key: 'Fjoint', label: '接头允许轴向载荷', symbol: 'F_joint', unit: 'N', unitGroup: 'force', default: 1000, min: 0, required: true, description: '接头/卡箍允许轴向载荷，与拔脱力要求联合校核（式36）' },
   ],
   outputs: [
     { key: 't', label: '壁厚（反算）', symbol: 't', unit: 'mm', unitGroup: 'length', digits: 2, group: '反算结果', primary: true, description: 't = max(tb, tv, tr)，向上圆整至 0.5 mm（式10）' },
@@ -69,7 +79,7 @@ export const intakeHose: FormulaSpec = {
     { key: 'fnMax', label: '允许最高固有频率', symbol: 'f_n,max', unit: 'Hz', unitGroup: 'frequency', digits: 2, group: '波数区间', description: 'fn,max = fex/√(1+1/Tt)（式14，无阻尼近似反解）' },
     { key: 'Nmin', label: '波数下限（隔振）', symbol: 'N_min', unit: '-', digits: 2, group: '波数区间', description: 'Nmin = K/[M·(2π·fn,max)²]（式15）；M 随 N 变化，按二次方程求解' },
     { key: 'Nmax', label: '波数上限（拔脱）', symbol: 'N_max', unit: '-', digits: 2, group: '波数区间', description: 'Nmax = K·Δallow/Fpull（式16）' },
-    { key: 'Ngap', label: '可行区间宽度', symbol: 'N_max−N_min', unit: '-', digits: 2, group: '波数区间', description: '≥0 可行；<0 说明材料/结构无法同时满足隔振与拔脱，需调整' },
+    { key: 'Ngap', label: '可行区间宽度', symbol: 'N_max−N_min', unit: '-', digits: 2, group: '波数区间', description: 'Nmax − max(Nmin, Nmin,Δ)；≥0 可行；<0 说明材料/结构无法同时满足隔振、行程与拔脱，需调整' },
     { key: 'fn', label: '实际固有频率', symbol: 'f_n', unit: 'Hz', unitGroup: 'frequency', digits: 2, group: '校核·隔振', description: 'fn = (1/2π)·√(Ker/M)（式20）' },
     { key: 'ratio', label: '频率比', symbol: 'r', unit: '-', digits: 2, group: '校核·隔振', description: 'r = fex/fn，>√2 进入隔振区' },
     { key: 'Tr', label: '实际传递率', symbol: 'T_r', unit: '-', digits: 4, group: '校核·隔振', description: 'Tr = √{[1+(2ζr)²]/[(1−r²)²+(2ζr)²]}（式21）' },
@@ -90,6 +100,21 @@ export const intakeHose: FormulaSpec = {
     { key: 'pcrRatio', label: '真空裕度', symbol: 'pcr/(n_v·p_v)', unit: '-', digits: 2, group: '校核·强度与连接', description: '≥1 合格' },
     { key: 'pb', label: '爆破压力', symbol: 'p_b', unit: 'kPa', unitGroup: 'pressure', digits: 1, group: '校核·强度与连接', description: 'pb = 2tσb/D，应 ≥ kb·p（式25）' },
     { key: 'pbRatio', label: '爆破裕度', symbol: 'pb/(k_b·p)', unit: '-', digits: 2, group: '校核·强度与连接', description: '≥1 合格' },
+    { key: 'Delta', label: '合成总位移', symbol: 'Δ', unit: 'mm', unitGroup: 'length', digits: 3, group: '校核·位移与疲劳', description: 'Δ = (Δx²+Δy²+Δz²)^{1/2}（式26）' },
+    { key: 'DeltaL', label: '横向合成位移', symbol: 'Δ_l', unit: 'mm', unitGroup: 'length', digits: 3, group: '校核·位移与疲劳', description: 'Δl = (Δy²+Δz²)^{1/2}（式27）' },
+    { key: 'ea', label: '单波轴向位移', symbol: 'e_a', unit: 'mm', unitGroup: 'length', digits: 4, group: '校核·位移与疲劳', description: 'ea = Δa/N（式28），应 ≤ εa·h' },
+    { key: 'el', label: '单波横向位移', symbol: 'e_l', unit: 'mm', unitGroup: 'length', digits: 4, group: '校核·位移与疲劳', description: 'el = Δl/N（式28），应 ≤ εl·h' },
+    { key: 'eaRatio', label: '轴向行程比', symbol: 'e_a/[e_a]', unit: '-', digits: 3, group: '校核·位移与疲劳', description: 'ea/(εa·h)，≤1 合格（式29）' },
+    { key: 'elRatio', label: '横向行程比', symbol: 'e_l/[e_l]', unit: '-', digits: 3, group: '校核·位移与疲劳', description: 'el/(εl·h)，≤1 合格（式29）' },
+    { key: 'NminD', label: '波数下限（行程）', symbol: 'N_min,Δ', unit: '-', digits: 2, group: '校核·位移与疲劳', description: 'Nmin,Δ = max[Δa/(εa·h), Δl/(εl·h)]（式30），已并入 N 的下限' },
+    { key: 'sigmaD', label: '位移应力', symbol: 'σ_d', unit: 'MPa', unitGroup: 'stress', digits: 3, group: '校核·位移与疲劳', description: 'σd = σdm + σdb（式31~32）' },
+    { key: 'sigmaP', label: '压力应力', symbol: 'σ_p', unit: 'MPa', unitGroup: 'stress', digits: 3, group: '校核·位移与疲劳', description: 'σp = p·h/(2t) + p·h²/(2t²)（式33）' },
+    { key: 'sigmaEq', label: '组合应力', symbol: 'σ_eq', unit: 'MPa', unitGroup: 'stress', digits: 3, group: '校核·位移与疲劳', primary: true, description: 'σeq = σp + σd（式34），应 ≤ [σ]/SFs，[σ] = σb/3' },
+    { key: 'sigRatio', label: '强度利用系数', symbol: 'σ_eq/([σ]/SF_s)', unit: '-', digits: 3, group: '校核·位移与疲劳', description: '≤1 合格；超限时增大 h 或增加 N' },
+    { key: 'dSigma', label: '疲劳应力幅', symbol: 'Δσ', unit: 'MPa', unitGroup: 'stress', digits: 3, group: '校核·位移与疲劳', description: 'Δσ = 2σd（式35），应 ≤ Sf(Nf)/SFf' },
+    { key: 'fatRatio', label: '疲劳裕度', symbol: 'S_f/(SF_f·Δσ)', unit: '-', digits: 2, group: '校核·位移与疲劳', description: '≥1 合格' },
+    { key: 'Fax', label: '运动轴向力', symbol: 'F_ax', unit: 'N', unitGroup: 'force', digits: 1, group: '校核·位移与疲劳', description: 'F = Ker·Δa（式36），应 ≤ Fjoint' },
+    { key: 'FaxRatio', label: '轴向力裕度', symbol: 'F_joint/F_ax', unit: '-', digits: 2, group: '校核·位移与疲劳', description: '≥1 合格' },
   ],
   latex: [
     {
@@ -144,11 +169,23 @@ export const intakeHose: FormulaSpec = {
       label: '校核：拔脱、真空与爆破（式24~25）',
       tex: '\\star\\ F = K_{er}\\, \\Delta_{allow} \\ge F_{pull},\\qquad p_{cr} \\ge n_v\\, p_v,\\qquad p_b = \\frac{2 t \\sigma_b}{D} \\ge k_b\\, p',
     },
+    {
+      label: '位移合成与行程校核（式26~30）',
+      tex: '\\star\\ \\Delta = \\sqrt{\\Delta x^2+\\Delta y^2+\\Delta z^2},\\quad \\Delta_a = \\Delta x,\\quad \\Delta_l = \\sqrt{\\Delta y^2+\\Delta z^2},\\quad e_a = \\frac{\\Delta_a}{N} \\le \\varepsilon_a h,\\quad e_l = \\frac{\\Delta_l}{N} \\le \\varepsilon_l h,\\quad N_{min,\\Delta} = \\max\\!\\left[\\frac{\\Delta_a}{\\varepsilon_a h},\\, \\frac{\\Delta_l}{\\varepsilon_l h}\\right]',
+    },
+    {
+      label: '位移应力与组合应力（式31~34）',
+      tex: '\\star\\ \\sigma_{dm} = \\frac{E\\, t^{2}\\, e_a}{2 h^{3}},\\quad \\sigma_{db} = \\frac{5 E\\, t\\, e_a}{3 h^{2}},\\quad \\sigma_d = \\sigma_{dm} + \\sigma_{db},\\quad \\sigma_p = \\frac{p\\, h}{2 t} + \\frac{p\\, h^{2}}{2 t^{2}},\\quad \\sigma_{eq} = \\sigma_p + \\sigma_d \\le \\frac{[\\sigma]}{SF_s}',
+    },
+    {
+      label: '疲劳与轴向力校核（式35~36）',
+      tex: '\\star\\ \\Delta\\sigma = 2\\sigma_d \\le \\frac{S_f(N_f)}{SF_f},\\qquad F = K_{er}\\, \\Delta_a \\le F_{joint}',
+    },
   ],
   diagram: INTAKE_HOSE_DIAGRAM,
   sensitivity: true,
   assumptions: [
-    '公式与参考文档《乘用车橡胶进气软管几何参数反算设计》一致，对应其式 (1)~(25)，依据 SAE J20、GB/T 3683、EJMA 波纹管经验式与 Bies《Engineering Noise Control》',
+    '公式与参考文档《乘用车橡胶进气软管几何参数反算设计（含位移校核）》一致，对应其式 (1)~(36)，依据 SAE J20、GB/T 3683、EJMA 波纹管经验式、FSA 手册与 Bies《Engineering Noise Control》',
     '反算流程：t = max(tb, tv, tr) 并向上圆整至 0.5 mm；N 取隔振下限的向上取整且不超过拔脱上限 Nmax；若 Nmin > Nmax，材料/结构无法同时满足，「可行区间宽度」输出为负，需降低硬度/壁厚、增加增强层或放宽隔振率',
     'Nmin 与总成质量 M 互相耦合（N → L → M → K_er,max → Nmin，文档要求迭代 2~3 轮）；本实现把式(15)~(19) 联立为关于 N 的二次方程 aN²+bN−K=0 直接求正根，与迭代收敛结果一致',
     '式(14) 由无阻尼近似 Tr ≈ 1/(r²−1) 反解 fn,max；阻尼使实际传递率略偏高，本实现按文档设计流程⑥在 N ≤ ⌊Nmax⌋ 内自动递增 N 直至 R ≥ Rreq，仍不满足时隔振余量为负',
@@ -157,6 +194,8 @@ export const intakeHose: FormulaSpec = {
     'K 为单波刚度（EJMA 经验式，Cf 取 0.8~1.5）；带直段时整体刚度应按波纹段与直段串联加权，本实现按整段波纹等效',
     '橡胶 E 随硬度、温度、应变幅变化，建议用 20~80 ℃ 实测 E 区间做包络设计；HA 仅作材料选型记录，不参与计算',
     '拔脱力本质是接头/卡箍能力，式(16) 只给出软管轴向刚度下限，最终仍需做拔脱试验；反算结果须用正算模型复核并留 10%~20% 设计余量（本模块校核组已给出 R、Lp、F、pcr、pb 余量）',
+    '运动位移校核按文档第 7 章式 (26)~(36)：行程下限 Nmin,Δ 与隔振下限 Nmin 取大后并入 N 的取值；式(31)(33) 中的壁厚符号 δ 以管壁厚度 t 代入、压力 q 以工作压力 p 代入；许用应力 [σ] 取 σb/3（文档建议拉伸强度的 1/3~1/2）',
+    '疲劳校核 Δσ = 2σd ≤ Sf(Nf)/SFf：Sf(Nf) 需按 EJMA 疲劳曲线或胶料疲劳试验在设计循环次数 Nf 处取值后作为输入给出，Nf 本身不直接参与计算',
   ],
   solve(v) {
     const empty: Record<string, number> = {
@@ -167,13 +206,23 @@ export const intakeHose: FormulaSpec = {
       fn: NaN, ratio: NaN, Tr: NaN, R: NaN, Rmargin: NaN,
       cL: NaN, fr: NaN, sigRad: NaN, vWall: NaN, S: NaN, W: NaN, LW: NaN, Lp: NaN, LpMargin: NaN,
       F: NaN, Fratio: NaN, pcr: NaN, pcrRatio: NaN, pb: NaN, pbRatio: NaN,
+      Delta: NaN, DeltaL: NaN, ea: NaN, el: NaN, eaRatio: NaN, elRatio: NaN, NminD: NaN,
+      sigmaD: NaN, sigmaP: NaN, sigmaEq: NaN, sigRatio: NaN, dSigma: NaN, fatRatio: NaN, Fax: NaN, FaxRatio: NaN,
     };
     const ok =
       v.D > 0 && v.w > 0 && v.h > 0 && v.n >= 1 && v.E > 0 && v.rho > 0 && v.sigmaB > 0 &&
       v.nu > 0 && v.nu < 0.5 && v.zeta > 0 && v.Rreq > 0 && v.r > 0 && v.Fpull > 0 &&
       v.deltaAllow > 0 && v.pv > 0 && v.p > 0 && v.pac > 0 && v.fex > 0 && v.Cf > 0 &&
-      v.CL > 0 && v.kb > 0 && v.nv > 0 && v.Mjoint >= 0 && v.rho0 > 0 && v.c0 > 0;
+      v.CL > 0 && v.kb > 0 && v.nv > 0 && v.Mjoint >= 0 && v.rho0 > 0 && v.c0 > 0 &&
+      v.dx >= 0 && v.dy >= 0 && v.dz >= 0 && v.epsA > 0 && v.epsL > 0 &&
+      v.SFs > 0 && v.sigmaF > 0 && v.SFf > 0 && v.Fjoint > 0;
     if (!ok) return empty;
+
+    // 位移合成与行程下限（式26~30，与 t、N 无关）
+    const Delta = Math.sqrt(v.dx * v.dx + v.dy * v.dy + v.dz * v.dz);
+    const DeltaA = v.dx;
+    const DeltaL = Math.sqrt(v.dy * v.dy + v.dz * v.dz);
+    const NminD = Math.max(DeltaA / (v.epsA * v.h), DeltaL / (v.epsL * v.h));
 
     // 辐射效率（与 t、N 无关，只算一次）
     const cL = Math.sqrt(v.E / (v.rho * (1 - v.nu * v.nu)));
@@ -235,9 +284,9 @@ export const intakeHose: FormulaSpec = {
       // 波数上限（式16）
       Nmax = (K * v.deltaAllow) / v.Fpull;
 
-      // 取 N = ⌈Nmin⌉，并按流程⑥在 N ≤ ⌊Nmax⌋ 内递增至 R ≥ Rreq
+      // 取 N = ⌈max(Nmin, Nmin,Δ)⌉，并按流程⑥在 N ≤ ⌊Nmax⌋ 内递增至 R ≥ Rreq
       const Ncap = Math.max(1, Math.floor(Nmax));
-      let Nnew = Math.min(Math.max(1, Math.ceil(Nmin)), Ncap);
+      let Nnew = Math.min(Math.max(1, Math.ceil(Math.max(Nmin, NminD))), Ncap);
       for (;;) {
         const Lc = Nnew * v.w;
         const Mc = v.rho * Math.PI * v.D * tNew * Lc + v.Mjoint;
@@ -281,7 +330,23 @@ export const intakeHose: FormulaSpec = {
     const pcrRatio = pcr / (v.nv * v.pv);
     const pb = (2 * t * v.sigmaB) / v.D;
     const pbRatio = pb / (v.kb * v.p);
-    const Ngap = Nmax - Nmin;
+    const Ngap = Nmax - Math.max(Nmin, NminD);
+
+    // 运动位移与行程校核（式26~36）
+    const ea = DeltaA / N;
+    const el = DeltaL / N;
+    const eaRatio = ea / (v.epsA * v.h);
+    const elRatio = el / (v.epsL * v.h);
+    const sigmaDm = (v.E * t * t * ea) / (2 * Math.pow(v.h, 3));
+    const sigmaDb = (5 * v.E * t * ea) / (3 * v.h * v.h);
+    const sigmaD = sigmaDm + sigmaDb;
+    const sigmaP = (v.p * v.h) / (2 * t) + (v.p * v.h * v.h) / (2 * t * t);
+    const sigmaEq = sigmaP + sigmaD;
+    const sigRatio = sigmaEq / (v.sigmaB / 3 / v.SFs);
+    const dSigma = 2 * sigmaD;
+    const fatRatio = v.sigmaF / (v.SFf * dSigma);
+    const Fax = Ker * DeltaA;
+    const FaxRatio = v.Fjoint / Fax;
 
     return {
       t, N, L,
@@ -291,6 +356,8 @@ export const intakeHose: FormulaSpec = {
       fn, ratio, Tr, R, Rmargin,
       cL, fr, sigRad, vWall, S, W, LW, Lp, LpMargin,
       F, Fratio, pcr, pcrRatio, pb, pbRatio,
+      Delta, DeltaL, ea, el, eaRatio, elRatio, NminD,
+      sigmaD, sigmaP, sigmaEq, sigRatio, dSigma, fatRatio, Fax, FaxRatio,
     };
   },
   benchmarks: [
@@ -303,6 +370,8 @@ export const intakeHose: FormulaSpec = {
         pv: 3e4, p: 1e5, pac: 100, fex: 200,
         Cf: 1, CL: 2, kb: 4, nv: 1.8,
         Mjoint: 0.4, rho0: 1.205, c0: 343,
+        dx: 0.002, dy: 0.001, dz: 0.001, epsA: 0.15, epsL: 0.08,
+        SFs: 2, sigmaF: 3e6, SFf: 1.5, Nf: 1e6, Fjoint: 1000,
       },
       expect: {
         t: 0.006, N: 3, L: 0.036000000000000004,
@@ -320,9 +389,16 @@ export const intakeHose: FormulaSpec = {
         F: 560.0293492724235, Fratio: 1.1200586985448469,
         pcr: 54575.60205290169, pcrRatio: 1.0106592972759572,
         pb: 2400000, pbRatio: 6,
+        Delta: 0.002449489742783178, DeltaL: 0.001414213562373095,
+        ea: 0.0006666666666666666, el: 0.0004714045207910317,
+        eaRatio: 0.2222222222222222, elRatio: 0.2946278254943948,
+        NminD: 0.8838834764831843, sigmaD: 109000.00000000001,
+        sigmaP: 722222.2222222221, sigmaEq: 831222.2222222221,
+        sigRatio: 0.49873333333333325, dSigma: 218000.00000000003,
+        fatRatio: 9.174311926605503, Fax: 224.01173970896937, FaxRatio: 4.464051755944468,
       },
       tolerance: 1e-9,
-      source: '按参考文档式 (1)~(25) 自建反算算例：tv 控制壁厚，N 位于隔振/拔脱可行区间内',
+      source: '按参考文档式 (1)~(36) 自建反算算例：tv 控制壁厚，N 位于隔振/拔脱可行区间内，含位移与疲劳校核',
     },
     {
       name: '高声压工况：pac 300 Pa（声辐射约束控制壁厚），阻尼校核递增 N',
@@ -333,6 +409,8 @@ export const intakeHose: FormulaSpec = {
         pv: 3e4, p: 1e5, pac: 300, fex: 200,
         Cf: 1, CL: 2, kb: 4, nv: 1.8,
         Mjoint: 0.4, rho0: 1.205, c0: 343,
+        dx: 0.002, dy: 0.001, dz: 0.001, epsA: 0.15, epsL: 0.08,
+        SFs: 2, sigmaF: 3e6, SFf: 1.5, Nf: 1e6, Fjoint: 1000,
       },
       expect: {
         t: 0.009000000000000001, N: 98, L: 1.176,
@@ -350,6 +428,13 @@ export const intakeHose: FormulaSpec = {
         F: 3574.58235971196, Fratio: 7.14916471942392,
         pcr: 184192.6569285433, pcrRatio: 3.410975128306357,
         pb: 3600000.0000000005, pbRatio: 9.000000000000002,
+        Delta: 0.002449489742783178, DeltaL: 0.001414213562373095,
+        ea: 0.000020408163265306123, el: 0.000014430750636460154,
+        eaRatio: 0.006802721088435374, elRatio: 0.009019219147787597,
+        NminD: 0.8838834764831843, sigmaD: 5211.734693877553,
+        sigmaP: 358024.6913580246, sigmaEq: 363236.4260519022,
+        sigRatio: 0.2179418556311413, dSigma: 10423.469387755105,
+        fatRatio: 191.87469407733718, Fax: 1429.832943884784, FaxRatio: 0.6993824028722198,
       },
       tolerance: 1e-9,
       source: '自建高声压算例：tr > tv 时壁厚由声辐射约束控制，且 N 经阻尼校核递增后仍满足 R ≥ Rreq',
