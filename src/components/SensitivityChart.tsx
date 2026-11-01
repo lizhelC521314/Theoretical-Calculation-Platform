@@ -13,9 +13,29 @@ interface Props {
  * 用于快速判断哪个参数对结果影响最大（设计优化的方向）。
  */
 export function SensitivityChart({ formula, inputsSI }: Props) {
-  const numericInputs = formula.inputs.filter((p) => !p.options && p.kind !== 'select');
+  // 按 showIf 只列出当前设计模式下实际参与计算的输入与输出
+  const visible = (cond?: { key: string; min?: number; max?: number }) =>
+    !cond ||
+    (inputsSI != null &&
+      Number(inputsSI[cond.key]) >= (cond.min ?? -Infinity) &&
+      Number(inputsSI[cond.key]) <= (cond.max ?? Infinity));
+
+  const numericInputs = formula.inputs.filter(
+    (p) => !p.options && p.kind !== 'select' && visible(p.showIf),
+  );
+  const outputList = formula.outputs.filter((o) => visible(o.showIf));
   const [xKey, setXKey] = useState(numericInputs[0]?.key ?? '');
-  const [yKey, setYKey] = useState(formula.outputs[0]?.key ?? '');
+  const [yKey, setYKey] = useState(outputList[0]?.key ?? '');
+
+  // 设计模式切换后可选变量/结果发生变化时，回落到首个可见项
+  useEffect(() => {
+    if (numericInputs.length > 0 && !numericInputs.some((p) => p.key === xKey)) {
+      setXKey(numericInputs[0].key);
+    }
+    if (outputList.length > 0 && !outputList.some((o) => o.key === yKey)) {
+      setYKey(outputList[0].key);
+    }
+  });
   const ref = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
 
@@ -112,7 +132,7 @@ export function SensitivityChart({ formula, inputsSI }: Props) {
             <label>
               结果
               <select value={yKey} onChange={(e) => setYKey(e.target.value)}>
-                {formula.outputs.map((o) => (
+                {outputList.map((o) => (
                   <option key={o.key} value={o.key}>
                     {o.symbol} {o.label}
                   </option>

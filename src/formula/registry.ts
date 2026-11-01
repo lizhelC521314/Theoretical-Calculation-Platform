@@ -17,8 +17,6 @@ import { wovenTubeSilencer } from '../domains/acoustics/wovenTubeSilencer';
 import { multiCavitySilencer } from '../domains/acoustics/multiCavitySilencer';
 import { pressureCorrection } from '../domains/fluid/pressureCorrection';
 import { airFilterElement } from '../domains/structure/airFilterElement';
-import { intakeHose } from '../domains/structure/intakeHose';
-import { intakeHoseFull } from '../domains/structure/intakeHoseFull';
 
 const ALL_FORMULAS: FormulaSpec[] = [
   porousMediaFitting,
@@ -29,8 +27,6 @@ const ALL_FORMULAS: FormulaSpec[] = [
   multiCavitySilencer,
   pressureCorrection,
   airFilterElement,
-  intakeHose,
-  intakeHoseFull,
 ];
 
 const byId = new Map<string, FormulaSpec>(ALL_FORMULAS.map((f) => [f.id, f]));
