@@ -17,16 +17,16 @@ interface Props {
   onBack: () => void;
 }
 
-/** 按公式元数据生成初始参数值与单位选择 */
+/** 按公式元数据生成初始参数值与单位选择（单位按输入项各自记录，互不影响） */
 function initialValues(formula: FormulaSpec) {
   const values: Record<string, number> = {};
   const units: Record<string, string> = {};
   for (const p of formula.inputs) {
     values[p.key] = p.default ?? 0;
-    if (p.unitGroup && !(p.unitGroup in units)) {
+    if (p.unitGroup) {
       const g = UNIT_GROUPS[p.unitGroup];
       const has = g?.units.some((u) => u.label === p.unit);
-      units[p.unitGroup] = has ? p.unit : g?.units[0].label ?? p.unit;
+      units[p.key] = has ? p.unit : g?.units[0].label ?? p.unit;
     }
   }
   return { values, units };
@@ -59,19 +59,18 @@ export function CalculatorPage({ formula, user, project, onBack }: Props) {
     setToast('');
   }, [formula]);
 
-  // 温度单位切换时同步换算输入值（℃ ↔ K 为平移关系，不能按倍率换算）
+  // 温度单位切换时同步换算该输入的值（℃ ↔ K 为平移关系，不能按倍率换算）
   const handleUnitsChange = useCallback(
     (next: Record<string, string>) => {
-      const changed = Object.keys(next).find((g) => units[g] !== next[g]);
-      if (changed === 'temperature') {
-        const from = units.temperature;
+      const changed = Object.keys(next).find((k) => units[k] !== next[k]);
+      const p = formula.inputs.find((x) => x.key === changed);
+      if (p?.unitGroup === 'temperature' && changed) {
+        const from = units[changed];
         setValues((prev) => {
           const out = { ...prev };
-          for (const p of formula.inputs) {
-            if (p.unitGroup !== 'temperature') continue;
-            const v = out[p.key];
-            if (typeof v !== 'number' || Number.isNaN(v)) continue;
-            out[p.key] = from === '℃' ? v + 273.15 : v - 273.15;
+          const v = out[changed];
+          if (typeof v === 'number' && !Number.isNaN(v)) {
+            out[changed] = from === '℃' ? v + 273.15 : v - 273.15;
           }
           return out;
         });
@@ -87,7 +86,7 @@ export function CalculatorPage({ formula, user, project, onBack }: Props) {
     for (const p of formula.inputs) {
       const raw = values[p.key];
       if (typeof raw !== 'number' || Number.isNaN(raw)) return null;
-      const unitLabel = p.unitGroup ? units[p.unitGroup] ?? p.unit : p.unit;
+      const unitLabel = p.unitGroup ? units[p.key] ?? p.unit : p.unit;
       inputsSI[p.key] = toSI(raw, p.unitGroup, unitLabel);
     }
     try {
@@ -128,7 +127,7 @@ export function CalculatorPage({ formula, user, project, onBack }: Props) {
     lines.push('');
     lines.push('输入参数,符号,数值,单位,SI值');
     for (const p of formula.inputs) {
-      const unitLabel = p.unitGroup ? units[p.unitGroup] ?? p.unit : p.unit;
+      const unitLabel = p.unitGroup ? units[p.key] ?? p.unit : p.unit;
       lines.push(`${p.label},${p.symbol},${values[p.key]},${unitLabel},${computed.inputsSI[p.key]}`);
     }
     lines.push('');

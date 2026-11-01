@@ -118,7 +118,8 @@ export function buildReportModel(
     const units = rec.units ?? {};
 
     const inputs: ParamRow[] = (f?.inputs ?? []).map((p) => {
-      const unitLabel = p.unitGroup ? units[p.unitGroup] ?? p.unit : p.unit;
+      // 单位按输入 key 记录；兼容早期按 unitGroup 记录的历史数据
+      const unitLabel = units[p.key] ?? (p.unitGroup ? units[p.unitGroup] : undefined) ?? p.unit;
       const v = values[p.key];
       return {
         label: p.label,

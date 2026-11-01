@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import type { FormulaSpec } from '../formula/types';
 import { UNIT_GROUPS } from '../formula/units';
 
@@ -6,7 +5,7 @@ interface Props {
   formula: FormulaSpec;
   /** 当前参数值（显示单位下的数值） */
   values: Record<string, number>;
-  /** 各单位分组当前选用的显示单位 */
+  /** 各输入项当前选用的显示单位（按输入 key 记录） */
   units: Record<string, string>;
   onValuesChange: (v: Record<string, number>) => void;
   onUnitsChange: (u: Record<string, string>) => void;
@@ -34,16 +33,8 @@ function UnitSelect({
   );
 }
 
-/** 输入参数表单：由公式元数据自动生成，同名 unitGroup 共享单位下拉框 */
+/** 输入参数表单：由公式元数据自动生成，每个输入独立选择显示单位 */
 export function ParamForm({ formula, values, units, onValuesChange, onUnitsChange }: Props) {
-  const groupUnit = useMemo(() => {
-    const m: Record<string, string> = {};
-    for (const p of formula.inputs) {
-      if (p.unitGroup && !(p.unitGroup in m)) m[p.unitGroup] = units[p.unitGroup] ?? p.unit;
-    }
-    return m;
-  }, [formula, units]);
-
   return (
     <div className="param-form">
       <h3 className="panel-title">输入参数</h3>
@@ -55,7 +46,7 @@ export function ParamForm({ formula, values, units, onValuesChange, onUnitsChang
               Number(values[p.showIf.key]) <= (p.showIf.max ?? Infinity)),
         )
         .map((p) => {
-        const unitLabel = p.unitGroup ? groupUnit[p.unitGroup] : p.unit;
+        const unitLabel = p.unitGroup ? units[p.key] ?? p.unit : p.unit;
         const v = values[p.key];
         const isSelect = p.kind === 'select' && p.options && p.options.length > 0;
         const outOfRange =
@@ -96,7 +87,7 @@ export function ParamForm({ formula, values, units, onValuesChange, onUnitsChang
                     <UnitSelect
                       group={p.unitGroup}
                       value={unitLabel}
-                      onChange={(u) => onUnitsChange({ ...units, [p.unitGroup!]: u })}
+                      onChange={(u) => onUnitsChange({ ...units, [p.key]: u })}
                     />
                   ) : (
                     <span className="unit-fixed">{p.unit}</span>
