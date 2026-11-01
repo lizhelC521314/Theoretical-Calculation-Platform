@@ -2,203 +2,180 @@ import type { FormulaSpec } from '../../formula/types';
 import { INTAKE_HOSE_DIAGRAM } from './diagrams';
 
 /**
- * 乘用车橡胶进气软管（波纹管）设计
+ * 乘用车橡胶进气软管（波纹管）几何参数反算设计
  *
- * 按参考文档《乘用车橡胶进气软管设计计算公式与输入参数（管壁辐射版）》
- * （依据 SAE J20 / SAE J200、GB/T 3683、ISO 6803、Munjal 管道声学）实现五类计算：
- *   几何与材料  A = πDt，I = πD³t/8，S = πDL，m″ = ρt
- *   耐压与爆破  σθ = pD/(2t)，σz = pD/(4t)，pb = 2tσb/D，
- *               pcr = [2E/(1−ν²)](t/D)³·CL
- *   刚度与隔振  kax = EA/L，kb = 3EI/L³，
- *               fn = (1/2π)√(kax/M)，Tr = √{[1+(2ζr)²]/[(1−r²)²+(2ζr)²]}，R = −20lgTr
- *   流动压降    Re = ρ0vD/μ，f = 64/Re 或 0.3164/Re^0.25，
- *               Δp = (kf·f·L/D + ΣK)·ρ0v²/2
- *   管壁声辐射  cL = √{E/[ρ(1−ν²)]}，fr = cL/(πD)，ka = 2πf·a/c0，
- *               σrad 分低/高环频率两支，W = ρ0c0Sσrad⟨v²⟩，LW = 10lg(W/10⁻¹²)
- *   卡箍连接    Fc = πDbpc/μf
+ * 按参考文档《乘用车橡胶进气软管几何参数反算设计》（依据 SAE J20、GB/T 3683、
+ * EJMA 波纹管经验式与 Bies 工程噪声控制）实现「反算 + 正算复核」：
+ *   壁厚反算  tb = kb·p·D/(2σb)（爆破），tv = D·[nv·pv·(1−ν²)/(2E·CL)]^{1/3}（真空塌陷），
+ *             tr = pac/(2πf·ρ·vallow)（声辐射），t = max(tb, tv, tr) 向上圆整 0.5 mm
+ *   波数反算  K = 1.7·Dm·E·tp³·n/(weff³·Cf)（单波刚度），Ker = K/N，
+ *             隔振下限 Nmin = K/[M(2πfn,max)²]，拔脱上限 Nmax = K·Δallow/Fpull
+ *   长度质量  L = N·w，M = ρπDt·L + M接头（与 N 耦合，按二次方程直接求解）
+ *   正算复核  fn、Tr、R ≥ Rreq；σrad、LW、Lp ≤ Lp,req；F = Ker·Δallow ≥ Fpull；
+ *             pcr ≥ nv·pv；pb = 2tσb/D ≥ kb·p
  */
 export const intakeHose: FormulaSpec = {
   id: 'structure.intakeHose',
   domain: 'structure',
   subsystem: '进气系统',
-  title: '橡胶进气软管（波纹管）设计',
-  summary: '进气软管五类校核：壁厚耐压与真空吸扁、刚度与隔振率、流动压降、管壁声辐射、卡箍密封，覆盖直段与波纹段组合的橡胶软管。',
-  tags: ['进气软管', '波纹管', '橡胶软管', 'EPDM', '壁厚', '爆破压力', '真空吸扁', '隔振', '传递率', '压降', '管壁声辐射', '卡箍', 'SAE J20', 'NVH', '结构设计'],
+  title: '橡胶进气软管（波纹管）几何反算设计',
+  summary: '几何反算：输入橡胶材料参数与性能要求（隔振率、声辐射、拔脱力、真空度），直接输出壁厚 t、波数 N 与软管长度 L，并用正算公式逐项复核余量。',
+  tags: ['进气软管', '波纹管', '橡胶软管', 'EPDM', '几何反算', '壁厚', '波数', '爆破', '真空吸扁', '隔振', '拔脱力', '管壁声辐射', 'EJMA', 'SAE J20', 'NVH', '结构设计'],
   description:
-    '乘用车橡胶进气软管（EPDM / NBR-PVC，常带涤纶或芳纶增强层）的五类设计校核：1) 几何与材料——管壁截面积 A = πDt、截面惯性矩 I = πD³t/8、内表面积 S = πDL、面密度 m″ = ρt；2) 耐压——环向应力 σθ = pD/(2t)、轴向应力 σz = pD/(4t)，安全系数 n = σb/σθ 应取 2~3，爆破压力 pb = 2tσb/D 应达工作压力的 3~5 倍，真空塌陷临界外压 pcr = [2E/(1−ν²)](t/D)³·CL 应达最大真空度的 1.5~2 倍；3) 刚度与隔振——轴向刚度 kax = EA/L、弯曲刚度 kb = 3EI/L³，固有频率 fn = (1/2π)√(kax/M)，按传递率 Tr 换算隔振率 R = −20lgTr，目标 ≥10 dB（fn ≤ fex/√2 才进入隔振区）；4) 流动——Re = ρ0vD/μ，层流 f = 64/Re、湍流 f = 0.3164/Re^0.25，波纹段粗糙修正 kf = 1.5~2.5，Δp = (kf·f·L/D + ΣK)·ρ0v²/2，目标 ≤3~5 kPa；5) 管壁声辐射——纵波速 cL、环频率 fr、波数 ka，辐射效率 σrad 按 f < fr 与 f ≥ fr 两支计算，辐射声功率 W 与声功率级 LW、测点声压级 Lp(r)；6) 卡箍夹紧力 Fc = πDbpc/μf，压缩率建议 20%~35%。',
+    '乘用车橡胶进气软管（EPDM，带 1~3 层增强层）的几何参数反算设计：① 输入内径 D、波距 w、波高 h、层数 n 与材料参数（E、ρ、σb、ν、ζ、HA）；② 按式(5)~(10) 由爆破、真空塌陷、声辐射三项约束反算壁厚并取大、向上圆整至 0.5 mm（无增强层橡胶 E 低，真空塌陷往往是控制项）；③ 按式(11)(12) 计算单波刚度 K 与整体刚度 Ker = K/N；④ 按式(13)~(17) 由隔振率要求给波数下限、拔脱力要求给波数上限，取 N = ⌈Nmin⌉ 并检查 N ≤ Nmax；⑤ 按式(18)(19) 计算 L = N·w 与总成质量 M（M 与 N 耦合，本实现按二次方程直接求解，等价于迭代 2~3 轮）；⑥ 按式(20)~(25) 正算复核固有频率、隔振率、声压级、拔脱承载、真空与爆破裕度；⑦ 若 R < Rreq 在 N ≤ Nmax 内自动递增 N（阻尼使实际传递率略高于无阻尼近似）；⑧ 若 Nmin > Nmax 则材料/结构无法同时满足，可行区间宽度输出为负，需调整材料或放宽要求。',
   inputs: [
-    { key: 'D', label: '软管内径', symbol: 'D', unit: 'mm', unitGroup: 'diameter', default: 50, min: 0, required: true, description: '与管路匹配，典型 30~120 mm' },
-    { key: 't', label: '壁厚（含增强层）', symbol: 't', unit: 'mm', unitGroup: 'length', default: 6, min: 0, required: true, description: '橡胶 + 增强层总壁厚，典型 3~8 mm' },
-    { key: 'L', label: '软管长度', symbol: 'L', unit: 'mm', unitGroup: 'length', default: 300, min: 0, required: true, description: '按布置确定，典型 100~600 mm（含波纹段）' },
-    { key: 'E', label: '弹性模量', symbol: 'E', unit: 'MPa', unitGroup: 'stress', default: 8, min: 0, required: true, description: 'EPDM 5~10 MPa；带增强层按等效模量取值' },
-    { key: 'sigmaB', label: '拉伸强度', symbol: 'σb', unit: 'MPa', unitGroup: 'stress', default: 10, min: 0, required: true, description: '取胶料与增强层的较小值，典型 8~15 MPa（带增强层可更高）' },
-    { key: 'rho', label: '胶料密度', symbol: 'ρ', unit: 'kg/m³', unitGroup: 'density', default: 1200, min: 0, required: true, description: 'EPDM 1100~1300 kg/m³，用于纵波速与面密度' },
+    { key: 'D', label: '软管内径', symbol: 'D', unit: 'mm', unitGroup: 'diameter', default: 50, min: 0, required: true, description: '由空间/流量确定，0.03~0.12 m' },
+    { key: 'w', label: '波距', symbol: 'w', unit: 'mm', unitGroup: 'length', default: 12, min: 0, required: true, description: '波纹节距，工艺确定，8~15 mm' },
+    { key: 'h', label: '波高', symbol: 'h', unit: 'mm', unitGroup: 'length', default: 20, min: 0, required: true, description: '波纹径向高度，工艺确定，8~20 mm；须满足 h > n·t' },
+    { key: 'n', label: '增强层层数', symbol: 'n', unit: '-', default: 2, min: 1, max: 5, required: true, description: '涤纶/芳纶增强层，1~3 层' },
+    { key: 'E', label: '弹性模量', symbol: 'E', unit: 'MPa', unitGroup: 'stress', default: 6, min: 0, required: true, description: 'EPDM 5~10 MPa；随硬度、温度、应变幅变化，建议 20~80℃ 实测区间包络' },
+    { key: 'rho', label: '胶料密度', symbol: 'ρ', unit: 'kg/m³', unitGroup: 'density', default: 1200, min: 0, required: true, description: 'EPDM 1100~1300 kg/m³' },
+    { key: 'sigmaB', label: '拉伸强度', symbol: 'σb', unit: 'MPa', unitGroup: 'stress', default: 10, min: 0, required: true, description: '取胶料与增强层的较小值，8~15 MPa' },
     { key: 'nu', label: '泊松比', symbol: 'ν', unit: '-', default: 0.49, min: 0, max: 0.5, required: true, description: '橡胶近似不可压，取 0.49' },
-    { key: 'zeta', label: '阻尼比', symbol: 'ζ', unit: '-', default: 0.1, min: 0, max: 1, required: true, description: '橡胶件 0.05~0.15，由隔振试验拟合' },
-    { key: 'p', label: '工作内压', symbol: 'p', unit: 'kPa', unitGroup: 'pressure', default: 100, min: 0, required: true, description: '增压机型更高，增压前 80~200 kPa，自然吸气接近常压' },
-    { key: 'pv', label: '最大真空度', symbol: 'pv', unit: 'kPa', unitGroup: 'pressure', default: 40, min: 0, required: true, description: '自然吸气机型 30~50 kPa；增压机型进气负压较小' },
-    { key: 'CL', label: '短管长度修正系数', symbol: 'CL', unit: '-', default: 2, min: 0, required: true, description: '真空塌陷公式的长度修正：长管取 1，短管 1~3' },
-    { key: 'M', label: '隔振侧质量', symbol: 'M', unit: 'kg', unitGroup: 'mass', default: 15, min: 0, required: true, description: '软管所隔离的部件质量（空滤总成 / 管路），用于固有频率' },
-    { key: 'fex', label: '激励频率', symbol: 'f_ex', unit: 'Hz', unitGroup: 'frequency', default: 100, min: 0, required: true, description: '发动机怠速/阶次频率，20~500 Hz；同时作为声辐射分析频率' },
-    { key: 'Q', label: '额定流量', symbol: 'Q', unit: 'm³/s', unitGroup: 'volumeFlow', default: 0.08, min: 0, required: true, description: '按发动机进气量，典型 0.03~0.20 m³/s' },
-    { key: 'muA', label: '空气动力粘度', symbol: 'μ', unit: 'Pa·s', unitGroup: 'dynamicViscosity', default: 1.81e-5, min: 0, required: true, description: '20℃ 空气约 1.81×10⁻⁵ Pa·s' },
-    { key: 'rho0', label: '空气密度', symbol: 'ρ0', unit: 'kg/m³', unitGroup: 'density', default: 1.2, min: 0, required: true, description: '20℃、1 atm 约 1.2 kg/m³' },
+    { key: 'zeta', label: '阻尼比', symbol: 'ζ', unit: '-', default: 0.08, min: 0, max: 1, required: true, description: '橡胶件 0.05~0.15，由隔振试验拟合' },
+    { key: 'HA', label: '邵氏硬度', symbol: 'HA', unit: '-', default: 65, min: 40, max: 90, required: false, description: '55~75（65±5），仅作材料选型记录，不参与计算' },
+    { key: 'Rreq', label: '隔振率要求', symbol: 'R_req', unit: 'dB', default: 12, min: 0, required: true, description: '目标值，≥10 dB' },
+    { key: 'LpReq', label: '声辐射要求（测点声压级）', symbol: 'Lp,req', unit: 'dB', default: 75, min: 0, required: true, description: '按法规/目标值，测点距离 r 处' },
+    { key: 'r', label: '声压测点距离', symbol: 'r', unit: 'mm', unitGroup: 'length', default: 1000, min: 0, required: true, description: '半消声室测点，0.5~2.0 m' },
+    { key: 'Fpull', label: '拔脱力要求', symbol: 'F_pull', unit: 'N', unitGroup: 'force', default: 500, min: 0, required: true, description: '接头试验要求，500~2000 N' },
+    { key: 'deltaAllow', label: '允许轴向伸长', symbol: 'Δ_allow', unit: 'mm', unitGroup: 'length', default: 5, min: 0, required: true, description: '按接头密封与布置取 3~8 mm' },
+    { key: 'pv', label: '最大真空度', symbol: 'pv', unit: 'kPa', unitGroup: 'pressure', default: 30, min: 0, required: true, description: '自然吸气 30~50 kPa' },
+    { key: 'p', label: '工作压力', symbol: 'p', unit: 'kPa', unitGroup: 'pressure', default: 100, min: 0, required: true, description: '按工况，增压机型更高' },
+    { key: 'pac', label: '管内声压幅值', symbol: 'p_ac', unit: 'Pa', unitGroup: 'pressure', default: 100, min: 0, required: true, description: '管内声压/压力脉动幅值，按谱确定；未知时建议先实测' },
+    { key: 'fex', label: '激励频率', symbol: 'f_ex', unit: 'Hz', unitGroup: 'frequency', default: 200, min: 0, required: true, description: '怠速/阶次频率，20~500 Hz；同时作为声辐射分析频率' },
+    { key: 'Cf', label: '刚度修正系数', symbol: 'C_f', unit: '-', default: 1, min: 0, required: true, description: '0.8~1.5，查 EJMA' },
+    { key: 'CL', label: '真空长度修正系数', symbol: 'C_L', unit: '-', default: 2, min: 0, required: true, description: '短管 1~3，长管取 1' },
+    { key: 'kb', label: '爆破安全系数', symbol: 'k_b', unit: '-', default: 4, min: 0, required: true, description: '取 3~5' },
+    { key: 'nv', label: '真空安全系数', symbol: 'n_v', unit: '-', default: 1.8, min: 0, required: true, description: '取 1.5~2' },
+    { key: 'Mjoint', label: '接头质量', symbol: 'M_j', unit: 'kg', unitGroup: 'mass', default: 0.4, min: 0, required: true, description: '软管两端接头（含卡箍）质量，计入总成质量 M' },
+    { key: 'rho0', label: '空气密度', symbol: 'ρ0', unit: 'kg/m³', unitGroup: 'density', default: 1.205, min: 0, required: true, description: '20℃、1 atm 约 1.205 kg/m³' },
     { key: 'c0', label: '空气声速', symbol: 'c0', unit: 'm/s', unitGroup: 'velocity', default: 343, min: 0, required: true, description: '20℃ 约 343 m/s' },
-    { key: 'sumK', label: '局部损失系数合计', symbol: 'ΣK', unit: '-', default: 1.5, min: 0, required: true, description: '弯头、变径、卡箍台阶累加，单个 0.2~1.0' },
-    { key: 'kf', label: '波纹粗糙修正系数', symbol: 'kf', unit: '-', default: 1.8, min: 1, max: 3, required: true, description: '波纹段摩擦系数取同 Re 直管的 1.5~2.5 倍；全直管取 1.0' },
-    { key: 'vmode', label: '壁面振速来源', symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '按质量律估算（p/(2πf·m″)）' }, { value: 2, label: '实测壁面法向振速' }], default: 1, required: true, description: '低频薄壁控制段可按式估算；有实测/FEA 数据时选实测' },
-    { key: 'pA', label: '管内压力脉动幅值', symbol: 'p′', unit: 'kPa', unitGroup: 'pressure', default: 1, min: 0, required: true, showIf: { key: 'vmode', max: 1 }, description: '压力脉动幅值（非静压），0.1~1 kPa 量级；用于质量律估算壁面振速' },
-    { key: 'vwall', label: '壁面法向振速（有效值）', symbol: 'v_w', unit: 'm/s', unitGroup: 'velocity', default: 0.15, min: 0, required: true, showIf: { key: 'vmode', min: 2 }, description: '实测或 FEA 得到的壁面法向振速有效值' },
-    { key: 'r', label: '声压测点距离', symbol: 'r', unit: 'mm', unitGroup: 'length', default: 1000, min: 0, required: true, description: '半消声室测点，0.5~2.0 m；r 远大于 L 时改用球面扩散' },
-    { key: 'b', label: '密封带宽度', symbol: 'b', unit: 'mm', unitGroup: 'length', default: 12, min: 0, required: true, description: '卡箍密封面宽度，8~15 mm' },
-    { key: 'pc', label: '接触压力', symbol: 'pc', unit: 'kPa', unitGroup: 'pressure', default: 800, min: 0, required: true, description: '卡箍接触压力 0.5~1.0 MPa（即 500~1000 kPa）' },
-    { key: 'muF', label: '摩擦系数', symbol: 'μf', unit: '-', default: 0.7, min: 0, max: 1, required: true, description: '橡胶-金属 0.6~0.8' },
   ],
   outputs: [
-    { key: 'A', label: '管壁截面积', symbol: 'A', unit: 'mm²', unitGroup: 'area', digits: 1, group: '几何与材料', description: 'A = π·D·t' },
-    { key: 'I', label: '截面惯性矩', symbol: 'I', unit: 'mm⁴', unitGroup: 'secondMomentOfArea', digits: 0, group: '几何与材料', description: 'I = π·D³·t/8（薄壁圆环近似）' },
-    { key: 'S', label: '内表面积', symbol: 'S', unit: 'm²', unitGroup: 'area', digits: 4, group: '几何与材料', description: 'S = π·D·L，用于辐射声功率' },
-    { key: 'mS', label: '管壁面密度', symbol: 'm″', unit: 'kg/m²', unitGroup: 'surfaceDensity', digits: 3, group: '几何与材料', description: 'm″ = ρ·t，质量定律与振速估算使用' },
-    { key: 'sigTheta', label: '环向应力', symbol: 'σθ', unit: 'MPa', unitGroup: 'stress', digits: 3, group: '耐压与爆破', description: 'σθ = p·D/(2t)，应满足 σθ ≤ σb/n（n = 2~3）' },
-    { key: 'sigZ', label: '轴向应力', symbol: 'σz', unit: 'MPa', unitGroup: 'stress', digits: 3, group: '耐压与爆破', description: 'σz = p·D/(4t) = σθ/2' },
-    { key: 'nAct', label: '实际安全系数', symbol: 'n', unit: '-', digits: 2, group: '耐压与爆破', primary: true, description: 'n = σb/σθ，设计要求 2~3' },
-    { key: 'pb', label: '爆破压力', symbol: 'pb', unit: 'kPa', unitGroup: 'pressure', digits: 1, group: '耐压与爆破', description: 'pb = 2tσb/D，取胶料与增强层强度的较小值' },
-    { key: 'pbRatio', label: '爆破裕度', symbol: 'pb/p', unit: '-', digits: 2, group: '耐压与爆破', description: '要求 pb ≥ (3~5)·p，并满足 SAE J20 爆破试验' },
-    { key: 'pcr', label: '临界外压（真空吸扁）', symbol: 'pcr', unit: 'kPa', unitGroup: 'pressure', digits: 1, group: '耐压与爆破', description: 'pcr = [2E/(1−ν²)]·(t/D)³·CL，橡胶 E 低，无增强层时仅十几 kPa' },
-    { key: 'pcrRatio', label: '真空裕度', symbol: 'pcr/pv', unit: '-', digits: 2, group: '耐压与爆破', description: '要求 pcr ≥ (1.5~2)·pv，不足时需增加增强层或波纹段' },
-    { key: 'kax', label: '轴向刚度', symbol: 'kax', unit: 'kN/m', unitGroup: 'stiffness', digits: 2, group: '刚度与隔振', description: 'kax = E·A/L，软管越软隔振越好，但越易吸扁' },
-    { key: 'kb', label: '弯曲刚度（简支）', symbol: 'kb', unit: 'kN/m', unitGroup: 'stiffness', digits: 2, group: '刚度与隔振', description: 'kb = 3·E·I/L³，两端固支时系数取 12' },
-    { key: 'fn', label: '固有频率', symbol: 'fn', unit: 'Hz', unitGroup: 'frequency', digits: 2, group: '刚度与隔振', description: 'fn = (1/2π)·√(kax/M)，应满足 fn ≤ fex/√2 才进入隔振区' },
-    { key: 'rFr', label: '频率比', symbol: 'r', unit: '-', digits: 2, group: '刚度与隔振', description: 'r = fex/fn' },
-    { key: 'Tr', label: '力传递率', symbol: 'Tr', unit: '-', digits: 4, group: '刚度与隔振', description: 'Tr = √{[1+(2ζr)²]/[(1−r²)²+(2ζr)²]}' },
-    { key: 'R', label: '隔振率', symbol: 'R', unit: 'dB', digits: 1, group: '刚度与隔振', primary: true, description: 'R = −20·lg(Tr)，目标 ≥10 dB' },
-    { key: 'vel', label: '平均流速', symbol: 'v', unit: 'm/s', unitGroup: 'velocity', digits: 3, group: '流动压降', description: 'v = Q/(πD²/4)，设计窗口 20~60 m/s，避免高速气流再生噪声' },
-    { key: 'Re', label: '雷诺数', symbol: 'Re', unit: '-', digits: 0, group: '流动压降', description: 'Re = ρ0·v·D/μ，<2300 按层流' },
-    { key: 'fD', label: '直管摩擦系数', symbol: 'f', unit: '-', digits: 4, group: '流动压降', description: '层流 64/Re，湍流 0.3164/Re^0.25' },
-    { key: 'dp', label: '软管压降', symbol: 'Δp', unit: 'kPa', unitGroup: 'pressure', digits: 3, group: '流动压降', primary: true, description: 'Δp = (kf·f·L/D + ΣK)·ρ0·v²/2，目标 ≤3~5 kPa' },
-    { key: 'cL', label: '管壁纵波速', symbol: 'cL', unit: 'm/s', unitGroup: 'velocity', digits: 2, group: '管壁声辐射', description: 'cL = √{E/[ρ(1−ν²)]}，橡胶远低于金属' },
-    { key: 'fr', label: '环频率', symbol: 'fr', unit: 'Hz', unitGroup: 'frequency', digits: 1, group: '管壁声辐射', description: 'fr = cL/(π·D)，管壁呼吸模态频率' },
-    { key: 'sigRad', label: '辐射效率', symbol: 'σrad', unit: '-', digits: 5, group: '管壁声辐射', description: 'f < fr 按 (2/π)(ka)²/√{1−(f/fr)²}；f ≥ fr 按 1/√{1−(fr/f)²}，工程限幅 ≤1' },
-    { key: 'vWall', label: '壁面振速（有效值）', symbol: 'vw', unit: 'm/s', unitGroup: 'velocity', digits: 4, group: '管壁声辐射', description: '质量律幅值 p′/(2πf·m″) 折有效值；或直接取实测值' },
-    { key: 'W', label: '辐射声功率', symbol: 'W', unit: 'W', digits: 6, group: '管壁声辐射', description: 'W = ρ0·c0·S·σrad·⟨v²⟩' },
-    { key: 'LW', label: '声功率级', symbol: 'LW', unit: 'dB', digits: 1, group: '管壁声辐射', description: 'LW = 10·lg(W/10⁻¹²)' },
-    { key: 'Lp', label: '测点声压级', symbol: 'Lp', unit: 'dB', digits: 1, group: '管壁声辐射', description: 'Lp(r) = LW − 10·lg(2π·r·L)，线声源近似；r ≫ L 时改球面扩散' },
-    { key: 'Fc', label: '卡箍夹紧力', symbol: 'Fc', unit: 'N', unitGroup: 'force', digits: 0, group: '卡箍连接', description: 'Fc = π·D·b·pc/μf，压缩率建议 20%~35%' },
+    { key: 't', label: '壁厚（反算）', symbol: 't', unit: 'mm', unitGroup: 'length', digits: 2, group: '反算结果', primary: true, description: 't = max(tb, tv, tr)，向上圆整至 0.5 mm（式10）' },
+    { key: 'N', label: '波数（反算）', symbol: 'N', unit: '-', digits: 0, group: '反算结果', primary: true, description: '取 ⌈Nmin⌉ 并经阻尼校核递增，不超过 Nmax（式17）' },
+    { key: 'L', label: '软管长度（反算）', symbol: 'L', unit: 'mm', unitGroup: 'length', digits: 1, group: '反算结果', primary: true, description: 'L = N·w（式18）' },
+    { key: 'tb', label: '爆破约束壁厚', symbol: 'tb', unit: 'mm', unitGroup: 'length', digits: 3, group: '壁厚约束', description: 'tb = kb·p·D/(2σb)（式5）' },
+    { key: 'tv', label: '真空塌陷约束壁厚', symbol: 'tv', unit: 'mm', unitGroup: 'length', digits: 3, group: '壁厚约束', description: 'tv = D·[nv·pv·(1−ν²)/(2E·CL)]^{1/3}（式6），橡胶 E 低时常为控制项' },
+    { key: 'tr', label: '声辐射约束壁厚', symbol: 'tr', unit: 'mm', unitGroup: 'length', digits: 3, group: '壁厚约束', description: 'tr = pac/(2π·fex·ρ·vallow)（式9），由质量律反解' },
+    { key: 'vallow', label: '允许壁面振速', symbol: 'v_allow', unit: 'm/s', unitGroup: 'velocity', digits: 4, group: '壁厚约束', description: 'vallow = √[Wreq/(ρ0·c0·S·σrad)]（式8）' },
+    { key: 'Dm', label: '平均直径', symbol: 'D_m', unit: 'mm', unitGroup: 'length', digits: 2, group: '几何与刚度', description: 'Dm = D + h + n·t（式1）' },
+    { key: 'tp', label: '单层等效厚度', symbol: 't_p', unit: 'mm', unitGroup: 'length', digits: 3, group: '几何与刚度', description: 'tp = t·(D/Dm)^{1/2}（式2）' },
+    { key: 'weff', label: '有效波高', symbol: 'w_eff', unit: 'mm', unitGroup: 'length', digits: 3, group: '几何与刚度', description: 'weff = h − n·t（式3），须 > 0' },
+    { key: 'K', label: '单波刚度', symbol: 'K', unit: 'kN/m', unitGroup: 'stiffness', digits: 2, group: '几何与刚度', description: 'K = 1.7·Dm·E·tp³·n/(weff³·Cf)（式11，EJMA 经验式）' },
+    { key: 'Ker', label: '整体轴向刚度', symbol: 'K_er', unit: 'kN/m', unitGroup: 'stiffness', digits: 2, group: '几何与刚度', description: 'Ker = K/N（式12）' },
+    { key: 'M', label: '总成质量', symbol: 'M', unit: 'kg', unitGroup: 'mass', digits: 3, group: '几何与刚度', description: 'M = ρ·π·D·t·L + M接头（式19）' },
+    { key: 'Tt', label: '目标传递率', symbol: 'T_t', unit: '-', digits: 4, group: '波数区间', description: 'Tt = 10^(−Rreq/20)（式13）' },
+    { key: 'fnMax', label: '允许最高固有频率', symbol: 'f_n,max', unit: 'Hz', unitGroup: 'frequency', digits: 2, group: '波数区间', description: 'fn,max = fex/√(1+1/Tt)（式14，无阻尼近似反解）' },
+    { key: 'Nmin', label: '波数下限（隔振）', symbol: 'N_min', unit: '-', digits: 2, group: '波数区间', description: 'Nmin = K/[M·(2π·fn,max)²]（式15）；M 随 N 变化，按二次方程求解' },
+    { key: 'Nmax', label: '波数上限（拔脱）', symbol: 'N_max', unit: '-', digits: 2, group: '波数区间', description: 'Nmax = K·Δallow/Fpull（式16）' },
+    { key: 'Ngap', label: '可行区间宽度', symbol: 'N_max−N_min', unit: '-', digits: 2, group: '波数区间', description: '≥0 可行；<0 说明材料/结构无法同时满足隔振与拔脱，需调整' },
+    { key: 'fn', label: '实际固有频率', symbol: 'f_n', unit: 'Hz', unitGroup: 'frequency', digits: 2, group: '校核·隔振', description: 'fn = (1/2π)·√(Ker/M)（式20）' },
+    { key: 'ratio', label: '频率比', symbol: 'r', unit: '-', digits: 2, group: '校核·隔振', description: 'r = fex/fn，>√2 进入隔振区' },
+    { key: 'Tr', label: '实际传递率', symbol: 'T_r', unit: '-', digits: 4, group: '校核·隔振', description: 'Tr = √{[1+(2ζr)²]/[(1−r²)²+(2ζr)²]}（式21）' },
+    { key: 'R', label: '实际隔振率', symbol: 'R', unit: 'dB', digits: 1, group: '校核·隔振', primary: true, description: 'R = −20·lg(Tr)，应 ≥ Rreq' },
+    { key: 'Rmargin', label: '隔振余量', symbol: 'R−R_req', unit: 'dB', digits: 1, group: '校核·隔振', description: '≥0 合格；为负时已被自动递增 N 修正，仍为负说明达到 Nmax 上限' },
+    { key: 'cL', label: '管壁纵波速', symbol: 'c_L', unit: 'm/s', unitGroup: 'velocity', digits: 2, group: '校核·声辐射', description: 'cL = √{E/[ρ(1−ν²)]}' },
+    { key: 'fr', label: '环频率', symbol: 'f_r', unit: 'Hz', unitGroup: 'frequency', digits: 1, group: '校核·声辐射', description: 'fr = cL/(π·D)' },
+    { key: 'sigRad', label: '辐射效率', symbol: 'σ_rad', unit: '-', digits: 5, group: '校核·声辐射', description: 'f<fr 与 f≥fr 双分支（式22），f→fr 发散，工程限幅 [0,1]' },
+    { key: 'vWall', label: '壁面振速', symbol: 'v_w', unit: 'm/s', unitGroup: 'velocity', digits: 4, group: '校核·声辐射', description: 'v = pac/(2π·fex·ρ·t)（质量律，由最终壁厚回代）' },
+    { key: 'S', label: '辐射表面积', symbol: 'S', unit: 'm²', unitGroup: 'area', digits: 4, group: '校核·声辐射', description: 'S = π·D·L' },
+    { key: 'W', label: '辐射声功率', symbol: 'W', unit: 'W', digits: 6, group: '校核·声辐射', description: 'W = ρ0·c0·S·σrad·v²（式23）' },
+    { key: 'LW', label: '声功率级', symbol: 'L_W', unit: 'dB', digits: 1, group: '校核·声辐射', description: 'LW = 10·lg(W/10⁻¹²)' },
+    { key: 'Lp', label: '测点声压级', symbol: 'L_p', unit: 'dB', digits: 1, group: '校核·声辐射', primary: true, description: 'Lp = LW − 10·lg(2π·r·L)，应 ≤ Lp,req' },
+    { key: 'LpMargin', label: '声辐射余量', symbol: 'Lp,req−Lp', unit: 'dB', digits: 1, group: '校核·声辐射', description: '≥0 合格；为负时需增大壁厚或降低管内声压' },
+    { key: 'F', label: '实际拔脱承载', symbol: 'F', unit: 'N', unitGroup: 'force', digits: 0, group: '校核·强度与连接', description: 'F = Ker·Δallow（式24），应 ≥ Fpull；最终仍须拔脱试验验证' },
+    { key: 'Fratio', label: '拔脱裕度', symbol: 'F/F_pull', unit: '-', digits: 2, group: '校核·强度与连接', description: '≥1 合格' },
+    { key: 'pcr', label: '真空失稳临界压力', symbol: 'p_cr', unit: 'kPa', unitGroup: 'pressure', digits: 1, group: '校核·强度与连接', description: 'pcr = [2E/(1−ν²)]·(t/D)³·CL，应 ≥ nv·pv（式25）' },
+    { key: 'pcrRatio', label: '真空裕度', symbol: 'pcr/(n_v·p_v)', unit: '-', digits: 2, group: '校核·强度与连接', description: '≥1 合格' },
+    { key: 'pb', label: '爆破压力', symbol: 'p_b', unit: 'kPa', unitGroup: 'pressure', digits: 1, group: '校核·强度与连接', description: 'pb = 2tσb/D，应 ≥ kb·p（式25）' },
+    { key: 'pbRatio', label: '爆破裕度', symbol: 'pb/(k_b·p)', unit: '-', digits: 2, group: '校核·强度与连接', description: '≥1 合格' },
   ],
   latex: [
     {
-      label: '几何与材料',
-      tex: "A = \\pi D t,\\qquad I = \\frac{\\pi D^{3} t}{8},\\qquad S = \\pi D L,\\qquad m'' = \\rho t",
+      label: '几何关系（式1~4）',
+      tex: '\\star\\ D_m = D + h + n t,\\quad t_p = t\\sqrt{D/D_m},\\quad w_{eff} = h - n t,\\quad A_w = \\pi D t,\\quad I_w = \\frac{\\pi D^{3} t}{8}',
     },
     {
-      label: '内压应力与安全系数',
-      tex: '\\sigma_\\theta = \\frac{p D}{2 t},\\qquad \\sigma_z = \\frac{p D}{4 t},\\qquad n = \\frac{\\sigma_b}{\\sigma_\\theta}',
+      label: '爆破约束壁厚（式5）',
+      tex: '\\star\\ t_b = \\frac{k_b\\, p\\, D}{2 \\sigma_b}',
     },
     {
-      label: '爆破压力',
-      tex: 'p_b = \\frac{2 t \\sigma_b}{D}',
+      label: '真空塌陷约束壁厚（式6）',
+      tex: '\\star\\ t_v = D \\left[ \\frac{n_v\\, p_v\\, (1 - \\nu^{2})}{2\\, E\\, C_L} \\right]^{1/3}',
     },
     {
-      label: '真空塌陷临界外压',
-      tex: 'p_{cr} = \\frac{2 E}{1 - \\nu^{2}} \\left(\\frac{t}{D}\\right)^{3} C_L',
+      label: '声辐射约束壁厚（式7~9）',
+      tex: '\\star\\ L_{W,req} = L_{p,req} + 10\\lg(2\\pi r L),\\quad v_{allow} = \\sqrt{\\frac{10^{(L_{W,req}-120)/10}}{\\rho_0 c_0 S\\, \\sigma_{rad}}},\\quad t_r = \\frac{p_{ac}}{2\\pi f_{ex}\\, \\rho\\, v_{allow}}',
     },
     {
-      label: '轴向与弯曲刚度',
-      tex: 'k_{ax} = \\frac{E A}{L},\\qquad k_b = \\frac{3 E I}{L^{3}}',
+      label: '壁厚取值（式10）',
+      tex: '\\star\\ t = \\max(t_b,\\, t_v,\\, t_r),\\quad \\text{向上圆整至}\\ 0.5\\ \\mathrm{mm}',
     },
     {
-      label: '固有频率、传递率与隔振率',
-      tex: 'f_n = \\frac{1}{2\\pi}\\sqrt{\\frac{k_{ax}}{M}},\\qquad r = \\frac{f_{ex}}{f_n},\\qquad T_r = \\sqrt{\\frac{1+(2\\zeta r)^{2}}{(1-r^{2})^{2}+(2\\zeta r)^{2}}},\\qquad R = -20\\lg T_r',
+      label: '单波刚度与整体刚度（式11~12）',
+      tex: '\\star\\ K = \\frac{1.7\\, D_m\\, E\\, t_p^{3}\\, n}{w_{eff}^{3}\\, C_f},\\qquad K_{er} = \\frac{K}{N}',
     },
     {
-      label: '流动压降',
-      tex: 'Re = \\frac{\\rho_0 v D}{\\mu},\\quad f = \\frac{64}{Re}\\ \\text{或}\\ \\frac{0.3164}{Re^{0.25}},\\quad \\Delta p = \\left(k_f f \\frac{L}{D} + \\sum K\\right)\\frac{\\rho_0 v^{2}}{2}',
+      label: '隔振给出的波数下限（式13~15）',
+      tex: '\\star\\ T_t = 10^{-R_{req}/20},\\quad f_{n,max} = \\frac{f_{ex}}{\\sqrt{1 + 1/T_t}},\\quad N_{min} = \\frac{K}{M\\, (2\\pi f_{n,max})^{2}}',
     },
     {
-      label: '管壁纵波速、环频率与波数',
-      tex: 'c_L = \\sqrt{\\frac{E}{\\rho(1-\\nu^{2})}},\\qquad f_r = \\frac{c_L}{\\pi D},\\qquad ka = \\frac{2\\pi f a}{c_0}\\ \\ (a = D/2)',
+      label: '拔脱力给出的波数上限（式16~17）',
+      tex: '\\star\\ N_{max} = \\frac{K\\, \\Delta_{allow}}{F_{pull}},\\qquad N_{min} \\le N \\le N_{max}',
     },
     {
-      label: '圆柱壳辐射效率（低于 / 高于环频率）',
-      tex: '\\sigma_{rad} = \\frac{2}{\\pi}\\frac{(ka)^{2}}{\\sqrt{1-(f/f_r)^{2}}}\\ (f < f_r),\\qquad \\sigma_{rad} = \\frac{1}{\\sqrt{1-(f_r/f)^{2}}}\\ (f \\ge f_r)',
+      label: '长度与质量（式18~19）',
+      tex: '\\star\\ L = N\\, w,\\qquad M = \\rho\\, \\pi D t\\, L + M_{joint}',
     },
     {
-      label: '辐射声功率与声压级',
-      tex: 'W = \\rho_0 c_0 S \\,\\sigma_{rad}\\langle v^{2}\\rangle,\\qquad L_W = 10\\lg\\frac{W}{10^{-12}},\\qquad L_p(r) = L_W - 10\\lg(2\\pi r L)',
+      label: '校核：固有频率、传递率与隔振率（式20~21）',
+      tex: '\\star\\ f_n = \\frac{1}{2\\pi}\\sqrt{\\frac{K_{er}}{M}},\\quad r = \\frac{f_{ex}}{f_n},\\quad T_r = \\sqrt{\\frac{1+(2\\zeta r)^{2}}{(1-r^{2})^{2}+(2\\zeta r)^{2}}},\\quad R = -20\\lg T_r \\ge R_{req}',
     },
     {
-      label: '壁面法向振速（质量律估算）',
-      tex: "|v| \\approx \\frac{p'}{2\\pi f m''},\\qquad m'' = \\rho t",
+      label: '校核：辐射效率（式22）',
+      tex: '\\star\\ \\sigma_{rad} = \\frac{2}{\\pi}\\frac{(ka)^{2}}{\\sqrt{1-(f/f_r)^{2}}}\\ (f < f_r),\\qquad \\sigma_{rad} = \\frac{1}{\\sqrt{1-(f_r/f)^{2}}}\\ (f \\ge f_r)',
     },
     {
-      label: '卡箍夹紧力',
-      tex: 'F_c = \\frac{\\pi D b p_c}{\\mu_f}',
+      label: '校核：辐射声功率与测点声压级（式23）',
+      tex: '\\star\\ L_W = 10\\lg\\frac{\\rho_0 c_0 S\\, \\sigma_{rad}\\, v^{2}}{10^{-12}},\\qquad L_p = L_W - 10\\lg(2\\pi r L) \\le L_{p,req}',
+    },
+    {
+      label: '校核：拔脱、真空与爆破（式24~25）',
+      tex: '\\star\\ F = K_{er}\\, \\Delta_{allow} \\ge F_{pull},\\qquad p_{cr} \\ge n_v\\, p_v,\\qquad p_b = \\frac{2 t \\sigma_b}{D} \\ge k_b\\, p',
     },
   ],
   diagram: INTAKE_HOSE_DIAGRAM,
   sensitivity: true,
   assumptions: [
-    '公式与参考文档《乘用车橡胶进气软管设计计算公式与输入参数（管壁辐射版）》一致，对应其式 (1)~(25)，依据 SAE J20 / SAE J200、GB/T 3683、ISO 6803 与 Munjal 管道声学',
-    '薄壁圆环近似：A = πDt、I = πD³t/8 要求 t/D 较小（本设计窗口 t/D ≈ 0.05~0.15），D 为内径；橡胶近似不可压取 ν = 0.49',
-    'σb 取胶料与增强层的较小值；无增强层时爆破压力与真空临界外压都很低，实际软管须靠增强层或波纹结构抗吸扁（本公式按输入 σb、E 计算，不含增强层角度/层数的折减）',
-    '隔振分析把软管简化为一端固定、另一端质量 M 的单自由度系统，kax 取轴向刚度；带波纹段时整体刚度应按直段与波纹段串联（波纹段刚度见 EJMA 波纹管公式）后再代入',
-    '压降用 Darcy-Weisbach，波纹段以 kf 放大同 Re 直管摩擦系数；ΣK 为全部局部损失之和，不含气流再生噪声',
-    '管壁声辐射只考虑壁面受激振动向外辐射，不含膨胀腔、谐振腔等管内消声元件；若总成带谐振腔，消声量按管道声学传递矩阵另行计算',
-    '辐射效率在 f → fr 附近公式发散，本实现将 σrad 限幅到 [0, 1]（工程近似）；橡胶阻尼大，实际辐射效率低于同尺寸金属管，精确值须实测或 FEA 修正',
-    '壁面振速按质量律估算时，p′/(2πf·m″) 视为幅值并折为有效值（÷√2）；选「实测」时输入值本身即为有效值，质量律不适用于接近环频率的模态区',
-    'Lp(r) 按线声源近似 −10lg(2πrL)；r 远大于管长 L 时应改用球面扩散 −10lg(4πr²)，本公式未自动切换',
-    '卡箍压缩率 20%~35% 为结构建议，本公式只输出所需夹紧力，泄漏与切伤须按 GB/T 3683 与样件验证',
+    '公式与参考文档《乘用车橡胶进气软管几何参数反算设计》一致，对应其式 (1)~(25)，依据 SAE J20、GB/T 3683、EJMA 波纹管经验式与 Bies《Engineering Noise Control》',
+    '反算流程：t = max(tb, tv, tr) 并向上圆整至 0.5 mm；N 取隔振下限的向上取整且不超过拔脱上限 Nmax；若 Nmin > Nmax，材料/结构无法同时满足，「可行区间宽度」输出为负，需降低硬度/壁厚、增加增强层或放宽隔振率',
+    'Nmin 与总成质量 M 互相耦合（N → L → M → K_er,max → Nmin，文档要求迭代 2~3 轮）；本实现把式(15)~(19) 联立为关于 N 的二次方程 aN²+bN−K=0 直接求正根，与迭代收敛结果一致',
+    '式(14) 由无阻尼近似 Tr ≈ 1/(r²−1) 反解 fn,max；阻尼使实际传递率略偏高，本实现按文档设计流程⑥在 N ≤ ⌊Nmax⌋ 内自动递增 N 直至 R ≥ Rreq，仍不满足时隔振余量为负',
+    '声辐射约束壁厚由质量控制段质量律 v = p/(2πfρt) 反解；pac 为管内声压（压力脉动）幅值；若辐射由结构振动主导，应改用实测壁面振速/加速度直接校核而不必反算 t（见文档 3.3 节）',
+    '辐射效率在 f → fr 附近公式发散，本实现将 σrad 限幅到 [0, 1]（工程近似）；橡胶阻尼大，实际辐射低于同尺寸金属管，精确值须实测或 FEA 修正',
+    'K 为单波刚度（EJMA 经验式，Cf 取 0.8~1.5）；带直段时整体刚度应按波纹段与直段串联加权，本实现按整段波纹等效',
+    '橡胶 E 随硬度、温度、应变幅变化，建议用 20~80 ℃ 实测 E 区间做包络设计；HA 仅作材料选型记录，不参与计算',
+    '拔脱力本质是接头/卡箍能力，式(16) 只给出软管轴向刚度下限，最终仍需做拔脱试验；反算结果须用正算模型复核并留 10%~20% 设计余量（本模块校核组已给出 R、Lp、F、pcr、pb 余量）',
   ],
   solve(v) {
-    const empty = {
-      A: NaN, I: NaN, S: NaN, mS: NaN,
-      sigTheta: NaN, sigZ: NaN, nAct: NaN, pb: NaN, pbRatio: NaN, pcr: NaN, pcrRatio: NaN,
-      kax: NaN, kb: NaN, fn: NaN, rFr: NaN, Tr: NaN, R: NaN,
-      vel: NaN, Re: NaN, fD: NaN, dp: NaN,
-      cL: NaN, fr: NaN, sigRad: NaN, vWall: NaN, W: NaN, LW: NaN, Lp: NaN,
-      Fc: NaN,
+    const empty: Record<string, number> = {
+      t: NaN, N: NaN, L: NaN,
+      tb: NaN, tv: NaN, tr: NaN, vallow: NaN,
+      Dm: NaN, tp: NaN, weff: NaN, K: NaN, Ker: NaN, M: NaN,
+      Tt: NaN, fnMax: NaN, Nmin: NaN, Nmax: NaN, Ngap: NaN,
+      fn: NaN, ratio: NaN, Tr: NaN, R: NaN, Rmargin: NaN,
+      cL: NaN, fr: NaN, sigRad: NaN, vWall: NaN, S: NaN, W: NaN, LW: NaN, Lp: NaN, LpMargin: NaN,
+      F: NaN, Fratio: NaN, pcr: NaN, pcrRatio: NaN, pb: NaN, pbRatio: NaN,
     };
-    const measured = v.vmode === 2;
     const ok =
-      v.D > 0 && v.t > 0 && v.L > 0 && v.E > 0 && v.sigmaB > 0 && v.rho > 0 &&
-      v.nu > 0 && v.nu < 0.5 && v.zeta > 0 && v.p > 0 && v.pv > 0 && v.CL > 0 &&
-      v.M > 0 && v.fex > 0 && v.Q > 0 && v.muA > 0 && v.rho0 > 0 && v.c0 > 0 &&
-      v.sumK >= 0 && v.kf > 0 && v.r > 0 && v.b > 0 && v.pc > 0 && v.muF > 0 &&
-      (measured ? v.vwall > 0 : v.pA > 0);
+      v.D > 0 && v.w > 0 && v.h > 0 && v.n >= 1 && v.E > 0 && v.rho > 0 && v.sigmaB > 0 &&
+      v.nu > 0 && v.nu < 0.5 && v.zeta > 0 && v.Rreq > 0 && v.r > 0 && v.Fpull > 0 &&
+      v.deltaAllow > 0 && v.pv > 0 && v.p > 0 && v.pac > 0 && v.fex > 0 && v.Cf > 0 &&
+      v.CL > 0 && v.kb > 0 && v.nv > 0 && v.Mjoint >= 0 && v.rho0 > 0 && v.c0 > 0;
     if (!ok) return empty;
 
-    // 几何与材料
-    const A = Math.PI * v.D * v.t;
-    const I = (Math.PI * Math.pow(v.D, 3) * v.t) / 8;
-    const S = Math.PI * v.D * v.L;
-    const mS = v.rho * v.t;
-
-    // 耐压与爆破
-    const sigTheta = (v.p * v.D) / (2 * v.t);
-    const sigZ = (v.p * v.D) / (4 * v.t);
-    const nAct = v.sigmaB / sigTheta;
-    const pb = (2 * v.t * v.sigmaB) / v.D;
-    const pbRatio = pb / v.p;
-    const pcr = ((2 * v.E) / (1 - v.nu * v.nu)) * Math.pow(v.t / v.D, 3) * v.CL;
-    const pcrRatio = pcr / v.pv;
-
-    // 刚度与隔振
-    const kax = (v.E * A) / v.L;
-    const kb = (3 * v.E * I) / Math.pow(v.L, 3);
-    const fn = Math.sqrt(kax / v.M) / (2 * Math.PI);
-    const rFr = v.fex / fn;
-    const twoZR = 2 * v.zeta * rFr;
-    const Tr = Math.sqrt((1 + twoZR * twoZR) / (Math.pow(1 - rFr * rFr, 2) + twoZR * twoZR));
-    const R = -20 * Math.log10(Tr);
-
-    // 流动压降
-    const Ac = (Math.PI * v.D * v.D) / 4;
-    const vel = v.Q / Ac;
-    const Re = (v.rho0 * vel * v.D) / v.muA;
-    const fD = Re < 2300 ? 64 / Re : 0.3164 / Math.pow(Re, 0.25);
-    const dp = ((v.kf * fD * v.L) / v.D + v.sumK) * v.rho0 * vel * vel / 2;
-
-    // 管壁声辐射
+    // 辐射效率（与 t、N 无关，只算一次）
     const cL = Math.sqrt(v.E / (v.rho * (1 - v.nu * v.nu)));
     const fr = cL / (Math.PI * v.D);
     const ka = (2 * Math.PI * v.fex * (v.D / 2)) / v.c0;
@@ -211,110 +188,171 @@ export const intakeHose: FormulaSpec = {
     // f → fr 附近公式发散，工程限幅到 [0, 1]
     sigRad = Math.min(1, Math.max(0, sigRad));
 
-    // vmode = 1：质量律幅值 p′/(2πf·m″)，折为有效值；vmode = 2：直接取实测有效值
-    const vWall = measured ? v.vwall : v.pA / (2 * Math.PI * v.fex * mS) / Math.sqrt(2);
+    // 壁厚前两项约束（与 L 无关，式5~6）
+    const tb = (v.kb * v.p * v.D) / (2 * v.sigmaB);
+    const tv = v.D * Math.cbrt((v.nv * v.pv * (1 - v.nu * v.nu)) / (2 * v.E * v.CL));
+
+    // 隔振目标（式13~14）
+    const Tt = Math.pow(10, -v.Rreq / 20);
+    const fnMax = v.fex / Math.sqrt(1 + 1 / Tt);
+    const w2 = Math.pow(2 * Math.PI * fnMax, 2);
+
+    /** 向上圆整至 0.5 mm（式10） */
+    const round05 = (x: number) => Math.ceil(x / 5e-4) * 5e-4;
+
+    // 迭代：t → K → N → L → tr → t（tr 依赖 L，L 依赖 N；文档流程②~⑤要求迭代收敛）
+    let t = round05(Math.max(tb, tv));
+    let N = 1;
+    let L = v.w;
+    let tr = 0;
+    let vallow = 0;
+    let Dm = NaN;
+    let tp = NaN;
+    let weff = NaN;
+    let K = NaN;
+    let Nmin = NaN;
+    let Nmax = NaN;
+    for (let it = 0; it < 20; it++) {
+      // 声辐射约束（式7~9，依赖当前 L）
+      const LWreq = v.LpReq + 10 * Math.log10(2 * Math.PI * v.r * L);
+      const Wreq = Math.pow(10, (LWreq - 120) / 10);
+      const Sc = Math.PI * v.D * L;
+      vallow = Math.sqrt(Wreq / (v.rho0 * v.c0 * Sc * sigRad));
+      tr = v.pac / (2 * Math.PI * v.fex * v.rho * vallow);
+      const tNew = round05(Math.max(tb, tv, tr));
+
+      // 几何与单波刚度（式1~3、11）
+      Dm = v.D + v.h + v.n * tNew;
+      tp = tNew * Math.sqrt(v.D / Dm);
+      weff = v.h - v.n * tNew;
+      if (weff <= 0) return empty; // 波高不足以容纳 n·t
+      K = (1.7 * Dm * v.E * Math.pow(tp, 3) * v.n) / (Math.pow(weff, 3) * v.Cf);
+
+      // 波数下限（式15）：Nmin·(ρπD·t·w·Nmin + M_j)·ω² = K 的正根（联立式18~19）
+      const aq = v.rho * Math.PI * v.D * tNew * v.w * w2;
+      const bq = v.Mjoint * w2;
+      Nmin = (-bq + Math.sqrt(bq * bq + 4 * aq * K)) / (2 * aq);
+      // 波数上限（式16）
+      Nmax = (K * v.deltaAllow) / v.Fpull;
+
+      // 取 N = ⌈Nmin⌉，并按流程⑥在 N ≤ ⌊Nmax⌋ 内递增至 R ≥ Rreq
+      const Ncap = Math.max(1, Math.floor(Nmax));
+      let Nnew = Math.min(Math.max(1, Math.ceil(Nmin)), Ncap);
+      for (;;) {
+        const Lc = Nnew * v.w;
+        const Mc = v.rho * Math.PI * v.D * tNew * Lc + v.Mjoint;
+        const KerC = K / Nnew;
+        const fnC = Math.sqrt(KerC / Mc) / (2 * Math.PI);
+        const rC = v.fex / fnC;
+        const z2 = 2 * v.zeta * rC;
+        const TrC = Math.sqrt((1 + z2 * z2) / (Math.pow(1 - rC * rC, 2) + z2 * z2));
+        const RC = -20 * Math.log10(TrC);
+        if (RC >= v.Rreq || Nnew >= Ncap) break;
+        Nnew++;
+      }
+
+      const Lnew = Nnew * v.w;
+      if (tNew === t && Nnew === N) break;
+      t = tNew;
+      N = Nnew;
+      L = Lnew;
+    }
+
+    // 正算复核（式18~25）
+    const S = Math.PI * v.D * L;
+    const M = v.rho * Math.PI * v.D * t * L + v.Mjoint;
+    const Ker = K / N;
+    const fn = Math.sqrt(Ker / M) / (2 * Math.PI);
+    const ratio = v.fex / fn;
+    const z2 = 2 * v.zeta * ratio;
+    const Tr = Math.sqrt((1 + z2 * z2) / (Math.pow(1 - ratio * ratio, 2) + z2 * z2));
+    const R = -20 * Math.log10(Tr);
+    const Rmargin = R - v.Rreq;
+
+    const vWall = v.pac / (2 * Math.PI * v.fex * v.rho * t);
     const W = v.rho0 * v.c0 * S * sigRad * vWall * vWall;
     const LW = 10 * Math.log10(W / 1e-12);
-    const Lp = LW - 10 * Math.log10(2 * Math.PI * v.r * v.L);
+    const Lp = LW - 10 * Math.log10(2 * Math.PI * v.r * L);
+    const LpMargin = v.LpReq - Lp;
 
-    // 卡箍连接
-    const Fc = (Math.PI * v.D * v.b * v.pc) / v.muF;
+    const F = Ker * v.deltaAllow;
+    const Fratio = F / v.Fpull;
+    const pcr = ((2 * v.E) / (1 - v.nu * v.nu)) * Math.pow(t / v.D, 3) * v.CL;
+    const pcrRatio = pcr / (v.nv * v.pv);
+    const pb = (2 * t * v.sigmaB) / v.D;
+    const pbRatio = pb / (v.kb * v.p);
+    const Ngap = Nmax - Nmin;
 
     return {
-      A, I, S, mS,
-      sigTheta, sigZ, nAct, pb, pbRatio, pcr, pcrRatio,
-      kax, kb, fn, rFr, Tr, R,
-      vel, Re, fD, dp,
-      cL, fr, sigRad, vWall, W, LW, Lp,
-      Fc,
+      t, N, L,
+      tb, tv, tr, vallow,
+      Dm, tp, weff, K, Ker, M,
+      Tt, fnMax, Nmin, Nmax, Ngap,
+      fn, ratio, Tr, R, Rmargin,
+      cL, fr, sigRad, vWall, S, W, LW, Lp, LpMargin,
+      F, Fratio, pcr, pcrRatio, pb, pbRatio,
     };
   },
   benchmarks: [
     {
-      name: '全链校核算例：D50 / t6 / L300，增压前 100 kPa，激励 100 Hz（低于环频率）',
+      name: '反算算例：D50 / w12 / h20 / 2 层，Rreq 12 dB，自然吸气真空 30 kPa（真空塌陷约束控制）',
       input: {
-        D: 0.05, t: 0.006, L: 0.3, E: 8e6, sigmaB: 10e6, rho: 1200, nu: 0.49, zeta: 0.1,
-        p: 1e5, pv: 4e4, CL: 2, M: 15, fex: 100, Q: 0.08,
-        muA: 1.81e-5, rho0: 1.2, c0: 343, sumK: 1.5, kf: 1.8,
-        vmode: 1, pA: 1000, vwall: 0.15,
-        r: 1.0, b: 0.012, pc: 8e5, muF: 0.7,
+        D: 0.05, w: 0.012, h: 0.02, n: 2,
+        E: 6e6, rho: 1200, sigmaB: 10e6, nu: 0.49, zeta: 0.08, HA: 65,
+        Rreq: 12, LpReq: 75, r: 1.0, Fpull: 500, deltaAllow: 0.005,
+        pv: 3e4, p: 1e5, pac: 100, fex: 200,
+        Cf: 1, CL: 2, kb: 4, nv: 1.8,
+        Mjoint: 0.4, rho0: 1.205, c0: 343,
       },
       expect: {
-        A: 0.0009424777960769379,
-        I: 2.9452431127404315e-7,
-        S: 0.047123889803846894,
-        mS: 7.2,
-        sigTheta: 416666.6666666667,
-        sigZ: 208333.33333333334,
-        nAct: 24,
-        pb: 2400000,
-        pbRatio: 24,
-        pcr: 72767.46940386892,
-        pcrRatio: 1.819186735096723,
-        kax: 25132.741228718347,
-        kb: 261.7993877991495,
-        fn: 6.5147001587056,
-        rFr: 15.349900619197324,
-        Tr: 0.013760436814505233,
-        R: 37.227355590733744,
-        vel: 40.7436654315252,
-        Re: 135061.8743586471,
-        fD: 0.016504534571135807,
-        dp: 1671.5825718382848,
-        cL: 93.66474351506379,
-        fr: 596.288276954278,
-        sigRad: 0.0013543357987156085,
-        vWall: 0.15630491599949758,
-        W: 0.0006417828843868181,
-        LW: 88.07388130778376,
-        Lp: 85.32087007700599,
-        Fc: 2154.234962461572,
+        t: 0.006, N: 3, L: 0.036000000000000004,
+        tb: 0.001, tv: 0.005978831654688267, tr: 0.002885096451583242, vallow: 0.022985214094049404,
+        Dm: 0.082, tp: 0.004685212856658182, weff: 0.008,
+        K: 336017.60956345405, Ker: 112005.86985448468, M: 0.44071504079052376,
+        Tt: 0.251188643150958, fnMax: 89.61250111744494,
+        Nmin: 2.4466481390249206, Nmax: 3.360176095634541, Ngap: 0.9135279566096202,
+        fn: 80.23458063666155, ratio: 2.4926907876005537, Tr: 0.20590029753362,
+        R: 13.726860516195371, Rmargin: 1.7268605161953712,
+        cL: 81.11604732299901, fr: 516.4007958212559, sigRad: 0.005792709076538173,
+        vWall: 0.011052426603603843, S: 0.005654866776461628,
+        W: 0.0000016538668472809484, LW: 62.185005416017056,
+        Lp: 68.64018172476304, LpMargin: 6.359818275236961,
+        F: 560.0293492724235, Fratio: 1.1200586985448469,
+        pcr: 54575.60205290169, pcrRatio: 1.0106592972759572,
+        pb: 2400000, pbRatio: 6,
       },
       tolerance: 1e-9,
-      source: '按参考文档式 (1)~(25) 自建全链校验算例（直管摩擦系数按湍流分支）',
+      source: '按参考文档式 (1)~(25) 自建反算算例：tv 控制壁厚，N 位于隔振/拔脱可行区间内',
     },
     {
-      name: '恶劣工况：800 Hz 高于环频率 + 实测振速 + 真空不足（pv 60 kPa）',
+      name: '高声压工况：pac 300 Pa（声辐射约束控制壁厚），阻尼校核递增 N',
       input: {
-        D: 0.05, t: 0.006, L: 0.3, E: 8e6, sigmaB: 10e6, rho: 1200, nu: 0.49, zeta: 0.1,
-        p: 1e5, pv: 6e4, CL: 2, M: 15, fex: 800, Q: 0.12,
-        muA: 1.81e-5, rho0: 1.2, c0: 343, sumK: 1.5, kf: 2.5,
-        vmode: 2, pA: 1000, vwall: 0.2,
-        r: 1.0, b: 0.012, pc: 8e5, muF: 0.7,
+        D: 0.05, w: 0.012, h: 0.02, n: 2,
+        E: 6e6, rho: 1200, sigmaB: 10e6, nu: 0.49, zeta: 0.08, HA: 65,
+        Rreq: 12, LpReq: 75, r: 1.0, Fpull: 500, deltaAllow: 0.005,
+        pv: 3e4, p: 1e5, pac: 300, fex: 200,
+        Cf: 1, CL: 2, kb: 4, nv: 1.8,
+        Mjoint: 0.4, rho0: 1.205, c0: 343,
       },
       expect: {
-        A: 0.0009424777960769379,
-        I: 2.9452431127404315e-7,
-        S: 0.047123889803846894,
-        mS: 7.2,
-        sigTheta: 416666.6666666667,
-        sigZ: 208333.33333333334,
-        nAct: 24,
-        pb: 2400000,
-        pbRatio: 24,
-        pcr: 72767.46940386892,
-        pcrRatio: 1.2127911567311487,
-        kax: 25132.741228718347,
-        kb: 261.7993877991495,
-        fn: 6.5147001587056,
-        rFr: 122.7992049535786,
-        Tr: 0.001630130480651023,
-        R: 55.755552638807075,
-        vel: 61.1154981472878,
-        Re: 202592.81153797064,
-        fD: 0.014913530507126266,
-        dp: 3862.9260047468774,
-        cL: 93.66474351506379,
-        fr: 596.288276954278,
-        sigRad: 1,
-        vWall: 0.2,
-        W: 0.7758477217305353,
-        LW: 118.89776489168172,
-        Lp: 116.14475366090394,
-        Fc: 2154.234962461572,
+        t: 0.009000000000000001, N: 98, L: 1.176,
+        tb: 0.001, tv: 0.005978831654688267, tr: 0.008655289354749724, vallow: 0.022985214094049407,
+        Dm: 0.08800000000000001, tp: 0.006784005252999682, weff: 0.0019999999999999983,
+        K: 70061814.25035442, Ker: 714916.4719423921, M: 2.395036998735663,
+        Tt: 0.251188643150958, fnMax: 89.61250111744494,
+        Nmin: 94.82867499346564, Nmax: 700.6181425035443, Ngap: 605.7894675100787,
+        fn: 86.95442147239473, ratio: 2.3000555533969442, Tr: 0.24746013139758832,
+        R: 12.129895216123481, Rmargin: 0.1298952161234812,
+        cL: 81.11604732299901, fr: 516.4007958212559, sigRad: 0.005792709076538173,
+        vWall: 0.022104853207207686, S: 0.18472564803107983,
+        W: 0.00021610526804471055, LW: 83.346653539025,
+        Lp: 74.66078163804265, LpMargin: 0.3392183619573501,
+        F: 3574.58235971196, Fratio: 7.14916471942392,
+        pcr: 184192.6569285433, pcrRatio: 3.410975128306357,
+        pb: 3600000.0000000005, pbRatio: 9.000000000000002,
       },
       tolerance: 1e-9,
-      source: '自建恶劣工况算例：f ≥ fr 时辐射效率取高分支并限幅为 1，验证真空裕度不足的校核输出',
+      source: '自建高声压算例：tr > tv 时壁厚由声辐射约束控制，且 N 经阻尼校核递增后仍满足 R ≥ Rreq',
     },
   ],
 };

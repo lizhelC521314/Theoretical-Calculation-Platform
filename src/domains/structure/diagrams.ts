@@ -87,8 +87,16 @@ export const INTAKE_HOSE_DIAGRAM = `
   <text x="166" y="86" font-size="11" fill="#666666">波纹段</text>
   <text x="308" y="86" font-size="11" fill="#666666">直段</text>
 
+  <!-- 波距 w 与波高 h 标注（波纹段局部） -->
+  <line x1="150" y1="66" x2="166" y2="66" stroke="#b45309" stroke-width="1"/>
+  <line x1="150" y1="62" x2="150" y2="70" stroke="#b45309" stroke-width="1"/>
+  <line x1="166" y1="62" x2="166" y2="70" stroke="#b45309" stroke-width="1"/>
+  <text x="153" y="60" font-size="11" fill="#b45309">w</text>
+  <line x1="142" y1="96" x2="142" y2="109" stroke="#b45309" stroke-width="1"/>
+  <text x="130" y="106" font-size="11" fill="#b45309">h</text>
+
   <!-- 端面圆环截面：D 与 t -->
-  <text x="12" y="216" font-size="11" fill="#222222">端面：A = π·D·t，I = π·D³·t/8（薄壁圆环）</text>
-  <text x="256" y="216" font-size="11" fill="#666666">弯曲半径 Rmin ≥ 1.5~3D</text>
+  <text x="12" y="216" font-size="11" fill="#222222">反算：t = max(tb, tv, tr) 圆整 0.5mm；L = N·w；Dm = D + h + n·t</text>
+  <text x="256" y="230" font-size="11" fill="#666666">校核：R ≥ Rreq，Lp ≤ Lp,req，F ≥ Fpull</text>
 </svg>
 `;
