@@ -207,14 +207,12 @@ export const intakeSystemResistance: FormulaSpec = {
     compute(v) {
       const base = v.Q;
       if (!(base > 0)) return [];
-      const pts: { x: number; y: number }[] = [];
-      for (let i = 0; i <= 24; i++) {
-        const q = base * (0.1 + (i * 1.5) / 24); // 10% ~ 160% 额定流量
-        const r = intakeSystemResistance.solve({ ...v, Q: q });
-        const dp = r.dpTotal;
-        if (Number.isFinite(dp)) pts.push({ x: q * 3600, y: dp });
-      }
-      return pts;
+      // 按输入流量 Q 的 0、25%、50%、75%、100%、125% 取点
+      return [0, 0.25, 0.5, 0.75, 1, 1.25].map((r) => {
+        const q = base * r;
+        const dp = q > 0 ? intakeSystemResistance.solve({ ...v, Q: q }).dpTotal : 0;
+        return { x: q * 3600, y: Number.isFinite(dp) ? dp : 0 };
+      });
     },
   },
   sensitivity: true,
