@@ -17,6 +17,9 @@ import type { CurvePoint, FormulaSpec, OutputSpec, ParamSpec } from '../../formu
  *   亥姆霍兹      f0 = (c/2π)·[An/(V·Leff)]^(1/2)，Leff = ln + 0.85dn          （式22）
  *   四分之一波长  fq = (2k−1)·c/(4L)，TLbranch = 20·lg|1 + Sp/(2Sbζb)|          （式23/24）
  *   滤芯          JCA 多孔层传递矩阵 Tlayer = [cos(kct), jZcsin(kct); …]        （式13）
+ *   膨胀腔高频    峰值 fmax,n = (2n−1)c/(4L)，谷值 fmin,n = n·c/(2L)，
+ *                 TLmax = 10lg[1+0.25(m−1/m)²]，TLavg = 10lg[1+0.125(m−1/m)²]，
+ *                 一阶高阶模态截止 fc,1 = 1.84c/(πD)                          （式24a~24f）
  *   多腔消音器    σi = nh·dh²/(4·din·Lc)，ξi = R0 + jk0(tw + α0dh)，
  *                 A(4×4) → Φ = exp(A·Lc) → Tcav → 逐腔串联                     （式25~31）
  *   系统合成      Tsys = Tin·Tbellows·Tbraid·Tairbox·Tmuffler·Tout             （式32）
@@ -436,6 +439,12 @@ const outputList: OutputSpec[] = [
   { key: 'tlBellowsAvg', label: '波纹管平均传递损失', symbol: 'TL_bel', unit: 'dB', digits: 1, group: '分部件平均传递损失', description: '仅波纹管段串联的平均 TL，通常 1~3 dB，远小于其隔振贡献' },
   { key: 'tlSilAvg', label: '多腔消音器平均传递损失', symbol: 'TL_muf', unit: 'dB', digits: 1, group: '分部件平均传递损失', description: '仅多腔穿孔消音器段串联的平均 TL；R0 为建议取值，结果仅供参考' },
 
+  { key: 'fExpPeak1', label: '膨胀腔一阶峰值频率', symbol: 'f_max,1', unit: 'Hz', digits: 1, group: '膨胀腔高频特性', description: 'fmax,1 = c/(4L)，即式(24c) 取 n=1；高阶峰值 fmax,n = (2n−1)c/(4L)，峰谷交替、间隔约 c/(2L)' },
+  { key: 'fExpMin1', label: '膨胀腔一阶谷值频率', symbol: 'f_min,1', unit: 'Hz', digits: 1, group: '膨胀腔高频特性', description: 'fmin,1 = c/(2L)，即式(24b) 取 n=1；谷值处 sin²(kL)=0，膨胀腔 TL 回到 0 dB' },
+  { key: 'tlExpMax', label: '膨胀腔峰值传递损失', symbol: 'TL_max', unit: 'dB', digits: 1, group: '膨胀腔高频特性', description: 'TLmax = 10lg[1 + 0.25(m − 1/m)²]（式24d）；峰值不随阶次升高而增大，只是频率变密' },
+  { key: 'tlExpAvg', label: '膨胀腔高频平均传递损失', symbol: 'TL_avg,exp', unit: 'dB', digits: 1, group: '膨胀腔高频特性', description: 'TLavg = 10lg[1 + 0.125(m − 1/m)²]（式24e，sin² 取 1/2），用于评价高频段整体消音量' },
+  { key: 'fcMode1', label: '腔体一阶高阶模态截止频率', symbol: 'f_c,1', unit: 'Hz', digits: 1, group: '膨胀腔高频特性', description: 'fc,1 = 1.84c/(πD_chamber)（式24f）；频率超过该值后平面波假设失效，需用三维模型或实测' },
+
   { key: 'fH', label: '亥姆霍兹谐振频率', symbol: 'f_0', unit: 'Hz', digits: 1, group: '谐振频率', showIf: { key: 'hOn', min: 1, max: 1 }, description: 'f0 = (c/2π)·[An/(V·Leff)]^(1/2)，Leff = ln + 0.85dn（式22）' },
   { key: 'fQ', label: '四分之一波长首阶频率', symbol: 'f_q', unit: 'Hz', digits: 1, group: '谐振频率', showIf: { key: 'qOn', min: 1, max: 1 }, description: 'fq = (2k−1)·c/(4L)，k=1,2,…；结果为首阶 c/(4L)（式23）' },
 ];
@@ -453,9 +462,9 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
   title: '进气系统声音传递损失计算（进气管—波纹管—编织管—空滤器—出气管—消音器）',
   summary:
     '按「进气管 3 段（每段可选进气管/波纹管/编织管）→ 空滤器（膨胀腔 + 滤芯 + 谐振腔/支管）→ 出气管 3 段（每段可选出气管/波纹管/多腔穿孔消音器）」建立四端参数（传递矩阵）模型并级联，输出系统传递损失 TL 曲线与各分部件平均 TL。',
-  tags: ['进气系统', '传递损失', 'TL', 'NVH', '声学', '进气管', '波纹管', '编织管', 'JCA', '空气滤清器', '滤芯', '膨胀腔', '亥姆霍兹', '四分之一波长', '多腔', '穿孔', '消音器', '传递矩阵', '四端参数'],
+  tags: ['进气系统', '传递损失', 'TL', 'NVH', '声学', '进气管', '波纹管', '编织管', 'JCA', '空气滤清器', '滤芯', '膨胀腔', '亥姆霍兹', '四分之一波长', '多腔', '穿孔', '消音器', '传递矩阵', '四端参数', '高频共振', '峰谷频率', '高阶模态'],
   description:
-    '传递损失 TL 是消音元件入射声功率与透射声功率之比，只与元件本身有关，与声源和末端反射无关（式1）。本公式统一采用 [p, ρcu] 状态变量（Z0 = 1），按四端参数逐段建立 2×2 传递矩阵并级联：等截面直管 T = [cos(kL), jsin(kL); jsin(kL), cos(kL)]，截面突变 T = [1, 0; 0, Sd/Su]；系统总矩阵 Tsys = Tin·Tbellows·Tbraid·Tairbox·Tmuffler·Tout，最后按 TL = 20lg(|T11+T12+T21+T22|/2) + 10lg(Sin/Sout) 求得（式3 与式33 的面积修正）。进气管侧每段可选进气管（纯直管）、波纹管（按「一串短膨胀腔」逐波节级联，mw = (D+2h)²/D²，单节 TLw = 10lg[1 + 0.25(mw−1/mw)²sin²(kw)]）或编织管（Johnson-Champoux-Allard 等效流体模型：五参数 → ρeq、Keq → Zc、kc → 壁面阻抗 ζw = Rw + jXw → 衰减系数 α = (2/D)·Rw/(Rw²+Xw²) → TL ≈ 8.686·α·L；系统级联时按复波数 kx = k0 − jα 处理）。空滤器按「膨胀腔 + 滤芯 + 可选谐振腔/四分之一波长支管」建模：膨胀腔 TLexp = 10lg[1 + 0.25(m−1/m)²sin²(kL)]（式21，与传递矩阵解严格等价），滤芯按 JCA 多孔层传递矩阵 Tlayer = [cos(kct), jZcsin(kct); jsin(kct)/Zc, cos(kct)]，亥姆霍兹 f0 = (c/2π)[An/(V·Leff)]^(1/2)（Leff = ln + 0.85dn），四分之一波长 fq = (2k−1)c/(4L) 按支管传递矩阵并联接入。出气管侧每段可选普通出气管、波纹管或 Sullivan-Crocker 多腔穿孔消音器（σ = nh·dh²/(4·din·Lc)、ξ = R0 + jk0(tw + α0dh)、4×4 系统矩阵 A → Φ = exp(A·Lc) → 单腔 Tcav → 逐腔串联）。结果区给出系统平均/峰值 TL、250/500/1000/1500 Hz 固定频点 TL、各分部件平均 TL 与谐振频率，并绘制系统 TL - Frequency 曲线。选定管型后输入区只显示该元件需要的参数，公式区同步切换为该元件的专用公式。',
+    '传递损失 TL 是消音元件入射声功率与透射声功率之比，只与元件本身有关，与声源和末端反射无关（式1）。本公式统一采用 [p, ρcu] 状态变量（Z0 = 1），按四端参数逐段建立 2×2 传递矩阵并级联：等截面直管 T = [cos(kL), jsin(kL); jsin(kL), cos(kL)]，截面突变 T = [1, 0; 0, Sd/Su]；系统总矩阵 Tsys = Tin·Tbellows·Tbraid·Tairbox·Tmuffler·Tout，最后按 TL = 20lg(|T11+T12+T21+T22|/2) + 10lg(Sin/Sout) 求得（式3 与式33 的面积修正）。进气管侧每段可选进气管（纯直管）、波纹管（按「一串短膨胀腔」逐波节级联，mw = (D+2h)²/D²，单节 TLw = 10lg[1 + 0.25(mw−1/mw)²sin²(kw)]）或编织管（Johnson-Champoux-Allard 等效流体模型：五参数 → ρeq、Keq → Zc、kc → 壁面阻抗 ζw = Rw + jXw → 衰减系数 α = (2/D)·Rw/(Rw²+Xw²) → TL ≈ 8.686·α·L；系统级联时按复波数 kx = k0 − jα 处理）。空滤器按「膨胀腔 + 滤芯 + 可选谐振腔/四分之一波长支管」建模：膨胀腔 TLexp = 10lg[1 + 0.25(m−1/m)²sin²(kL)]（式21，与传递矩阵解严格等价），滤芯按 JCA 多孔层传递矩阵 Tlayer = [cos(kct), jZcsin(kct); jsin(kct)/Zc, cos(kct)]，亥姆霍兹 f0 = (c/2π)[An/(V·Leff)]^(1/2)（Leff = ln + 0.85dn），四分之一波长 fq = (2k−1)c/(4L) 按支管传递矩阵并联接入。出气管侧每段可选普通出气管、波纹管或 Sullivan-Crocker 多腔穿孔消音器（σ = nh·dh²/(4·din·Lc)、ξ = R0 + jk0(tw + α0dh)、4×4 系统矩阵 A → Φ = exp(A·Lc) → 单腔 Tcav → 逐腔串联）。结果区给出系统平均/峰值 TL、250/500/1000/1500 Hz 固定频点 TL、各分部件平均 TL、谐振频率，并按第 6.5 节输出膨胀腔高频峰谷频率、峰值/高频平均 TL 与一阶高阶模态截止频率（fmax,n = (2n−1)c/(4L)、fmin,n = n·c/(2L)、TLmax = 10lg[1+0.25(m−1/m)²]、TLavg = 10lg[1+0.125(m−1/m)²]、fc,1 = 1.84c/(πD)，式24a~24f），同时绘制系统 TL - Frequency 曲线。高频峰来自腔长与波长的干涉：多腔宜错开长度、腔长公差建议 ±2%、按 1/3 倍频程平均评价。选定管型后输入区只显示该元件需要的参数，公式区同步切换为该元件的专用公式。',
   inputs: [
     { key: 't', label: '介质温度', symbol: 't', unit: '℃', unitGroup: 'temperature', default: 20, required: true, description: '空气温度，用于声速 c ≈ 331.3 + 0.606t（摄氏温度）' },
     { key: 'rho0', label: '空气密度', symbol: 'ρ0', unit: 'kg/m³', unitGroup: 'density', default: 1.205, min: 0, required: true, description: '常温常压 20 ℃ 约 1.205 kg/m³；高温进气按实际密度修正' },
@@ -505,6 +514,8 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     { label: '出气管段 2：多腔穿孔消音器（式25~31）', tex: '\\Phi = e^{A L_{c,i}},\\quad T_{cav} = \\Phi_{11}-\\frac{\\Phi_{12}[:,1]\\,\\Phi_{21}[2,:]}{\\Phi_{22}[2,1]},\\quad T = T_n T_{duct}(c_t)\\cdots T_1', showIf: { key: 'o2', min: 3, max: 3 } },
     { label: '出气管段 3：多腔穿孔消音器（式25~31）', tex: '\\Phi = e^{A L_{c,i}},\\quad T_{cav} = \\Phi_{11}-\\frac{\\Phi_{12}[:,1]\\,\\Phi_{21}[2,:]}{\\Phi_{22}[2,1]},\\quad T = T_n T_{duct}(c_t)\\cdots T_1', showIf: { key: 'o3', min: 3, max: 3 } },
     { label: '空滤器膨胀腔（式21）', tex: 'm = \\frac{S_2}{S_1},\\qquad TL_{exp} = 10\\lg\\left[1+0.25\\left(m-\\frac{1}{m}\\right)^2\\sin^2(kL)\\right]' },
+    { label: '膨胀腔峰谷频率与峰值（式24a~24d）', tex: '\\lambda=\\frac{c}{f},\\quad kL=\\frac{2\\pi L}{\\lambda},\\qquad f_{min,n}=\\frac{nc}{2L},\\quad f_{max,n}=\\frac{(2n-1)c}{4L},\\quad TL_{max}=10\\lg\\left[1+0.25\\left(m-\\frac{1}{m}\\right)^2\\right]' },
+    { label: '膨胀腔高频平均与高阶模态截止（式24e/24f）', tex: 'TL_{avg}=10\\lg\\left[1+0.125\\left(m-\\frac{1}{m}\\right)^2\\right],\\qquad f_{c,1}=\\frac{1.84c}{\\pi D}' },
     { label: '滤芯多孔层（JCA + 传递矩阵，式13）', tex: 'T_{layer} = \\begin{bmatrix}\\cos(k_c t_f) & jZ_c\\sin(k_c t_f)\\\\ j\\sin(k_c t_f)/Z_c & \\cos(k_c t_f)\\end{bmatrix}' },
     { label: '亥姆霍兹谐振腔（式22）', tex: 'f_0 = \\frac{c}{2\\pi}\\sqrt{\\frac{A_n}{V L_{eff}}},\\qquad L_{eff}=l_n+0.85d_n', showIf: { key: 'hOn', min: 1, max: 1 } },
     { label: '四分之一波长支管（式23/24）', tex: 'f_q = \\frac{(2k-1)c}{4L},\\qquad TL_{branch} = 20\\lg\\left|1+\\frac{S_p}{2S_b\\zeta_b}\\right|', showIf: { key: 'qOn', min: 1, max: 1 } },
@@ -521,6 +532,11 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     '编织管校核：按论文样件（L=145 mm、D=49.36 mm、t=2.7 mm）20~2000 Hz 的频带平均 TL 本实现约 18.4 dB（论文约 16.4 dB，580 Hz 附近论文约 20 dB、本实现约 19.5 dB）；差异来自式17/18 的端部与背衬简化，工程定型前应按实测两负载法标定',
     'JCA 参数必须按材料标定，Maa 简化式（式19/20）只在缺少五参数时估算，本模块未采用；若某段改用 Maa 模型，需自行代入等效参数后再与本模型对比',
     '空滤器按「膨胀腔（式21）+ 滤芯（JCA 多孔层传递矩阵）+ 可选亥姆霍兹谐振腔（式22）+ 可选四分之一波长支管（式23/24）」建模；文档给出的膨胀腔 TL = 10lg[1+0.25(m−1/m)²sin²(kL)] 与传递矩阵解严格等价，本实现用传递矩阵以便与其他元件级联',
+    '膨胀腔高频峰谷规律（式24a~24e）：峰值 fmax,n = (2n−1)c/(4L)、谷值 fmin,n = n·c/(2L)，峰谷交替、间隔约 c/(2L)；峰值 TLmax = 10lg[1+0.25(m−1/m)²]、高频平均 TLavg = 10lg[1+0.125(m−1/m)²]（sin² 取 1/2）。峰值不随阶次升高而增大，只是频率越高越密；这种「高频共振附加消音」来自腔长与波长的干涉，不是材料吸声',
+    '高频峰对腔长、温度与加工公差敏感：腔长差 5% 峰位约偏 5%，建议腔长公差控制在 ±2%；c 随温度升高而增大、峰位向高频偏移，按最高工作温度校核峰位，避免峰移出目标频段',
+    '多腔/分段结构：各腔长度应错开（避免成整数倍），使高频峰互相填补形成宽频带；若各腔等长，峰谷同步，反而出现深谷。按目标频率反解腔长可用 L = (2n−1)c/(4f_target)，让峰值落在目标噪声频率上',
+    '本式按空滤器腔体直径估算一阶高阶模态截止 f_c,1 = 1.84c/(πD_chamber)（式24f，最保守）：f > f_c,1 后平面波假设失效，膨胀腔会出现三维模态峰，也可能因模态耦合出现低谷，工程上以实测或 FEM 为准',
+    '评价高频消音效果建议按 1/3 倍频程能量平均，避免单频峰造成「消音很好」的误判；穿孔腔的 Helmholtz 峰（低频）与膨胀腔的高频峰互补，可覆盖更宽频带',
     '滤芯按 JCA 多孔层法向传递矩阵计算，滤材的 σ_f、φ、α∞、Λ、Λ′ 建议按本滤材实测数据取值（默认值仅为典型量级），不能套用编织管参数；滤芯厚度取 0 时按不装滤芯处理',
     '亥姆霍兹与四分之一波长支管按并联支管传递矩阵 [1,0; 1/ζb, 1] 接入，ζb 为支管输入阻抗相对主管特性阻抗的归一化值；支管共振频点上 ζb → 0，TL 出现理论峰值，采样点未落在共振频率时峰值会略低',
     '多腔穿孔消音器按 Sullivan-Crocker / Munjal 一维耦合模型：σ = nh·dh²/(4·din·Lc)、ξ = R0 + jk0(tw + α0dh)、4×4 矩阵 A → Φ = exp(A·Lc) → Tcav → 逐腔串联（式25~31）；R0 默认 0.0055 为建议取值，未用实测校核，结果仅供参考',
@@ -538,6 +554,7 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       c: NaN, tl_avg: NaN, tl_max: NaN, f_peak: NaN,
       tl250: NaN, tl500: NaN, tl1000: NaN, tl1500: NaN,
       tlInAvg: NaN, tlBoxAvg: NaN, tlOutAvg: NaN, tlBraidAvg: NaN, tlBellowsAvg: NaN, tlSilAvg: NaN,
+      fExpPeak1: NaN, fExpMin1: NaN, tlExpMax: NaN, tlExpAvg: NaN, fcMode1: NaN,
       fH: NaN, fQ: NaN,
     };
 
@@ -837,6 +854,14 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       : NaN;
     const fQ = v.qOn === 1 ? c / (4 * v.Lq) : NaN;
 
+    // 膨胀腔高频峰谷特性（式24a~24f）：m = (D_chamber/d_box)²，峰谷间隔约 c/(2L)
+    const mExp = (v.dBoxCh * v.dBoxCh) / (v.dBoxIn * v.dBoxIn);
+    const fExpPeak1 = v.LBox > 0 ? c / (4 * v.LBox) : NaN;
+    const fExpMin1 = v.LBox > 0 ? c / (2 * v.LBox) : NaN;
+    const tlExpMax = 10 * Math.log10(1 + 0.25 * Math.pow(mExp - 1 / mExp, 2));
+    const tlExpAvg = 10 * Math.log10(1 + 0.125 * Math.pow(mExp - 1 / mExp, 2));
+    const fcMode1 = (1.84 * c) / (Math.PI * v.dBoxCh);
+
     return {
       c,
       tl_avg: nSys > 0 ? sumSys / nSys : NaN,
@@ -849,6 +874,7 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       tlBraidAvg: nBraid > 0 ? sumBraid / nBraid : NaN,
       tlBellowsAvg: nBel > 0 ? sumBel / nBel : NaN,
       tlSilAvg: nSil > 0 ? sumSil / nSil : NaN,
+      fExpPeak1, fExpMin1, tlExpMax, tlExpAvg, fcMode1,
       fH, fQ,
     };
   },
@@ -883,9 +909,13 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
         dBoxIn: 0.06, dBoxCh: 0.2, LBox: 0.3,
         L1: 0, L2: 0, L3: 0, Lo1: 0, Lo2: 0, Lo3: 0,
       }),
-      expect: { c: 343, tl250: 14.800618, tl500: 7.381177, tl1000: 12.109240, tl1500: 14.312461 },
+      expect: {
+        c: 343, tl250: 14.800618, tl500: 7.381177, tl1000: 12.109240, tl1500: 14.312461,
+        fExpPeak1: 285.83333333333337, fExpMin1: 571.6666666666667,
+        tlExpMax: 14.964622192784612, tlExpAvg: 12.090620200891928, fcMode1: 1004.4586768415699,
+      },
       tolerance: 1e-6,
-      source: '《进气系统传递损失计算》第 10 节算例表：m=(200/60)²=11.11，TL=10lg[1+0.25(m−1/m)²sin²(kL)] 在 250/500/1000/1500 Hz 分别为 14.8/7.5/12.2/14.3 dB（表中四舍五入到 0.1 dB）',
+      source: '《进气系统传递损失计算》第 10 节算例表：m=(200/60)²=11.11，TL=10lg[1+0.25(m−1/m)²sin²(kL)] 在 250/500/1000/1500 Hz 分别为 14.8/7.5/12.2/14.3 dB（表中四舍五入到 0.1 dB）；第 6.5 节示例给出峰值 286/857/1429/2000 Hz、谷值 572/1143/1714 Hz、TLmax≈15.0 dB、TLavg≈12.1 dB，f_c1 按式(24f) 由腔径 200 mm 估算',
     },
     {
       name: '亥姆霍兹谐振腔：V=0.5 L、l_n=30 mm、d_n=20 mm',
