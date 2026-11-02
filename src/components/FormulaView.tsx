@@ -20,16 +20,20 @@ export function FormulaView({
   /** 当前输入值（界面单位），用于按 showIf 隐藏未参与计算的逐腔符号行；不传则全部显示 */
   values?: Record<string, number>;
 }) {
-  const rendered = useMemo(
-    () => formula.latex.map((l) => ({ ...l, html: renderTex(l.tex) })),
-    [formula],
-  );
-
   // 与 ParamForm 相同的 showIf 求值：参数值落在 [min, max] 区间才显示该行
   const visible = (s?: { key: string; min?: number; max?: number }) =>
     !values ||
     !s ||
     (Number(values[s.key]) >= (s.min ?? -Infinity) && Number(values[s.key]) <= (s.max ?? Infinity));
+
+  const rendered = useMemo(
+    () =>
+      formula.latex
+        .filter((l) => visible(l.showIf))
+        .map((l) => ({ ...l, html: renderTex(l.tex) })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [formula, values],
+  );
 
   return (
     <div className="formula-view">

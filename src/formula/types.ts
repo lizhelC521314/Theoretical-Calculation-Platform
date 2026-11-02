@@ -123,7 +123,15 @@ export interface FormulaSpec {
   inputs: ParamSpec[];
   outputs: OutputSpec[];
   /** 主公式与中间公式的 LaTeX 表达式 */
-  latex: { label: string; tex: string }[];
+  latex: {
+    label: string;
+    tex: string;
+    /**
+     * 条件显示：仅当某输入参数满足条件时才在公式区显示该条公式。
+     * 用于「按元件类型切换公式」——选中波纹管/穿孔消音器时才显示其专用公式。
+     */
+    showIf?: { key: string; min?: number; max?: number };
+  }[];
   /** 配套示意图（SVG 字符串，尺寸建议 viewBox 0 0 400 220） */
   diagram?: string;
   /** 结果曲线（可选）：有值时计算页在结果区下方绘制曲线图 */

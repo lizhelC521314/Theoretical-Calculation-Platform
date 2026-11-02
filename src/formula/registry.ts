@@ -16,8 +16,8 @@ import { quarterWaveTube } from '../domains/acoustics/quarterWaveTube';
 import { wovenTubeSilencer } from '../domains/acoustics/wovenTubeSilencer';
 import { multiCavitySilencer } from '../domains/acoustics/multiCavitySilencer';
 import { pressureCorrection } from '../domains/fluid/pressureCorrection';
+import { intakeSystemResistance } from '../domains/fluid/intakeSystemResistance';
 import { airFilterElement } from '../domains/structure/airFilterElement';
-import { intakeHose } from '../domains/structure/intakeHose';
 import { intakeHoseFull } from '../domains/structure/intakeHoseFull';
 
 const ALL_FORMULAS: FormulaSpec[] = [
@@ -28,8 +28,8 @@ const ALL_FORMULAS: FormulaSpec[] = [
   wovenTubeSilencer,
   multiCavitySilencer,
   pressureCorrection,
+  intakeSystemResistance,
   airFilterElement,
-  intakeHose,
   intakeHoseFull,
 ];
 
