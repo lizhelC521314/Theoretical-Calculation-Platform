@@ -44,7 +44,7 @@ export const intakeSystemResistance: FormulaSpec = {
     { key: 'cb', label: '编织管弯曲附加系数', symbol: 'c_b', unit: '-', unitGroup: 'dimensionless', default: 0.5, min: 0, required: true, description: '式 9d：c_b = 0.4~0.6。R_b/D ≥ 3 时基本无附加，R_b/D = 2 时 K 增 20%~30%，R_b/D = 1 时增 40%~60%' },
     { key: 'epsM', label: '穿孔管绝对粗糙度', symbol: 'ε_m', unit: 'mm', unitGroup: 'length', default: 0.2, min: 0, required: true, description: '穿孔管内壁 0.1~0.3 mm；孔口本身的增量另按穿孔率 φ 计入（式 15）' },
     { key: 'aPerf', label: '穿孔率摩擦放大系数 a', symbol: 'a', unit: '-', unitGroup: 'dimensionless', default: 1.0, min: 0, required: true, description: '式 15：f_m = f_s·(1 + a·φ)，a = 0.5~1.5，无试验数据取 1.0' },
-    { key: 'c1', label: '消音器弯头开孔系数 c1', symbol: 'c_1', unit: '-', unitGroup: 'dimensionless', default: 1.5, min: 0, required: true, description: '式 15c：c1 = 1~2，由「直管 vs 弯管、开孔 vs 不开孔」对比试验标定' },
+    { key: 'c1', label: '消音器弯头开孔系数 c1', symbol: 'c_1', unit: '-', unitGroup: 'dimensionless', default: 1.5, min: 0, required: true, description: '式 15c：建议取值 1.5（范围 1~2；直管/弯管、开孔/不开孔的差异可按对比数据修正）' },
     { key: 'c2', label: '消音器弯头开孔系数 c2', symbol: 'c_2', unit: '-', unitGroup: 'dimensionless', default: 1.0, min: 0, required: true, description: '式 15c：c2 = 0.5~1.5，表征腔体交换损失，弯角越大权重越高' },
     { key: 'CdLeak', label: '编织壁泄漏流量系数', symbol: 'C_d', unit: '-', unitGroup: 'dimensionless', default: 0.7, min: 0, max: 1, required: true, description: '编织管壁面孔隙泄漏量 q = C_d·A_h·(2Δp/ρ)^(1/2) 的流量系数，取 0.6~0.8；泄漏量不计入压降，仅用于评估过滤旁通' },
 

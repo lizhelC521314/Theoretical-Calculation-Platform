@@ -343,7 +343,7 @@ const CAVITY_MAX = 6;
 /**
  * 逐腔单独输入：长度、腔外径、开孔直径、开孔数量。
  * 腔数 n 增大后依次展开（showIf），n 之外的腔输入不参与计算。
- * 默认值取自参考图表（郭荣论文算例）：L_c = 8/10/13/17/23.8 mm，
+ * 默认值建议取值（典型 5 腔算例）：L_c = 8/10/13/17/23.8 mm，
  * d_out = 69 mm，d_h = 3.1 mm，n_h = 36。
  */
 const CAVITY_LC_DEFAULT = [8, 10, 13, 17, 23.8, 20];
@@ -353,22 +353,22 @@ for (let i = 1; i <= CAVITY_MAX; i++) {
     {
       key: `Lc${i}`, label: `腔${i} 长度`, symbol: `L_c${i}`, unit: 'mm', unitGroup: 'length',
       default: CAVITY_LC_DEFAULT[i - 1], min: 6, max: 50, required: true, showIf: { key: 'n', min: i },
-      description: `第 ${i} 腔沿轴向的宽度，建议范围 0.006~0.050 m，属设计变量；算例取 ${CAVITY_LC_DEFAULT[i - 1]} mm`,
+      description: `第 ${i} 腔沿轴向的宽度，建议范围 0.006~0.050 m，属设计变量；建议取值 ${CAVITY_LC_DEFAULT[i - 1]} mm`,
     },
     {
       key: `dout${i}`, label: `腔${i} 外径`, symbol: `d_out${i}`, unit: 'mm', unitGroup: 'length',
       default: 69, min: 52, max: 160, required: true, showIf: { key: 'n', min: i },
-      description: `第 ${i} 腔的腔体外径，建议范围 1.3~2.0 倍主管内径；算例取 69 mm`,
+      description: `第 ${i} 腔的腔体外径，建议范围 1.3~2.0 倍主管内径；建议取值 69 mm`,
     },
     {
       key: `dh${i}`, label: `腔${i} 开孔直径`, symbol: `d_h${i}`, unit: 'mm', unitGroup: 'length',
       default: 3.1, min: 2, max: 4, required: true, showIf: { key: 'n', min: i },
-      description: `第 ${i} 腔的单孔直径，建议范围 0.002~0.004 m，属设计变量；算例取 3.1 mm`,
+      description: `第 ${i} 腔的单孔直径，建议范围 0.002~0.004 m，属设计变量；建议取值 3.1 mm`,
     },
     {
       key: `nh${i}`, label: `腔${i} 开孔数量`, symbol: `n_h${i}`, unit: '个',
       default: 36, min: 20, max: 60, required: true, showIf: { key: 'n', min: i },
-      description: `第 ${i} 腔的穿孔个数，建议范围 20~60，属设计变量；算例取 36`,
+      description: `第 ${i} 腔的穿孔个数，建议范围 20~60，属设计变量；建议取值 36`,
     },
   );
 }
@@ -414,17 +414,17 @@ export const multiCavitySilencer: FormulaSpec = {
   description:
     '多腔宽频消声器由主管穿孔段与串联腔体构成，PPT 采用一维传递矩阵法：各腔按自身几何（L_c,i、d_out,i、d_h,i、n_h,i）单独按式(1) 算穿孔率 σ_i，按式(5) 由该腔 σ_i 单独算端部修正 α0,i，再按式(3)~(6) 用该腔 α0,i、CG 算穿孔阻抗 ξ_i（含 M1=0 与 M1>0 两种工况），耦合项按 σ_i·P/(S·ξ_i) 计入（式8/10/12，P2 取内壁 πd_in），再按式(12) 构造 4×4 系统矩阵 A，取 Φ = exp(A·Lc) 并按式(14) 压缩为单腔 2×2 传递矩阵，按式(15) 将各腔串联（相邻腔间按式(16) 插入隔板直管段），最后由式(18) TL(f) = 20lg(|T11+T12+T21+T22|/2) 得到传递损失。结果区给出频带平均 TL、峰值 TL、峰值频率、各腔穿孔率与各腔端部修正系数，并绘制 TL - Frequency 曲线。',
   inputs: [
-    { key: 'din', label: '主管内径', symbol: 'd_in', unit: 'mm', unitGroup: 'length', default: 41.6, min: 40, max: 80, required: true, description: '主管（穿孔段）内径，建议范围 0.040~0.080 m；算例（图表中记号 d_in）取 41.6 mm' },
-    { key: 'tw', label: '穿孔壁厚（孔深）', symbol: 't_w', unit: 'mm', unitGroup: 'length', default: 2.8, min: 1.5, max: 3, required: true, description: '穿孔板厚度，即孔的有效深度，建议范围 0.0015~0.003 m；算例取 2.8 mm' },
-    { key: 'n', label: '腔数', symbol: 'n', unit: '个', default: 5, min: 3, max: 6, required: true, description: '串联腔体数量，建议范围 3~6；算例取 5 腔，改动后下方逐腔输入按腔数依次展开' },
+    { key: 'din', label: '主管内径', symbol: 'd_in', unit: 'mm', unitGroup: 'length', default: 41.6, min: 40, max: 80, required: true, description: '主管（穿孔段）内径，建议范围 0.040~0.080 m；建议取值 41.6 mm' },
+    { key: 'tw', label: '穿孔壁厚（孔深）', symbol: 't_w', unit: 'mm', unitGroup: 'length', default: 2.8, min: 1.5, max: 3, required: true, description: '穿孔板厚度，即孔的有效深度，建议范围 0.0015~0.003 m；建议取值 2.8 mm' },
+    { key: 'n', label: '腔数', symbol: 'n', unit: '个', default: 5, min: 3, max: 6, required: true, description: '串联腔体数量，建议范围 3~6；建议取值 5 腔，改动后下方逐腔输入按腔数依次展开' },
     ...cavityInputs,
-    { key: 'ct', label: '隔板厚度', symbol: 'c_t', unit: 'mm', unitGroup: 'length', default: 2, min: 1, max: 3, required: true, description: '相邻腔之间的隔板（环形叶片）厚度，按式(16)作为直管段插入，建议范围 0.001~0.003 m；算例取 2 mm' },
-    { key: 'rho0', label: '空气密度', symbol: 'ρ0', unit: 'kg/m³', unitGroup: 'density', default: 1.205, min: 0, required: true, description: '常温常压空气密度，20℃ 取 1.205 kg/m³' },
-    { key: 'c0v', label: '空气声速', symbol: 'c0', unit: 'm/s', default: 343, min: 0, required: true, description: '常温常压声速，20℃ 取 343 m/s' },
-    { key: 'M1', label: '主管马赫数', symbol: 'M1', unit: '-', default: 0, min: 0, max: 0.15, required: true, description: '主管流速马赫数，建议范围 0~0.15；默认 0（无气流，按式3），有气流时按式(4)~式(6)计算' },
-    { key: 'R0', label: '阻性常数', symbol: 'R0', unit: '-', default: 0.0055, min: 0, required: true, description: '穿孔阻抗实部经验常数，PPT 取值 0.0055（±20%，需标定）' },
-    { key: 'fmin', label: '频率最小值', symbol: 'f_min', unit: 'Hz', default: 100, min: 0, required: true, description: 'TL 曲线扫描下限，PPT 默认 100 Hz' },
-    { key: 'fmax', label: '频率最大值', symbol: 'f_max', unit: 'Hz', default: 5000, min: 0, required: true, description: 'TL 曲线扫描上限，PPT 默认 5000 Hz' },
+    { key: 'ct', label: '隔板厚度', symbol: 'c_t', unit: 'mm', unitGroup: 'length', default: 2, min: 1, max: 3, required: true, description: '相邻腔之间的隔板（环形叶片）厚度，按式(16)作为直管段插入，建议范围 0.001~0.003 m；建议取值 2 mm' },
+    { key: 'rho0', label: '空气密度', symbol: 'ρ0', unit: 'kg/m³', unitGroup: 'density', default: 1.205, min: 0, required: true, description: '常温常压空气密度，建议取值 1.205 kg/m³（20℃）' },
+    { key: 'c0v', label: '空气声速', symbol: 'c0', unit: 'm/s', default: 343, min: 0, required: true, description: '常温常压声速，建议取值 343 m/s（20℃）' },
+    { key: 'M1', label: '主管马赫数', symbol: 'M1', unit: '-', default: 0, min: 0, max: 0.15, required: true, description: '主管流速马赫数，建议范围 0~0.15；建议取值 0（无气流，按式3），有气流时按式(4)~式(6)计算' },
+    { key: 'R0', label: '阻性常数', symbol: 'R0', unit: '-', default: 0.0055, min: 0, required: true, description: '穿孔阻抗实部经验常数，建议取值 0.0055（±20%）' },
+    { key: 'fmin', label: '频率最小值', symbol: 'f_min', unit: 'Hz', default: 100, min: 0, required: true, description: 'TL 曲线扫描下限，建议取值 100 Hz' },
+    { key: 'fmax', label: '频率最大值', symbol: 'f_max', unit: 'Hz', default: 5000, min: 0, required: true, description: 'TL 曲线扫描上限，建议取值 5000 Hz' },
     { key: 'df', label: '频率步长', symbol: 'Δf', unit: 'Hz', default: 10, min: 1, required: true, description: '频率扫描步长，建议范围 5~10 Hz' },
   ],
   outputs: [
@@ -484,7 +484,7 @@ export const multiCavitySilencer: FormulaSpec = {
     '各腔穿孔率 σ_i 由该腔自身几何按式(1) 计算，并以 σ_i 乘入该腔的耦合项（式8/10/12）；腔体耦合周长取内壁 P2 = πd_in，外壁刚性不参与耦合',
     'PPT 校验点：漏乘 σ 会把壁面当成 100% 全开，表现为 TL 在 100 Hz 达 60 dB 以上且随频率单调下降；正常结果应呈带通特性',
     'R0 很小时腔体共振几乎无阻尼，TL 峰值极高且对频率步长 Δf 敏感；工程判断应以频带平均 TL 与实测数据为准',
-    '默认初始值取自参考图表（郭荣论文算例）：d_in=41.6、d_out=69、d_h=3.1、n_h=36、t_w=2.8、c_t=2 mm，5 腔、L_c=8/10/13/17/23.8 mm',
+    '默认初始值建议取值：d_in=41.6、d_out=69、d_h=3.1、n_h=36、t_w=2.8、c_t=2 mm，5 腔、L_c=8/10/13/17/23.8 mm',
     '逐腔参数开放后不再逐腔扫描敏感性（参数数量过多且腔数会改变计算结构），故本公式不提供参数敏感性分析',
     'PPT 式(20)(21) 的优化流程（以 L_c、d_h、n_h 为设计变量，σ≤0.25、孔间距≥2d_h、Δp≤Δp_max）不在本模块实现',
     '相邻腔之间按式(16)以隔板厚度 c_t 的直管段连接；进出口管段与面积突变矩阵（式17）默认不参与计算',

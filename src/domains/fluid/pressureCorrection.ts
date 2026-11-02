@@ -12,7 +12,7 @@ import { PRESSURE_CORRECTION_DIAGRAM } from './diagrams';
  *   总压降    ΔP_total = ΔP_std − P_dyn
  *
  * 内部 SI 全程 Pa（与项目「SI 全程 + unitGroup 显示换算」约定一致），outputs 声明 unit='kPa' + unitGroup='pressure'，
- * 界面自动换算显示 kPa。管道出口直径 D 以 m 为 SI 单位（PPT 默认 0.06 m）。
+ * 界面自动换算显示 kPa。管道出口直径 D 以 m 为 SI 单位（建议取值 0.06 m）。
  */
 
 /** 由 SI 输入（Pa, K, kg/h, kg/m³, m）算出中间量。Q/V 二选一：Q > 0 优先，否则 V。 */
@@ -87,7 +87,7 @@ export const pressureCorrection: FormulaSpec = {
     'PPT 给出的流速公式 v = (Q/ρ)/(πD²/4)/3600：Q/ρ 先得体积流量 m³/h，除以截面积 m² 再除以 3600 s/h 得 m/s',
     'PPT 说明 Q 与 V 两者只能输入一个。本实现按之前直径/面积二选一的惯例：Q > 0 时优先采用 Q，Q = 0 时按 V 反算 Q = ρ·V',
     '压力量内部全程以 Pa 为 SI 单位，界面通过 unitGroup=pressure 自动换算显示 kPa/MPa',
-    'D 以 m 为单位（PPT 默认 0.06 m，即 60 mm），与声学公式 D 以 mm 不同，请注意输入单位',
+    'D 以 m 为单位（建议取值 0.06 m，即 60 mm），与声学公式 D 以 mm 不同，请注意输入单位',
     'ΔP_total = ΔP_std − P_dyn：从修正后的静态压降中扣除出口动压得到纯损失压降',
   ],
   solve(v) {
