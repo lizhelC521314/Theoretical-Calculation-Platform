@@ -107,6 +107,15 @@ export const UNIT_GROUPS: Record<string, UnitGroup> = {
       { label: '10⁻⁶ m⁻¹', factor: 1e-6 },
     ],
   },
+  viscousDrag: {
+    si: 'm⁻²',
+    preferred: '10¹⁰ m⁻²',
+    units: [
+      { label: 'm⁻²', factor: 1 },
+      { label: '10⁹ m⁻²', factor: 1e9 },
+      { label: '10¹⁰ m⁻²', factor: 1e10 },
+    ],
+  },
   force: {
     si: 'N',
     preferred: 'N',
