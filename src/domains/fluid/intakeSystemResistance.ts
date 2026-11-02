@@ -5,12 +5,17 @@ import type { FormulaSpec } from '../../formula/types';
  *
  * 按《进气系统分部件阻力计算（进气管-波纹管-编织管-空滤器-出气管-消音器）》实现：
  *   通用段阻力   Δp = [ f·(L/D) + ΣK ]·(ρv²/2)，v = Q/A，A = πD²/4
+ *   渐变管       D(x) = D_in + (D_out − D_in)·x/L，沿程摩擦按 N = 20 段积分（式 4a~4c）；
+ *                全锥角 θ = 2arctan[(D_out − D_in)/(2L)]，渐扩 K_exp = k_exp(θ)·(1 − A_in/A_out)²（基准 v_in）、
+ *                渐缩 K_con = k_con(θ)·(1 − A_out/A_in)（基准 v_out），k 按 5°~90° 表插值（式 4d~4f）
+ *   动压差       Δp_sys,static = ΣΔp_loss + ½ρ(v_out² − v_in²)（式 4g）；本式入口为静止大气，
+ *                加速到 v_in 的动压已含在入口段 (1 + K_in) 项内，故取 Δp_sys,static = ΣΔp_loss + ½ρv_out²
  *   摩擦因子     f = 0.25 / { lg[ ε/(3.7D) + 5.74/Re^0.9 ] }²（Swamee-Jain 显式解，替代式 5）
  *   弯头         K_bend = n·K_90(R/D)·(θ/90°)^0.8~1.2（式 6a，本式取指数 1.0 + 查表 K_90）
  *   波纹管       f_c = f_s·[1 + k·(h/p)^m]（式 7，k = 3~5、m = 1.2~1.5）；无波深/波距时退回 C_c
  *   编织管       ε_b = 0.05~0.30 mm 粗糙管；弯曲时 K 增 cb·D/R_b、有效面积 A_eff = A·(1 − 0.1·D/R_b)（式 9d/9e）
  *   穿孔消音器   f_m = f_s·(1 + a·φ)，φ = A_h/(π·D·L)（式 15）；另有隔板、突扩/突缩、弯曲开孔附加（式 15c）
- *   空滤器       Δp = ΣK_box·(ρv_box²/2) + (a·v_f + b·v_f²) + k_d·m_dust
+ *   空滤器       Δp = ΣK_box·(ρv_box²/2) + (a·v_eff + b·v_eff²) + k_d·m_dust，v_eff = v_f/η（式 13b/13c）
  *   大气入口段   Δp_entrance = (1 + K_in)·(ρv²/2) − (ρV²/2) + p_bay
  *   空气密度     ρ = p/(R·T)·(1 − 0.378·p_v/p)，p = p0·(1 − 2.2557×10⁻⁵·z)^5.2559（式 20~22，可选）
  *   可压缩修正   Δp_comp ≈ Δp_inc·(1 + M²/4)，M = v/c，c = (γRT)^(1/2)
@@ -21,10 +26,10 @@ export const intakeSystemResistance: FormulaSpec = {
   subsystem: '进气系统',
   title: '进气系统阻力设计',
   summary:
-    '按「进气管 3 段（每段可选进气管/波纹管/编织管）→ 空滤器（箱体 + 滤芯）→ 出气管 3 段（每段可选出气管/波纹管/多腔穿孔消音器）」逐段计算静压损失并汇总，另计入大气入口段（含车速冲压与舱内负压）与可压缩性修正，输出系统阻力曲线。',
+    '按「进气管 3 段（每段可选进气管/波纹管/编织管，可设渐扩/渐缩出口直径）→ 空滤器（箱体 + 滤芯 + 流场不均匀修正）→ 出气管 3 段（每段可选出气管/波纹管/多腔穿孔消音器）」逐段计算静压损失并汇总，另计入大气入口段（含车速冲压与舱内负压）、出口动压与可压缩性修正，输出系统阻力曲线。',
   tags: ['进气系统', '阻力', '压降', '进气管', '波纹管', '编织管', '空气滤清器', '滤芯', '消音器', '穿孔管', '达西摩擦因子', '局部阻力', '入口损失', '马赫数', 'ISO 5011', '流体设计'],
   description:
-    '进气系统总阻力为各段静压损失之和：Δp_sys = Δp_entrance + ΣΔp_in + Δp_airbox + ΣΔp_out。每段均按「沿程摩擦 + 局部阻力」计算 Δp = [f·(L/D) + ΣK]·(ρv²/2)，各段流速按各自内径计算，局部阻力系数按该段局部流速取动压。弯头不再取固定值，按 K_bend = n·K_90(R/D)·(θ/90°)^0.8~1.2 逐只计算（90°、R/D=1 取 0.3~0.5，R/D=0.5 取 0.8~1.2，直角/拼焊取 1.1~1.5；45° 约为 90° 的一半）。进气管侧每段可选进气管（光滑管 ε_s）、波纹管（f_c = f_s·[1 + k·(h/p)^m]，k = 3~5、m = 1.2~1.5；无几何数据时退回 C_c = 1.5~2.5）或编织管（ε_b = 0.05~0.30 mm，弯曲时按 K·[1 + c_b·D/R_b] 放大、按 A_eff = A·(1 − 0.1·D/R_b) 重算流速）。出气管侧可选普通出气管、波纹管或多腔穿孔消音器：穿孔管摩擦按 f_m = f_s·(1 + a·φ) 放大，φ 为孔总面积与穿孔段管内表面积之比；另计隔板损失、本体突扩/突缩，以及弯曲段整片开孔带来的「冲击 + 腔体交换」附加损失 K_bend,perf = K_bend,0·[1 + c1·(θ/90°)·φ_b] + c2·(θ/90°)²·φ_b/(1 − φ_b)。空滤器阻力 = 箱体局部阻力 + 滤芯多孔介质阻力 (a·v_f + b·v_f²) + 容尘增量 k_d·m_dust，a、b 由 ISO 5011 台架拟合。大气入口段按 Δp = (1 + K_in)·(ρv²/2) − (ρV²/2) 计算，系数是 (1 + K_in) 而不是单独的 K_in，因为把静止空气加速到管内流速所需的动压同样表现为入口静压下降。空气密度可直接输入，也可按温度、海拔与相对湿度由 p(z)、Buck 公式与湿空气状态方程计算（式 20~22）。马赫数 M > 0.3 时按 Δp_comp ≈ Δp_inc·(1 + M²/4) 粗略修正，M > 0.6 应以一维气体动力学（Fanno）或 CFD 复算并做堵塞校核。选定管型后，输入区只显示该元件实际需要的参数，公式区同步切换为该元件的专用公式。',
+    '进气系统总阻力为各段静压损失之和：Δp_sys = Δp_entrance + ΣΔp_in + Δp_airbox + ΣΔp_out。每段均按「沿程摩擦 + 局部阻力」计算 Δp = [f·(L/D) + ΣK]·(ρv²/2)，各段流速按各自内径计算，局部阻力系数按该段局部流速取动压。若某段的进口与出口内径不同，按式(4a)~(4c) 把沿程摩擦分 20 段积分（D_i 取子段平均直径、v_i 按当地截面重算），并按式(4d)~(4f) 分别计入渐扩/渐缩局部损失：θ = 2arctan[(D_out − D_in)/(2L)]，K_exp = k_exp(θ)·(1 − A_in/A_out)²（基准为上游小管流速）、K_con = k_con(θ)·(1 − A_out/A_in)（基准为下游小管流速），k_exp、k_con 按 5°~90° 工程表线性插值；θ ≤ 10° 几乎可忽略，θ > 45° 的渐扩接近突扩必须计入，同面积比下渐扩损失约为渐缩的 1.5~2 倍。弯头不再取固定值，按 K_bend = n·K_90(R/D)·(θ/90°)^0.8~1.2 逐只计算（90°、R/D=1 取 0.3~0.5，R/D=0.5 取 0.8~1.2，直角/拼焊取 1.1~1.5；45° 约为 90° 的一半）。进气管侧每段可选进气管（光滑管 ε_s）、波纹管（f_c = f_s·[1 + k·(h/p)^m]，k = 3~5、m = 1.2~1.5；无几何数据时退回 C_c = 1.5~2.5）或编织管（ε_b = 0.05~0.30 mm，弯曲时按 K·[1 + c_b·D/R_b] 放大、按 A_eff = A·(1 − 0.1·D/R_b) 重算流速）。出气管侧可选普通出气管、波纹管或多腔穿孔消音器：穿孔管摩擦按 f_m = f_s·(1 + a·φ) 放大，φ 为孔总面积与穿孔段管内表面积之比；另计隔板损失、本体突扩/突缩，以及弯曲段整片开孔带来的「冲击 + 腔体交换」附加损失 K_bend,perf = K_bend,0·[1 + c1·(θ/90°)·φ_b] + c2·(θ/90°)²·φ_b/(1 − φ_b)。空滤器阻力 = 箱体局部阻力 + 滤芯多孔介质阻力 (a·v_f + b·v_f²) + 容尘增量 k_d·m_dust，a、b 由 ISO 5011 台架拟合；箱内流场不均匀时按式(13b)(13c) 取有效面速度 v_eff = v_f/η（η = 0.6~1.0：进气口居中、箱体对称取 0.9，进气口偏置、挡板较多取 0.7~0.8，无导流板、进气直冲滤芯取 0.6~0.7），压降按 a·v_eff + b·v_eff² 计算。大气入口段按 Δp = (1 + K_in)·(ρv²/2) − (ρV²/2) 计算，系数是 (1 + K_in) 而不是单独的 K_in，因为把静止空气加速到管内流速所需的动压同样表现为入口静压下降。空气密度可直接输入，也可按温度、海拔与相对湿度由 p(z)、Buck 公式与湿空气状态方程计算（式 20~22）。系统总静压降按式(4g) 另加出口动压 ½ρv_out²（入口为静止大气时），与各段损失之和分开输出，避免把动压项重复计入损失。马赫数 M > 0.3 时按 Δp_comp ≈ Δp_inc·(1 + M²/4) 粗略修正，M > 0.6 应以一维气体动力学（Fanno）或 CFD 复算并做堵塞校核。选定管型后，输入区只显示该元件实际需要的参数，公式区同步切换为该元件的专用公式。',
   inputs: [
     { key: 'Q', label: '系统体积流量', symbol: 'Q', unit: 'm³/h', unitGroup: 'volumeFlow', default: 600, min: 0, required: true, description: '发动机额定功率点或最大扭矩点的进气体积流量，示例 600 m³/h = 0.1667 m³/s' },
     { key: 'rhoMode', label: '密度计算方式', symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '直接输入密度' }, { value: 2, label: '按温度/海拔/湿度计算' }], default: 1, required: true, description: '方式 1 直接用下面的 ρ；方式 2 由本地大气压 p(z)、温度 T 与相对湿度按式 20~22 计算（高原、高温工况推荐）' },
@@ -49,7 +54,8 @@ export const intakeSystemResistance: FormulaSpec = {
     { key: 'CdLeak', label: '编织壁泄漏流量系数', symbol: 'C_d', unit: '-', unitGroup: 'dimensionless', default: 0.7, min: 0, max: 1, required: true, description: '编织管壁面孔隙泄漏量 q = C_d·A_h·(2Δp/ρ)^(1/2) 的流量系数，取 0.6~0.8；泄漏量不计入压降，仅用于评估过滤旁通' },
 
     { key: 't1', label: '进气管段 1 类型', symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '进气管' }, { value: 2, label: '波纹管' }, { value: 3, label: '编织管' }], default: 1, required: true, description: '按实际走向把进气管划分为 3 段，每段单独选型、单独计算' },
-    { key: 'D1', label: '进气管段 1 内径', symbol: 'D_in1', unit: 'mm', unitGroup: 'diameter', default: 70, min: 0, required: true, description: '该段管内径，流速按本段内径计算' },
+    { key: 'D1', label: '进气管段 1 进口内径', symbol: 'D_in1', unit: 'mm', unitGroup: 'diameter', default: 70, min: 0, required: true, description: '该段进口内径，流速按本段进口截面计算（入口段也以此为基准）' },
+    { key: 'Dout1', label: '进气管段 1 出口内径', symbol: 'D_in,out1', unit: 'mm', unitGroup: 'diameter', default: 70, min: 0, required: true, description: '该段出口内径；与进口相同时按等截面直管，不同时按式(4a)~(4f) 渐变管离散（渐扩/渐缩局部损失按锥角查表自动计入）' },
     { key: 'L1', label: '进气管段 1 长度', symbol: 'L_in1', unit: 'mm', unitGroup: 'length', default: 300, min: 0, required: true, description: '该段沿程长度（不含弯头展开长度）' },
     { key: 'K1', label: '进气管段 1 其它局部阻力系数', symbol: 'ΣK_1', unit: '-', unitGroup: 'dimensionless', default: 0.35, min: 0, required: true, description: '不含弯头的局部损失之和（入口、变径、滤网等）；弯头由下面的「弯头规格 / 只数」自动按式 6a 计入' },
     { key: 'bendN1', label: '进气管段 1 弯头规格', symbol: 'K_90', unit: '-', kind: 'select', options: [{ value: 0, label: '无弯头' }, { value: 1, label: '45°，R/D=1（0.18）' }, { value: 2, label: '45°，R/D=0.5（0.35）' }, { value: 3, label: '90°，R/D=2（0.25）' }, { value: 4, label: '90°，R/D=1（0.40）' }, { value: 5, label: '90°，R/D=0.5（1.00）' }, { value: 6, label: '90°直角/拼焊（1.30）' }], default: 0, required: true, description: '按式 6a：K_bend = n·K_90(R/D)·(θ/90°)^0.8~1.2，括号内为 90° 基准值；Re < 10⁵ 或相邻弯头间距 <5D 时应再乘 1.1~1.3' },
@@ -60,7 +66,8 @@ export const intakeSystemResistance: FormulaSpec = {
     { key: 'rbn1', label: '进气管段 1 编织管弯曲半径', symbol: 'R_b1', unit: 'mm', unitGroup: 'length', default: 0, min: 0, showIf: { key: 't1', min: 3, max: 3 }, description: '仅编织管需要：软管弯曲半径 R_b。R_b/D ≥ 3 无附加损失；R_b/D = 2 时 K 增 20%~30% 且有效面积减 5%；R_b/D = 1 时 K 增 40%~60%、有效面积减 10%。0 表示无弯曲' },
 
     { key: 't2', label: '进气管段 2 类型', symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '进气管' }, { value: 2, label: '波纹管' }, { value: 3, label: '编织管' }], default: 2, required: true, description: '示例段 2 为波纹管' },
-    { key: 'D2', label: '进气管段 2 内径', symbol: 'D_in2', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '波纹管内径按波谷或名义内径取值，须与供应商定义一致' },
+    { key: 'D2', label: '进气管段 2 进口内径', symbol: 'D_in2', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '波纹管内径按波谷或名义内径取值，须与供应商定义一致' },
+    { key: 'Dout2', label: '进气管段 2 出口内径', symbol: 'D_in,out2', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '与进口相同时按等截面；不同时按式(4a)~(4f) 渐变管离散，波纹摩擦放大仍逐子段计入' },
     { key: 'L2', label: '进气管段 2 长度', symbol: 'L_in2', unit: 'mm', unitGroup: 'length', default: 150, min: 0, required: true, description: '波纹管自由状态长度' },
     { key: 'K2', label: '进气管段 2 其它局部阻力系数', symbol: 'ΣK_2', unit: '-', unitGroup: 'dimensionless', default: 0.4, min: 0, required: true, description: '不含弯头的局部损失；波纹管弯曲安装时弯头系数取 0.5~0.8（比光滑管大）' },
     { key: 'bendN2', label: '进气管段 2 弯头规格', symbol: 'K_90', unit: '-', kind: 'select', options: [{ value: 0, label: '无弯头' }, { value: 1, label: '45°，R/D=1（0.18）' }, { value: 2, label: '45°，R/D=0.5（0.35）' }, { value: 3, label: '90°，R/D=2（0.25）' }, { value: 4, label: '90°，R/D=1（0.40）' }, { value: 5, label: '90°，R/D=0.5（1.00）' }, { value: 6, label: '90°直角/拼焊（1.30）' }], default: 0, required: true, description: '按式 6a 逐只计算弯头损失；波纹管弯曲时可比光滑管再放大 30%~60%' },
@@ -71,7 +78,8 @@ export const intakeSystemResistance: FormulaSpec = {
     { key: 'rbn2', label: '进气管段 2 编织管弯曲半径', symbol: 'R_b2', unit: 'mm', unitGroup: 'length', default: 0, min: 0, showIf: { key: 't2', min: 3, max: 3 }, description: '仅编织管需要：弯曲半径 R_b，0 表示无弯曲；R_b/D < 3 时按式 9d/9e 放大 K 并折减有效面积' },
 
     { key: 't3', label: '进气管段 3 类型', symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '进气管' }, { value: 2, label: '波纹管' }, { value: 3, label: '编织管' }], default: 3, required: true, description: '示例段 3 为编织管' },
-    { key: 'D3', label: '进气管段 3 内径', symbol: 'D_in3', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '编织管内径' },
+    { key: 'D3', label: '进气管段 3 进口内径', symbol: 'D_in3', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '编织管内径' },
+    { key: 'Dout3', label: '进气管段 3 出口内径', symbol: 'D_in,out3', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '与进口相同时按等截面；不同时按式(4a)~(4f) 渐变管离散' },
     { key: 'L3', label: '进气管段 3 长度', symbol: 'L_in3', unit: 'mm', unitGroup: 'length', default: 250, min: 0, required: true, description: '编织管长度' },
     { key: 'K3', label: '进气管段 3 其它局部阻力系数', symbol: 'ΣK_3', unit: '-', unitGroup: 'dimensionless', default: 0.3, min: 0, required: true, description: '不含弯头的局部损失；编织管弯曲时弯头 K 建议 ≥ 0.4' },
     { key: 'bendN3', label: '进气管段 3 弯头规格', symbol: 'K_90', unit: '-', kind: 'select', options: [{ value: 0, label: '无弯头' }, { value: 1, label: '45°，R/D=1（0.18）' }, { value: 2, label: '45°，R/D=0.5（0.35）' }, { value: 3, label: '90°，R/D=2（0.25）' }, { value: 4, label: '90°，R/D=1（0.40）' }, { value: 5, label: '90°，R/D=0.5（1.00）' }, { value: 6, label: '90°直角/拼焊（1.30）' }], default: 0, required: true, description: '按式 6a 逐只计算；急弯（R/D < 1）与入口损失叠加是进气阻力最容易被低估的部位' },
@@ -88,9 +96,11 @@ export const intakeSystemResistance: FormulaSpec = {
     { key: 'bF', label: '滤芯压降二次系数', symbol: 'b', unit: 'Pa·s²/m²', default: 800, min: 0, required: true, description: 'ISO 5011 台架拟合的惯性项系数（Pa·s²/m²）' },
     { key: 'mDust', label: '容尘量', symbol: 'm_dust', unit: 'g', default: 0, min: 0, required: true, description: '已积尘质量，初始状态取 0，终了状态按容尘试验值校核' },
     { key: 'kD', label: '容尘系数', symbol: 'k_d', unit: 'Pa/g', default: 0, min: 0, required: true, description: '容尘引起的压降增长率（Pa/g），由容尘试验确定；初始状态取 0' },
+    { key: 'eta', label: '箱内流场不均匀系数', symbol: 'η', unit: '-', unitGroup: 'dimensionless', default: 1.0, min: 0.5, max: 1, required: true, description: '式(13b)(13c)：v_eff = v_f/η，按 a·v_eff + b·v_eff² 计算滤芯压降。进气口居中、箱体对称取 0.9；进气口偏置、挡板较多取 0.7~0.8；无导流板、进气直冲滤芯取 0.6~0.7；1.0 表示流场均匀' },
 
     { key: 'o1', label: '出气管段 1 类型', symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '出气管' }, { value: 2, label: '波纹管' }, { value: 3, label: '多腔穿孔消音器' }], default: 1, required: true, description: '出气管侧同样分 3 段，示例段 1 为出气管' },
-    { key: 'Do1', label: '出气管段 1 内径', symbol: 'D_out1', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '出气管段内径' },
+    { key: 'Do1', label: '出气管段 1 进口内径', symbol: 'D_out1', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '出气管段进口内径' },
+    { key: 'Douto1', label: '出气管段 1 出口内径', symbol: 'D_out,out1', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '与进口相同时按等截面；不同时按式(4a)~(4f) 渐变管离散，出口速度也用于系统出口动压' },
     { key: 'Lo1', label: '出气管段 1 长度', symbol: 'L_out1', unit: 'mm', unitGroup: 'length', default: 400, min: 0, required: true, description: '出气管段长度' },
     { key: 'Ko1', label: '出气管段 1 其它局部阻力系数', symbol: 'ΣK_out1', unit: '-', unitGroup: 'dimensionless', default: 0.8, min: 0, required: true, description: '不含弯头的局部损失（节气门全开 0.1~0.3、变径等）；弯头由下面的「弯头规格 / 只数」按式 6a 计入' },
     { key: 'bendO1', label: '出气管段 1 弯头规格', symbol: 'K_90', unit: '-', kind: 'select', options: [{ value: 0, label: '无弯头' }, { value: 1, label: '45°，R/D=1（0.18）' }, { value: 2, label: '45°，R/D=0.5（0.35）' }, { value: 3, label: '90°，R/D=2（0.25）' }, { value: 4, label: '90°，R/D=1（0.40）' }, { value: 5, label: '90°，R/D=0.5（1.00）' }, { value: 6, label: '90°直角/拼焊（1.30）' }], default: 0, required: true, description: '按式 6a 逐只计算弯头损失' },
@@ -105,7 +115,8 @@ export const intakeSystemResistance: FormulaSpec = {
     { key: 'kb1', label: '出气管段 1 隔板/挡板损失系数', symbol: 'ΣK_baf1', unit: '-', unitGroup: 'dimensionless', default: 0, min: 0, showIf: { key: 'o1', min: 3, max: 3 }, description: '仅多腔穿孔消音器需要：各腔隔板缩流损失之和，K = 0.5(1−A_b/A) + (1−A_b/A)²，典型 0.05~0.2/道；不缩流的环形挡板取 0.02~0.05' },
 
     { key: 'o2', label: '出气管段 2 类型', symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '出气管' }, { value: 2, label: '波纹管' }, { value: 3, label: '多腔穿孔消音器' }], default: 3, required: true, description: '示例段 2 为多腔穿孔消音器' },
-    { key: 'Do2', label: '出气管段 2 内径', symbol: 'D_out2', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '消音器穿孔管主体内径' },
+    { key: 'Do2', label: '出气管段 2 进口内径', symbol: 'D_out2', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '消音器穿孔管主体内径' },
+    { key: 'Douto2', label: '出气管段 2 出口内径', symbol: 'D_out,out2', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '与进口相同时按等截面；不同时按式(4a)~(4f) 渐变管离散' },
     { key: 'Lo2', label: '出气管段 2 长度', symbol: 'L_out2', unit: 'mm', unitGroup: 'length', default: 200, min: 0, required: true, description: '穿孔管有效长度' },
     { key: 'Ko2', label: '出气管段 2 其它局部阻力系数', symbol: 'ΣK_out2', unit: '-', unitGroup: 'dimensionless', default: 0.4, min: 0, required: true, description: '消音器进出口 K_in,m + K_out,m（不含弯头与隔板）；本体直径大于主管时按突扩/突缩另加' },
     { key: 'bendO2', label: '出气管段 2 弯头规格', symbol: 'K_90', unit: '-', kind: 'select', options: [{ value: 0, label: '无弯头' }, { value: 1, label: '45°，R/D=1（0.18）' }, { value: 2, label: '45°，R/D=0.5（0.35）' }, { value: 3, label: '90°，R/D=2（0.25）' }, { value: 4, label: '90°，R/D=1（0.40）' }, { value: 5, label: '90°，R/D=0.5（1.00）' }, { value: 6, label: '90°直角/拼焊（1.30）' }], default: 0, required: true, description: '消音器弯曲 90° 时按式 15c 与弯曲段穿孔率 φ_b 联合修正；本项为同几何光滑弯头的 K_bend,0' },
@@ -120,7 +131,8 @@ export const intakeSystemResistance: FormulaSpec = {
     { key: 'kb2', label: '出气管段 2 隔板/挡板损失系数', symbol: 'ΣK_baf2', unit: '-', unitGroup: 'dimensionless', default: 0, min: 0, showIf: { key: 'o2', min: 3, max: 3 }, description: '仅多腔穿孔消音器需要：多腔隔板缩流损失之和，典型 0.05~0.2/道' },
 
     { key: 'o3', label: '出气管段 3 类型', symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '出气管' }, { value: 2, label: '波纹管' }, { value: 3, label: '多腔穿孔消音器' }], default: 1, required: true, description: '未使用的段可将长度与局部阻力系数取 0' },
-    { key: 'Do3', label: '出气管段 3 内径', symbol: 'D_out3', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '出气管段内径' },
+    { key: 'Do3', label: '出气管段 3 进口内径', symbol: 'D_out3', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '出气管段进口内径' },
+    { key: 'Douto3', label: '出气管段 3 出口内径', symbol: 'D_out,out3', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '与进口相同时按等截面；不同时按式(4a)~(4f) 渐变管离散；该段为系统末段，出口速度决定出口动压' },
     { key: 'Lo3', label: '出气管段 3 长度', symbol: 'L_out3', unit: 'mm', unitGroup: 'length', default: 0, min: 0, required: true, description: '该段长度，未使用取 0' },
     { key: 'Ko3', label: '出气管段 3 其它局部阻力系数', symbol: 'ΣK_out3', unit: '-', unitGroup: 'dimensionless', default: 0, min: 0, required: true, description: '该段不含弯头的局部损失，未使用取 0' },
     { key: 'bendO3', label: '出气管段 3 弯头规格', symbol: 'K_90', unit: '-', kind: 'select', options: [{ value: 0, label: '无弯头' }, { value: 1, label: '45°，R/D=1（0.18）' }, { value: 2, label: '45°，R/D=0.5（0.35）' }, { value: 3, label: '90°，R/D=2（0.25）' }, { value: 4, label: '90°，R/D=1（0.40）' }, { value: 5, label: '90°，R/D=0.5（1.00）' }, { value: 6, label: '90°直角/拼焊（1.30）' }], default: 0, required: true, description: '按式 6a 逐只计算弯头损失' },
@@ -147,7 +159,8 @@ export const intakeSystemResistance: FormulaSpec = {
     { key: 'lk3', label: '进气管段 3 编织壁泄漏量', symbol: 'q_leak3', unit: 'm³/s', unitGroup: 'volumeFlow', digits: 5, group: '进气管段', showIf: { key: 't3', min: 3, max: 3 }, description: 'q = C_d·A_h·(2Δp/ρ)^(1/2)；泄漏占总量 >2% 时需评估过滤效率影响' },
 
     { key: 'dpBox', label: '空滤器箱体压降', symbol: 'Δp_box', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '空滤器', description: 'ΣK_box·(ρv_box²/2)，v_box = Q/A_box' },
-    { key: 'dpFilter', label: '滤芯压降', symbol: 'Δp_f', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '空滤器', description: 'a·v_f + b·v_f²，v_f = Q/A_f（未含容尘）' },
+    { key: 'dpFilter', label: '滤芯压降', symbol: 'Δp_f', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '空滤器', description: 'a·v_eff + b·v_eff²，v_eff = v_f/η（未含容尘）' },
+    { key: 'vEff', label: '滤芯有效面速度', symbol: 'v_eff', unit: 'm/s', unitGroup: 'velocity', digits: 3, group: '空滤器', description: '式(13b)：v_eff = v_f/η，η < 1 时表示箱内流场不均匀、局部面速度升高' },
     { key: 'dpAirbox', label: '空滤器总压降', symbol: 'Δp_airbox', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '空滤器', primary: true, description: '箱体 + 滤芯 + 容尘（k_d·m_dust）' },
 
     { key: 'dpOut1', label: '出气管段 1 压降', symbol: 'Δp_out1', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '出气管段', description: '出气管段按各自类型计算' },
@@ -163,7 +176,11 @@ export const intakeSystemResistance: FormulaSpec = {
     { key: 'dpB2', label: '出气管段 2 弯曲开孔附加损失', symbol: 'Δp_bend2', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '出气管段', showIf: { key: 'o2', min: 3, max: 3 }, description: '式 15b/15c：弯曲段整片开孔带来的「冲击 + 腔体交换」附加损失' },
     { key: 'dpB3', label: '出气管段 3 弯曲开孔附加损失', symbol: 'Δp_bend3', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '出气管段', showIf: { key: 'o3', min: 3, max: 3 }, description: '式 15b/15c：无弯曲或 φ_b = 0 时为 0' },
 
-    { key: 'dpTotal', label: '系统总阻力', symbol: 'Δp_sys', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '汇总', primary: true, description: '入口段 + 进气管 3 段 + 空滤器 + 出气管 3 段之和' },
+    { key: 'dpTotal', label: '系统总阻力', symbol: 'Δp_sys', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '汇总', primary: true, description: '入口段 + 进气管 3 段 + 空滤器 + 出气管 3 段各段静压损失之和（不含出口动压）' },
+    { key: 'vOut', label: '系统出口流速', symbol: 'v_out', unit: 'm/s', unitGroup: 'velocity', digits: 3, group: '汇总', description: '按出气管段 3 的出口内径计算，v_out = Q/(πD_out,out3²/4)' },
+    { key: 'dpDyn', label: '出口动压', symbol: 'Δp_dyn,out', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '汇总', description: '式(4g)：Δp_dyn = ½ρv_out²，入口为静止大气时这部分动压同样由系统提供' },
+    { key: 'dpTotalStatic', label: '系统总静压降', symbol: 'Δp_sys,static', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '汇总', description: '式(4g)：Δp_sys,static = Δp_sys + ½ρv_out²，与各段损失之和分开输出' },
+    { key: 'thetaMax', label: '最大全锥角', symbol: 'θ_max', unit: '°', digits: 2, group: '汇总', description: '式(4d)：θ = 2arctan[(D_out − D_in)/(2L)]，各段中绝对值最大者；θ ≤ 10° 渐变损失可忽略，θ > 45° 渐扩接近突扩' },
     { key: 'Mmax', label: '最大马赫数', symbol: 'M_max', unit: '-', unitGroup: 'dimensionless', digits: 3, group: '汇总', description: '各段 M = v/c 的最大值；M > 0.3 需做可压缩修正，M > 0.6 需 Fanno/CFD 并校核堵塞' },
     { key: 'dpComp', label: '可压缩修正后总阻力', symbol: 'Δp_comp', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '汇总', description: 'Δp_comp ≈ Δp_sys·(1 + M_max²/4)，M > 0.5 时误差变大，应逐段迭代 p、ρ、v' },
     { key: 'S', label: '系统阻力系数', symbol: 'S', unit: 'Pa·s²/m³', digits: 4, group: '汇总', description: 'S = Δp_sys/Q²，用于绘制 Δp = S·Q² 曲线并与发动机需求曲线匹配' },
@@ -174,6 +191,8 @@ export const intakeSystemResistance: FormulaSpec = {
     { label: '雷诺数', tex: 'Re = \\frac{\\rho v D}{\\mu}' },
     { label: '通用段阻力（沿程摩擦 + 局部阻力）', tex: '\\Delta p = \\left[ f\\,\\frac{L}{D} + \\sum K \\right]\\cdot\\frac{\\rho v^{2}}{2}' },
     { label: '达西摩擦因子（Swamee-Jain 显式解）', tex: 'f = \\frac{0.25}{\\left\\{\\lg\\left[\\dfrac{\\varepsilon}{3.7D} + \\dfrac{5.74}{Re^{0.9}}\\right]\\right\\}^{2}}' },
+    { label: '渐变管：直径变化与沿程摩擦离散（式 4a~4c，N = 20）', tex: 'D(x) = D_{in} + \\left(D_{out} - D_{in}\\right)\\frac{x}{L},\\quad v(x) = \\frac{4Q}{\\pi D(x)^{2}},\\qquad \\Delta p_{f} \\approx \\sum_{i=1}^{N} f_i\\frac{\\Delta L}{D_i}\\frac{\\rho v_i^{2}}{2}' },
+    { label: '渐变管：全锥角与渐扩/渐缩局部损失（式 4d~4f）', tex: '\\theta = 2\\arctan\\frac{D_{out} - D_{in}}{2L},\\qquad K_{exp} = k_{exp}(\\theta)\\left(1 - \\frac{A_{in}}{A_{out}}\\right)^{2},\\qquad K_{con} = k_{con}(\\theta)\\left(1 - \\frac{A_{out}}{A_{in}}\\right)' },
     { label: '弯头损失（逐只计算，式 6a/6b）', tex: 'K_{bend} = n\\cdot K_{90}\\!\\left(\\frac{R}{D}\\right)\\cdot\\left(\\frac{\\theta}{90^{\\circ}}\\right)^{0.8\\sim 1.2}' },
     { label: '进气管段 1：波纹管（几何相关摩擦放大，式 7）', tex: 'f_c = f_s\\left[1 + k\\left(\\frac{h}{p}\\right)^{m}\\right],\\qquad \\Delta p = \\left[f_c\\frac{L}{D} + \\Sigma K\\right]\\frac{\\rho v^{2}}{2}', showIf: { key: 't1', min: 2, max: 2 } },
     { label: '进气管段 1：编织管（弯曲修正 + 壁面泄漏，式 9a/9d/9e）', tex: 'K_{br} = K\\left[1 + c_b\\frac{D}{R_b}\\right],\\quad A_{eff} = A\\left(1 - 0.1\\frac{D}{R_b}\\right),\\quad q_{leak} = C_d A_h\\sqrt{\\frac{2\\Delta p}{\\rho}}', showIf: { key: 't1', min: 3, max: 3 } },
@@ -194,7 +213,9 @@ export const intakeSystemResistance: FormulaSpec = {
     { label: '出气管段 2：孔口射流损失（穿流结构）', tex: '\\Delta p_{jet} = \\left(\\frac{1}{C_d^{2}}-1\\right)\\frac{\\rho v_h^{2}}{2},\\qquad v_h = \\frac{Q_{th}}{A_h}', showIf: { key: 'o2', min: 3, max: 3 } },
     { label: '出气管段 3：孔口射流损失（穿流结构）', tex: '\\Delta p_{jet} = \\left(\\frac{1}{C_d^{2}}-1\\right)\\frac{\\rho v_h^{2}}{2},\\qquad v_h = \\frac{Q_{th}}{A_h}', showIf: { key: 'o3', min: 3, max: 3 } },
     { label: '空滤器阻力（箱体 + 滤芯 + 容尘）', tex: '\\Delta p_{airbox} = \\sum K_{box}\\frac{\\rho v_{box}^{2}}{2} + \\left(a\\,v_f + b\\,v_f^{2}\\right) + k_d\\, m_{dust},\\qquad v_f = \\frac{Q}{A_f}' },
+    { label: '空滤器流场不均匀修正（式 13b/13c）', tex: 'v_{eff} = \\frac{v_f}{\\eta},\\qquad \\Delta p_{filter} = a\\,v_{eff} + b\\,v_{eff}^{2},\\qquad \\eta = 0.6\\sim 1.0' },
     { label: '大气入口段压降（含车速冲压与舱内负压）', tex: '\\Delta p_{entrance} = \\left(1 + K_{in}\\right)\\frac{\\rho v_{in}^{2}}{2} - \\frac{\\rho V^{2}}{2} + p_{bay}' },
+    { label: '出口动压与系统总静压降（式 4g）', tex: '\\Delta p_{dyn,out} = \\frac{1}{2}\\rho v_{out}^{2},\\qquad \\Delta p_{sys,static} = \\Delta p_{sys} + \\frac{1}{2}\\rho v_{out}^{2}' },
     { label: '湿空气密度与海拔修正（式 20~22）', tex: '\\rho = \\frac{p}{R_d T}\\left[1 - 0.378\\frac{p_v}{p}\\right],\\qquad p = p_0\\left(1 - 2.2557\\times 10^{-5}z\\right)^{5.2559},\\qquad p_v = RH\\cdot 611.2\\exp\\left(\\frac{17.62T_c}{243.12 + T_c}\\right)', showIf: { key: 'rhoMode', min: 2, max: 2 } },
     { label: '马赫数与声速', tex: 'M = \\frac{v}{c},\\qquad c = \\sqrt{\\gamma R T}' },
     { label: '可压缩性工程修正', tex: '\\Delta p_{comp} \\approx \\Delta p_{sys}\\left(1 + \\frac{M^{2}}{4}\\right)' },
@@ -221,15 +242,19 @@ export const intakeSystemResistance: FormulaSpec = {
     '弯头按式 6a/6b 逐只计算：K_bend = n·K_90(R/D)·(θ/90°)^0.8~1.2，规格下拉已内置 45°/R/D=1 0.18、45°/R/D=0.5 0.35、90°/R/D=2 0.25、90°/R/D=1 0.40、90°/R/D=0.5 1.00、90° 直角/拼焊 1.30；本公式取指数 1.0。Re < 10⁵ 或相邻弯头间距 < 5D 时应再乘 1.1~1.3，该放大需用户自行并入弯头规格系数或 ΣK',
     '波纹管摩擦按式 7：f_c = f_s·[1 + k·(h/p)^m]，k = 3~5、m = 1.2~1.5；h 或 p 未填写（为 0）时退回 C_c·f_s（C_c = 1.5~2.5）。轴向拉伸后波距变大、f_c 下降 5%~15%，设计按自由状态波距取值',
     '编织管按式 9a/9d/9e 计算：摩擦用 ε_b = 0.05~0.30 mm 的粗糙管；弯曲时弯头系数 K 增 c_b·D/R_b（c_b = 0.4~0.6），有效面积 A_eff = A·(1 − 0.1·D/R_b)，流速与动压按 A_eff 重算；R_b/D ≥ 3 时附加可忽略',
+    '某段进口与出口内径不同时按渐变管式 4a~4f 计算：沿程摩擦按 N = 20 个子段积分（D_i 取子段平均直径、v_i 按当地截面重算），全锥角 θ = 2arctan[(D_out − D_in)/(2L)]，渐扩 K_exp = k_exp(θ)·(1 − A_in/A_out)²（基准 v_in）、渐缩 K_con = k_con(θ)·(1 − A_out/A_in)（基准 v_out）；k_exp、k_con 由 5°/10°/20°/30°/45°/60°/90° 工程表线性插值，θ < 5° 按 0 线性过渡，θ > 90° 取末值',
+    'θ ≤ 10° 的渐变损失几乎可忽略，θ > 45° 的渐扩接近突扩必须计入；同面积比下渐扩损失约为渐缩的 1.5~2 倍，因此进气管收缩段比扩张段更有利',
     '多腔穿孔消音器按式 15/15a：穿孔率 φ = A_h/(π·D·L)（A_h 为穿孔段孔口总面积，L 为穿孔段长度），摩擦按 f_m = f_s·(1 + a·φ) 放大，a = 0.5~1.5、无试验数据取 1.0；另计进出口 K、隔板 ΣK_baf 与本体突扩/突缩',
     '穿孔弯头按式 15b/15c 计算附加损失：K_bend,perf = K_bend,0·[1 + c1·(θ/90°)·φ_b] + c2·(θ/90°)²·φ_b/(1 − φ_b)，c1 = 1~2、c2 = 0.5~1.5；θ < 30° 且 φ_b < 0.1 时可直接把 φ_b 取 0 按光滑弯头计算，θ ≥ 60° 且 φ_b > 0.2 必须计入',
     '空气密度可选直接输入或按式 20~22 计算：ρ = p/(R_d·T)·(1 − 0.378·p_v/p)，p = p0·(1 − 2.2557×10⁻⁵·z)^5.2559，p_v = RH·p_sat，p_sat 按 Buck 公式；系统内仍用同一密度，各段温度不同时应逐段按当地密度修正',
     '按不可压缩流处理，各段流速与动压按该段内径计算；增压机型出气管（60~80 ℃）须按 Δp₂ = Δp₁·(ρ₂/ρ₁) 修正',
     '摩擦因子用 Swamee-Jain 显式解代替 Colebrook 迭代，Re > 1000 时误差 < 1%；波纹管用式 7 放大、编织管与穿孔管用等效粗糙度近似',
     '空滤器滤芯系数 a、b 必须由本滤芯的 ISO 5011 台架试验拟合，不能套用其它滤芯；k_d 由容尘试验确定，设计时按「初始」与「终了」两种状态分别校核',
+    '箱内流场不均匀按式 13b/13c 修正：v_eff = v_f/η，滤芯压降按 a·v_eff + b·v_eff² 计算；η = 0.6~1.0（进气口居中、箱体对称 0.9；进气口偏置、挡板较多 0.7~0.8；无导流板直冲滤芯 0.6~0.7），η = 1 表示流场均匀、与 v_f 直接计算等价',
     '消音器环腔为封闭腔、无净穿流，孔口不计射流损失；若结构存在穿流（如回流式），须另填 Q_th 并按 Δp_jet = (1/C_d² − 1)·ρv_h²/2 计算',
     '编织管壁面孔隙泄漏量 q = C_d·A_h·(2Δp/ρ)^(1/2) 只作旁通评估，不计入系统压降；泄漏占总量 >2% 时须评估对过滤效率与压降测量的影响',
     '大气入口段按 (1 + K_in)·(ρv²/2) − (ρV²/2) + p_bay 计算，即同时计入「加速到管内流速所需的动压」与「入口几何局部损失」；此段以进气管段 1 的内径与流速为基准',
+    '按式 4g 把「各段损失」与「出口动压」分开输出：Δp_sys 为各段静压损失之和，Δp_sys,static = Δp_sys + ½ρv_out² 为入口静止大气时的系统总静压降；接入发动机后若出口背压由进气歧管提供，则不应重复计入 ½ρv_out²',
     '马赫数修正采用 Δp_comp ≈ Δp_sys·(1 + M²/4)：M < 0.5 时误差约 3%，M > 0.6 应改用一维气体动力学（Fanno/等温流）或 CFD，并做堵塞校核',
     '一维计算用于方案筛选与管径/弯头优化，定型前须做 CFD 稳态/瞬态或整机台架验证',
   ],
@@ -237,13 +262,14 @@ export const intakeSystemResistance: FormulaSpec = {
     const empty = {
       vIn: NaN, dpEntrance: NaN,
       dpIn1: NaN, dpIn2: NaN, dpIn3: NaN,
-      dpBox: NaN, dpFilter: NaN, dpAirbox: NaN,
+      dpBox: NaN, dpFilter: NaN, dpAirbox: NaN, vEff: NaN,
       dpOut1: NaN, dpOut2: NaN, dpOut3: NaN,
       dpJet1: NaN, dpJet2: NaN, dpJet3: NaN,
       dpB1: NaN, dpB2: NaN, dpB3: NaN, phiA1: NaN, phiA2: NaN, phiA3: NaN,
       rhoUsed: NaN,
       lk1: NaN, lk2: NaN, lk3: NaN,
-      dpTotal: NaN, Mmax: NaN, dpComp: NaN, S: NaN,
+      dpTotal: NaN, vOut: NaN, dpDyn: NaN, dpTotalStatic: NaN, thetaMax: NaN,
+      Mmax: NaN, dpComp: NaN, S: NaN,
     };
 
     const segOk = (D: number, L: number, K: number) =>
@@ -252,15 +278,21 @@ export const intakeSystemResistance: FormulaSpec = {
     const num = (x: number, min = 0) => Number.isFinite(x) && x >= min;
     const bendOk = (o: number, n: number) => Number.isInteger(o) && o >= 0 && o <= 6 && num(n);
     const phiOk = (x: number) => Number.isFinite(x) && x >= 0 && x <= 1;
+    /** 出口内径缺省（未填）视为与进口相同；填 0 也按等径处理 */
+    const dOutOk = (x: number) => !Number.isFinite(x) || x >= 0;
+    /** 流场不均匀系数：未填按 1.0；填写时限定 0.5~1.0 */
+    const etaOk = (x: number) => !Number.isFinite(x) || (x >= 0.5 && x <= 1);
 
     if (!(v.Q > 0) || !(v.mu > 0) || !(v.T > 0) || !num(v.V) || !num(v.Kin) || !Number.isFinite(v.pBay) ||
         !(v.rhoMode === 2 ? num(v.z) && phiOk(v.RH) : v.rho > 0) ||
         !num(v.epsS) || !num(v.Cc, 1) || !num(v.kBell) || !num(v.mBell) || !num(v.epsB) || !num(v.cb) ||
         !num(v.epsM) || !num(v.aPerf) || !num(v.c1) || !num(v.c2) || !num(v.CdLeak) ||
         !(v.ABox > 0) || !num(v.KBox) || !(v.Af > 0) ||
-        !num(v.aF) || !num(v.bF) || !num(v.mDust) || !num(v.kD) ||
+        !num(v.aF) || !num(v.bF) || !num(v.mDust) || !num(v.kD) || !etaOk(v.eta) ||
         !segOk(v.D1, v.L1, v.K1) || !segOk(v.D2, v.L2, v.K2) || !segOk(v.D3, v.L3, v.K3) ||
         !segOk(v.Do1, v.Lo1, v.Ko1) || !segOk(v.Do2, v.Lo2, v.Ko2) || !segOk(v.Do3, v.Lo3, v.Ko3) ||
+        !dOutOk(v.Dout1) || !dOutOk(v.Dout2) || !dOutOk(v.Dout3) ||
+        !dOutOk(v.Douto1) || !dOutOk(v.Douto2) || !dOutOk(v.Douto3) ||
         !bendOk(v.bendN1, v.nb1) || !bendOk(v.bendN2, v.nb2) || !bendOk(v.bendN3, v.nb3) ||
         !bendOk(v.bendO1, v.nbo1) || !bendOk(v.bendO2, v.nbo2) || !bendOk(v.bendO3, v.nbo3) ||
         !num(v.h1) || !num(v.p1) || !num(v.h2) || !num(v.p2) || !num(v.h3) || !num(v.p3) ||
@@ -308,42 +340,99 @@ export const intakeSystemResistance: FormulaSpec = {
       6: { k: 1.3, th: 90 },
     };
 
+    /**
+     * 渐变管锥角系数表（式 4e/4f）：θ(°) 与 k_exp、k_con；
+     * θ < 5° 时从 0 线性过渡到首值，θ > 90° 取末值。
+     */
+    const THETA_TAB = [5, 10, 20, 30, 45, 60, 90];
+    const KEXP_TAB = [0.05, 0.08, 0.15, 0.3, 0.55, 0.8, 1.0];
+    const KCON_TAB = [0.02, 0.03, 0.05, 0.08, 0.12, 0.18, 0.3];
+    const interpTab = (tab: number[], deg: number) => {
+      const d = Math.abs(deg);
+      const last = THETA_TAB.length - 1;
+      if (d <= THETA_TAB[0]) return tab[0] * (d / THETA_TAB[0]);
+      if (d >= THETA_TAB[last]) return tab[last];
+      for (let i = 1; i <= last; i++) {
+        if (d <= THETA_TAB[i]) {
+          const t = (d - THETA_TAB[i - 1]) / (THETA_TAB[i] - THETA_TAB[i - 1]);
+          return tab[i - 1] + (tab[i] - tab[i - 1]) * t;
+        }
+      }
+      return tab[last];
+    };
+    /** 渐变管沿程摩擦离散段数（式 4c 要求 N ≥ 10，本式取 20） */
+    const TAPER_N = 20;
+
     type SegOpt = { h?: number; p?: number; rb?: number; ah?: number; phiB?: number; kb?: number; Db?: number };
 
-    const seg = (type: number, D: number, L: number, K: number, bend: number, nb: number, opt: SegOpt, side: 'in' | 'out') => {
-      const A0 = (Math.PI * D * D) / 4;
+    const seg = (type: number, din: number, doutRaw: number, L: number, K: number, bend: number, nb: number, opt: SegOpt, side: 'in' | 'out') => {
+      const dout = Number.isFinite(doutRaw) && doutRaw > 0 ? doutRaw : din;
+      const tapered = L > 0 && Math.abs(dout / din - 1) > 1e-9;
       const eps = type === 3 ? (side === 'in' ? v.epsB : v.epsM) : v.epsS;
-      let Aeff = A0;
-      let kBendAmp = 1;
-      if (side === 'in' && type === 3 && opt.rb! > 0) {
-        const ratio = D / opt.rb!;
-        Aeff = Math.max(A0 * (1 - 0.1 * ratio), 0.5 * A0);
-        kBendAmp = 1 + v.cb * ratio;
-      }
-      const vel = Q / Aeff;
-      const Re = (rho * vel * D) / mu;
+      /** 编织管弯曲：按当地直径折减有效面积、放大弯头系数（式 9d/9e） */
+      const areaAt = (D: number) => {
+        const A = (Math.PI * D * D) / 4;
+        if (side === 'in' && type === 3 && opt.rb! > 0) {
+          const ratio = D / opt.rb!;
+          return { Aeff: Math.max(A * (1 - 0.1 * ratio), 0.5 * A), kBendAmp: 1 + v.cb * ratio };
+        }
+        return { Aeff: A, kBendAmp: 1 };
+      };
+      const inl = areaAt(din);
+      const outl = areaAt(dout);
+      const vel = Q / inl.Aeff;
+      const velOut = Q / outl.Aeff;
+      const Re = (rho * vel * din) / mu;
+      /** 波纹管/穿孔管的摩擦放大系数（穿孔率随当地直径变化，故逐子段另算） */
       let mult = 1;
       if (type === 2) {
         const hp = opt.h! > 0 && opt.p! > 0 ? opt.h! / opt.p! : 0;
         mult = hp > 0 ? 1 + v.kBell * Math.pow(hp, v.mBell) : v.Cc;
       }
-      let phi = 0;
-      if (side === 'out' && type === 3) {
-        phi = L > 0 && opt.ah! > 0 ? opt.ah! / (Math.PI * D * L) : 0;
-        mult = 1 + v.aPerf * phi;
-      }
-      const f = fric(Re, eps, D) * mult;
+      const phiAt = (D: number) =>
+        side === 'out' && type === 3 && L > 0 && opt.ah! > 0 ? opt.ah! / (Math.PI * D * L) : 0;
+      const phi = phiAt(din);
+      if (side === 'out' && type === 3) mult = 1 + v.aPerf * phi;
+      const f = fric(Re, eps, din) * mult;
       const b = K90[bend] ?? K90[0];
       const th = b.th / 90;
       const pb = side === 'out' && type === 3 ? Math.min(opt.phiB ?? 0, 0.95) : 0;
       const kSmooth = b.k * (1 + v.c1 * th * pb) + v.c2 * th * th * (pb / (1 - pb));
-      const kPer = kSmooth * kBendAmp;
+      const kPer = kSmooth * inl.kBendAmp;
       const nBend = nb > 0 ? nb : 0;
-      const kJoint = K + nBend * kPer + (side === 'out' && type === 3 ? kGeo(opt.Db!, D) + (opt.kb ?? 0) : 0);
+      const kJoint = K + nBend * kPer + (side === 'out' && type === 3 ? kGeo(opt.Db!, din) + (opt.kb ?? 0) : 0);
       const qDyn = 0.5 * rho * vel * vel;
-      const dp = (f * (L / D) + kJoint) * qDyn;
+
+      /** 等径段：Δp = [f·(L/D) + ΣK]·(ρv²/2)（基准算例的路径，保持不变） */
+      let dp = (f * (L / din) + kJoint) * qDyn;
+      /** 出口动压（式 4g 用末段出口流速；等径时与进口流速相同） */
+      const qDynOut = 0.5 * rho * velOut * velOut;
+      let thetaDeg = 0;
+      if (tapered) {
+        // 式 4a~4c：沿程摩擦按 N 段积分，D_i 取子段平均直径、v_i 按当地截面重算
+        const dl = L / TAPER_N;
+        let dpFric = 0;
+        for (let i = 0; i < TAPER_N; i++) {
+          const Di = din + (dout - din) * ((i + 0.5) / TAPER_N);
+          const li = areaAt(Di);
+          const vi = Q / li.Aeff;
+          const Rei = (rho * vi * Di) / mu;
+          const mi = side === 'out' && type === 3 ? 1 + v.aPerf * phiAt(Di) : mult;
+          const fi = fric(Rei, eps, Di) * mi;
+          dpFric += fi * (dl / Di) * 0.5 * rho * vi * vi;
+        }
+        // 式 4d~4f：全锥角与渐扩/渐缩局部损失（渐扩以 v_in 为基准、渐缩以 v_out 为基准）
+        thetaDeg = (2 * Math.atan((dout - din) / (2 * L)) * 180) / Math.PI;
+        const aRatio = outl.Aeff / inl.Aeff;
+        const kTaper = dout > din
+          ? interpTab(KEXP_TAB, thetaDeg) * Math.pow(1 - 1 / aRatio, 2) * qDyn
+          : interpTab(KCON_TAB, thetaDeg) * (1 - aRatio) * qDynOut;
+        dp = dpFric + kJoint * qDyn + kTaper;
+      }
+
       const dpB = nBend * (kSmooth - b.k) * qDyn;
-      return { vel, M: vel / Math.sqrt(gamma * R * v.T), dp, dpB, phi };
+      const M = (tapered ? Math.max(vel, velOut) : vel) / Math.sqrt(gamma * R * v.T);
+      return { vel, velOut, M, dp, dpB, phi, thetaDeg };
     };
 
     /** 消音器壳体与穿孔管不同径时的突扩 + 突缩系数（等径为 0） */
@@ -364,14 +453,14 @@ export const intakeSystemResistance: FormulaSpec = {
     const leakQ = (A: number, dp: number) =>
       A > 0 && dp > 0 ? v.CdLeak * A * Math.sqrt((2 * dp) / rho) : 0;
 
-    const s1 = seg(v.t1, v.D1, v.L1, v.K1, v.bendN1, v.nb1, { h: v.h1, p: v.p1, rb: v.rbn1 }, 'in');
-    const s2 = seg(v.t2, v.D2, v.L2, v.K2, v.bendN2, v.nb2, { h: v.h2, p: v.p2, rb: v.rbn2 }, 'in');
-    const s3 = seg(v.t3, v.D3, v.L3, v.K3, v.bendN3, v.nb3, { h: v.h3, p: v.p3, rb: v.rbn3 }, 'in');
-    const s4 = seg(v.o1, v.Do1, v.Lo1, v.Ko1, v.bendO1, v.nbo1,
+    const s1 = seg(v.t1, v.D1, v.Dout1, v.L1, v.K1, v.bendN1, v.nb1, { h: v.h1, p: v.p1, rb: v.rbn1 }, 'in');
+    const s2 = seg(v.t2, v.D2, v.Dout2, v.L2, v.K2, v.bendN2, v.nb2, { h: v.h2, p: v.p2, rb: v.rbn2 }, 'in');
+    const s3 = seg(v.t3, v.D3, v.Dout3, v.L3, v.K3, v.bendN3, v.nb3, { h: v.h3, p: v.p3, rb: v.rbn3 }, 'in');
+    const s4 = seg(v.o1, v.Do1, v.Douto1, v.Lo1, v.Ko1, v.bendO1, v.nbo1,
       { h: v.hO1, p: v.pO1, ah: v.Ah1, phiB: v.phi1, kb: v.kb1, Db: v.Db1 }, 'out');
-    const s5 = seg(v.o2, v.Do2, v.Lo2, v.Ko2, v.bendO2, v.nbo2,
+    const s5 = seg(v.o2, v.Do2, v.Douto2, v.Lo2, v.Ko2, v.bendO2, v.nbo2,
       { h: v.hO2, p: v.pO2, ah: v.Ah2, phiB: v.phi2, kb: v.kb2, Db: v.Db2 }, 'out');
-    const s6 = seg(v.o3, v.Do3, v.Lo3, v.Ko3, v.bendO3, v.nbo3,
+    const s6 = seg(v.o3, v.Do3, v.Douto3, v.Lo3, v.Ko3, v.bendO3, v.nbo3,
       { h: v.hO3, p: v.pO3, ah: v.Ah3, phiB: v.phi3, kb: v.kb3, Db: v.Db3 }, 'out');
 
     const dpJet1 = v.o1 === 3 ? jetDp(v.Qh1, v.Ah1, v.Cd1) : 0;
@@ -386,16 +475,24 @@ export const intakeSystemResistance: FormulaSpec = {
     const vIn = s1.vel;
     const dpEntrance = (1 + v.Kin) * 0.5 * rho * vIn * vIn - 0.5 * rho * v.V * v.V + v.pBay;
 
-    // 空滤器：箱体局部阻力 + 滤芯多孔介质阻力 + 容尘
+    // 空滤器：箱体局部阻力 + 滤芯多孔介质阻力（流场不均匀修正）+ 容尘
     const vBox = Q / v.ABox;
     const dpBox = v.KBox * 0.5 * rho * vBox * vBox;
+    const eta = Number.isFinite(v.eta) && v.eta > 0 ? v.eta : 1;
     const vf = Q / v.Af;
-    const dpFilter = v.aF * vf + v.bF * vf * vf;
+    const vEff = vf / eta;
+    const dpFilter = v.aF * vEff + v.bF * vEff * vEff;
     const dpAirbox = dpBox + dpFilter + v.kD * v.mDust;
 
     const dpTotal =
       dpEntrance + s1.dp + s2.dp + s3.dp + dpAirbox +
       s4.dp + s5.dp + s6.dp + dpJet1 + dpJet2 + dpJet3;
+
+    // 式 4g：出口动压与系统总静压降（与各段损失之和分开输出）
+    const vOut = s6.velOut;
+    const dpDyn = 0.5 * rho * vOut * vOut;
+    const dpTotalStatic = dpTotal + dpDyn;
+    const thetaMax = Math.max(s1.thetaDeg, s2.thetaDeg, s3.thetaDeg, s4.thetaDeg, s5.thetaDeg, s6.thetaDeg);
 
     const Mmax = Math.max(s1.M, s2.M, s3.M, s4.M, s5.M, s6.M);
     const dpComp = dpTotal * (1 + (Mmax * Mmax) / 4);
@@ -406,13 +503,13 @@ export const intakeSystemResistance: FormulaSpec = {
       dpEntrance,
       dpIn1: s1.dp, dpIn2: s2.dp, dpIn3: s3.dp,
       lk1, lk2, lk3,
-      dpBox, dpFilter, dpAirbox,
+      dpBox, dpFilter, dpAirbox, vEff,
       dpOut1: s4.dp, dpOut2: s5.dp, dpOut3: s6.dp,
       dpJet1, dpJet2, dpJet3,
       dpB1: s4.dpB, dpB2: s5.dpB, dpB3: s6.dpB,
       phiA1: s4.phi, phiA2: s5.phi, phiA3: s6.phi,
       rhoUsed: rho,
-      dpTotal, Mmax, dpComp, S,
+      dpTotal, vOut, dpDyn, dpTotalStatic, thetaMax, Mmax, dpComp, S,
     };
   },
   benchmarks: [
@@ -449,6 +546,11 @@ export const intakeSystemResistance: FormulaSpec = {
         dpOut3: 0,
         phiA2: 0,
         dpTotal: 8118.169057663068,
+        vOut: 58.946275219220496,
+        dpDyn: 2093.484675737603,
+        dpTotalStatic: 10211.653733400672,
+        vEff: 0.6666666666666666,
+        thetaMax: 0,
         Mmax: 0.1717538385775335,
         dpComp: 8178.03929831086,
         S: 292254.0860758705,
@@ -564,6 +666,84 @@ export const intakeSystemResistance: FormulaSpec = {
       },
       tolerance: 1e-9,
       source: '新版资料校验（弯头式 6a、编织管式 9d/9e、穿孔弯头式 15b/15c：K_bend,perf ≈ 1.01，对应 Δp_bend ≈ 0.61·ρv²/2）',
+    },
+    {
+      name: '渐变管缓扩 70→80 mm、L = 300 mm（资料式 4a~4f 与算例 15）',
+      input: {
+        Q: 600 / 3600, rho: 1.205, mu: 1.81e-5, T: 293.15, V: 0, Kin: 0.05, pBay: 0,
+        rhoMode: 1, z: 0, RH: 0,
+        epsS: 3e-5, Cc: 2, kBell: 4, mBell: 1.35, epsB: 1e-4, cb: 0.5,
+        epsM: 2e-4, aPerf: 1, c1: 1.5, c2: 1, CdLeak: 0.7,
+        t1: 1, D1: 0.07, Dout1: 0.08, L1: 0.3, K1: 0, bendN1: 0, nb1: 0, h1: 4e-3, p1: 0.01, lkA1: 0, rbn1: 0,
+        t2: 2, D2: 0.06, L2: 0, K2: 0, bendN2: 0, nb2: 0, h2: 4e-3, p2: 0.01, lkA2: 0, rbn2: 0,
+        t3: 3, D3: 0.06, L3: 0, K3: 0, bendN3: 0, nb3: 0, h3: 4e-3, p3: 0.01, lkA3: 0, rbn3: 0,
+        ABox: 0.00283, KBox: 0.5, Af: 0.25, aF: 300, bF: 800, mDust: 0, kD: 0,
+        o1: 1, Do1: 0.06, Lo1: 0, Ko1: 0, bendO1: 0, nbo1: 0, hO1: 4e-3, pO1: 0.01,
+        o2: 1, Do2: 0.06, Lo2: 0, Ko2: 0, bendO2: 0, nbo2: 0, hO2: 4e-3, pO2: 0.01,
+        o3: 1, Do3: 0.06, Lo3: 0, Ko3: 0, bendO3: 0, nbo3: 0, hO3: 4e-3, pO3: 0.01,
+        Db1: 0.06, Ah1: 0, Cd1: 0.7, Qh1: 0, phi1: 0, kb1: 0,
+        Db2: 0.06, Ah2: 0, Cd2: 0.7, Qh2: 0, phi2: 0, kb2: 0,
+        Db3: 0.06, Ah3: 0, Cd3: 0.7, Qh3: 0, phi3: 0, kb3: 0,
+      },
+      expect: {
+        dpIn1: 66.07954240676722,
+        thetaMax: 1.9096825077443764,
+        dpTotal: 2852.9910842196114,
+      },
+      tolerance: 1e-9,
+      source: '《进气系统分部件阻力计算》式(4a)~(4f) 与算例 15：θ ≈ 1.9°，k_exp ≈ 0.03，K ≈ 0.002（Δp ≈ 2 Pa），沿程摩擦 ≈ 60 Pa',
+    },
+    {
+      name: '渐变管急扩 60→120 mm、L = 50 mm（资料算例 15）',
+      input: {
+        Q: 600 / 3600, rho: 1.205, mu: 1.81e-5, T: 293.15, V: 0, Kin: 0.05, pBay: 0,
+        rhoMode: 1, z: 0, RH: 0,
+        epsS: 3e-5, Cc: 2, kBell: 4, mBell: 1.35, epsB: 1e-4, cb: 0.5,
+        epsM: 2e-4, aPerf: 1, c1: 1.5, c2: 1, CdLeak: 0.7,
+        t1: 1, D1: 0.07, L1: 0, K1: 0, bendN1: 0, nb1: 0, h1: 4e-3, p1: 0.01, lkA1: 0, rbn1: 0,
+        t2: 1, D2: 0.06, Dout2: 0.12, L2: 0.05, K2: 0, bendN2: 0, nb2: 0, h2: 4e-3, p2: 0.01, lkA2: 0, rbn2: 0,
+        t3: 3, D3: 0.06, L3: 0, K3: 0, bendN3: 0, nb3: 0, h3: 4e-3, p3: 0.01, lkA3: 0, rbn3: 0,
+        ABox: 0.00283, KBox: 0.5, Af: 0.25, aF: 300, bF: 800, mDust: 0, kD: 0,
+        o1: 1, Do1: 0.06, Lo1: 0, Ko1: 0, bendO1: 0, nbo1: 0, hO1: 4e-3, pO1: 0.01,
+        o2: 1, Do2: 0.06, Lo2: 0, Ko2: 0, bendO2: 0, nbo2: 0, hO2: 4e-3, pO2: 0.01,
+        o3: 1, Do3: 0.06, Lo3: 0, Ko3: 0, bendO3: 0, nbo3: 0, hO3: 4e-3, pO3: 0.01,
+        Db1: 0.06, Ah1: 0, Cd1: 0.7, Qh1: 0, phi1: 0, kb1: 0,
+        Db2: 0.06, Ah2: 0, Cd2: 0.7, Qh2: 0, phi2: 0, kb2: 0,
+        Db3: 0.06, Ah3: 0, Cd3: 0.7, Qh3: 0, phi3: 0, kb3: 0,
+      },
+      expect: {
+        dpIn2: 964.7727911893552,
+        thetaMax: 61.92751306414704,
+      },
+      tolerance: 1e-9,
+      source: '《进气系统分部件阻力计算》算例 15：急扩 θ ≈ 62°，k_exp ≈ 0.8，K ≈ 0.45，Δp ≈ 940 Pa',
+    },
+    {
+      name: '空滤器流场不均匀 η = 0.9（资料式 13b/13c 与算例 14）',
+      input: {
+        Q: 600 / 3600, rho: 1.205, mu: 1.81e-5, T: 293.15, V: 0, Kin: 0.05, pBay: 0,
+        rhoMode: 1, z: 0, RH: 0,
+        epsS: 3e-5, Cc: 2, kBell: 4, mBell: 1.35, epsB: 1e-4, cb: 0.5,
+        epsM: 2e-4, aPerf: 1, c1: 1.5, c2: 1, CdLeak: 0.7, eta: 0.9,
+        t1: 1, D1: 0.07, L1: 0.3, K1: 0.35, bendN1: 0, nb1: 0, h1: 4e-3, p1: 0.01, lkA1: 0, rbn1: 0,
+        t2: 2, D2: 0.06, L2: 0.15, K2: 0.4, bendN2: 0, nb2: 0, h2: 4e-3, p2: 0.01, lkA2: 0, rbn2: 0,
+        t3: 3, D3: 0.06, L3: 0.25, K3: 0.3, bendN3: 0, nb3: 0, h3: 4e-3, p3: 0.01, lkA3: 0, rbn3: 0,
+        ABox: 0.00283, KBox: 0.5, Af: 0.25, aF: 300, bF: 800, mDust: 0, kD: 0,
+        o1: 1, Do1: 0.06, Lo1: 0.4, Ko1: 0.8, bendO1: 0, nbo1: 0, hO1: 4e-3, pO1: 0.01,
+        o2: 3, Do2: 0.06, Lo2: 0.2, Ko2: 0.4, bendO2: 0, nbo2: 0, hO2: 4e-3, pO2: 0.01,
+        o3: 1, Do3: 0.06, Lo3: 0, Ko3: 0, bendO3: 0, nbo3: 0, hO3: 4e-3, pO3: 0.01,
+        Db1: 0.06, Ah1: 0, Cd1: 0.7, Qh1: 0, phi1: 0, kb1: 0,
+        Db2: 0.06, Ah2: 0, Cd2: 0.7, Qh2: 0, phi2: 0, kb2: 0,
+        Db3: 0.06, Ah3: 0, Cd3: 0.7, Qh3: 0, phi3: 0, kb3: 0,
+      },
+      expect: {
+        vEff: 0.7407407407407407,
+        dpFilter: 661.1796982167352,
+        dpAirbox: 1706.0242530938785,
+        dpTotal: 8223.793200324248,
+      },
+      tolerance: 1e-9,
+      source: '《进气系统分部件阻力计算》式(13b)(13c) 与算例 14：η = 0.9 → v_eff = 0.741，a·v = 222 Pa、b·v² = 439 Pa，合计 661 Pa',
     },
   ],
 };
