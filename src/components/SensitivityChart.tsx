@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as echarts from 'echarts';
-import type { FormulaSpec } from '../formula/types';
+import type { FormulaSpec, ShowIf } from '../formula/types';
+import { showIfMatches } from '../formula/types';
 
 interface Props {
   formula: FormulaSpec;
@@ -14,11 +15,7 @@ interface Props {
  */
 export function SensitivityChart({ formula, inputsSI }: Props) {
   // 按 showIf 只列出当前设计模式下实际参与计算的输入与输出
-  const visible = (cond?: { key: string; min?: number; max?: number }) =>
-    !cond ||
-    (inputsSI != null &&
-      Number(inputsSI[cond.key]) >= (cond.min ?? -Infinity) &&
-      Number(inputsSI[cond.key]) <= (cond.max ?? Infinity));
+  const visible = (cond?: ShowIf) => !cond || (inputsSI != null && showIfMatches(cond, inputsSI));
 
   const numericInputs = formula.inputs.filter(
     (p) => !p.options && p.kind !== 'select' && visible(p.showIf),

@@ -18,6 +18,29 @@ export const DOMAIN_ORDER: Domain[] = ['fluid', 'structure', 'acoustics'];
 /** 参数类型 */
 export type ParamKind = 'number' | 'select';
 
+/** 条件显示的单条判断：参数值落在 [min, max] 区间内（缺省端视为无穷） */
+export interface ShowIfCondition {
+  key: string;
+  min?: number;
+  max?: number;
+}
+
+/**
+ * 条件显示：单条条件，或条件数组（数组表示全部满足）。
+ * 后者用于组合条件，如「进气管段数 ≥ i」且「该段管型 = 波纹管」。
+ */
+export type ShowIf = ShowIfCondition | ShowIfCondition[];
+
+/** 判断 showIf 是否满足；参数缺失或为 NaN 时视为不满足 */
+export function showIfMatches(cond: ShowIf | undefined, values: Record<string, number>): boolean {
+  if (!cond) return true;
+  const list = Array.isArray(cond) ? cond : [cond];
+  return list.every((c) => {
+    const v = Number(values[c.key]);
+    return Number.isFinite(v) && v >= (c.min ?? -Infinity) && v <= (c.max ?? Infinity);
+  });
+}
+
 /** 输入参数定义：界面据此自动生成表单控件 */
 export interface ParamSpec {
   /** 内部键名，solve 函数据此取值（统一使用 SI 单位） */
@@ -58,7 +81,7 @@ export interface ParamSpec {
    * 用于「按腔数逐腔展开」这类字段——腔数 n 变大后第 i 腔的输入才出现；
    * min/max 可同时或单独使用（如结构型式 1/2 切换：max:1 与 min:2）。
    */
-  showIf?: { key: string; min?: number; max?: number };
+  showIf?: ShowIf;
 }
 
 /** 输出参数定义 */
@@ -84,7 +107,7 @@ export interface OutputSpec {
    * 与 ParamSpec.showIf 同义——用于「按腔数逐腔展开」的逐腔输出，
    * 腔数 n 之外的腔不参与计算，对应行直接隐藏；min/max 可同时或单独使用。
    */
-  showIf?: { key: string; min?: number; max?: number };
+  showIf?: ShowIf;
 }
 
 /** 基准算例：用于自动化回归测试，保证公式实现正确 */
@@ -142,7 +165,7 @@ export interface FormulaSpec {
      * 条件显示：仅当某输入参数满足条件时才在公式区显示该条公式。
      * 用于「按元件类型切换公式」——选中波纹管/穿孔消音器时才显示其专用公式。
      */
-    showIf?: { key: string; min?: number; max?: number };
+    showIf?: ShowIf;
   }[];
   /** 配套示意图（SVG 字符串，尺寸建议 viewBox 0 0 400 220） */
   diagram?: string;

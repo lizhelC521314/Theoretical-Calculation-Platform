@@ -1,7 +1,7 @@
 import katex from 'katex';
 import { useMemo } from 'react';
 import type { FormulaSpec } from '../formula/types';
-import { DOMAIN_LABEL } from '../formula/types';
+import { DOMAIN_LABEL, showIfMatches } from '../formula/types';
 
 function renderTex(tex: string): string {
   try {
@@ -20,11 +20,9 @@ export function FormulaView({
   /** 当前输入值（界面单位），用于按 showIf 隐藏未参与计算的逐腔符号行；不传则全部显示 */
   values?: Record<string, number>;
 }) {
-  // 与 ParamForm 相同的 showIf 求值：参数值落在 [min, max] 区间才显示该行
-  const visible = (s?: { key: string; min?: number; max?: number }) =>
-    !values ||
-    !s ||
-    (Number(values[s.key]) >= (s.min ?? -Infinity) && Number(values[s.key]) <= (s.max ?? Infinity));
+  // 与 ParamForm 相同的 showIf 求值：多条件需同时满足
+  const visible = (s?: Parameters<typeof showIfMatches>[0]) =>
+    !values || !s || showIfMatches(s, values);
 
   const rendered = useMemo(
     () =>

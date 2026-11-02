@@ -1,5 +1,6 @@
 import { Fragment } from 'react';
 import type { FormulaSpec, ParamSpec } from '../formula/types';
+import { showIfMatches } from '../formula/types';
 import { UNIT_GROUPS } from '../formula/units';
 
 interface Props {
@@ -58,12 +59,7 @@ function buildBlocks(visible: ParamSpec[]): Block[] {
 
 /** 输入参数表单：由公式元数据自动生成，每个输入独立选择显示单位 */
 export function ParamForm({ formula, values, units, onValuesChange, onUnitsChange }: Props) {
-  const visible = formula.inputs.filter(
-    (p) =>
-      !p.showIf ||
-      (Number(values[p.showIf.key]) >= (p.showIf.min ?? -Infinity) &&
-        Number(values[p.showIf.key]) <= (p.showIf.max ?? Infinity)),
-  );
+  const visible = formula.inputs.filter((p) => showIfMatches(p.showIf, values));
 
   /** 控件本体：下拉框（枚举）或数值框 + 单位 */
   const control = (p: ParamSpec) => {

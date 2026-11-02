@@ -1,4 +1,5 @@
 import type { FormulaSpec } from '../formula/types';
+import { showIfMatches } from '../formula/types';
 import { autoUnit, formatNumber } from '../formula/units';
 
 interface Props {
@@ -21,17 +22,12 @@ export function ResultPanel({ formula, outputsSI, inputsSI, onSensitivity, sensi
     );
   }
 
-  // 按 OutputSpec.showIf 过滤：腔数之外的逐腔输出不参与计算，对应行直接隐藏
-  // （showIf 目前只用于无量纲参数 n，SI 值与界面值一致）
+  // 按 OutputSpec.showIf 过滤：未参与计算的逐腔/未启用段输出不显示
+  // （showIf 目前只用于无量纲参数，SI 值与界面值一致）
   const visible =
     inputsSI == null
       ? formula.outputs
-      : formula.outputs.filter(
-          (o) =>
-            !o.showIf ||
-            (Number(inputsSI[o.showIf.key]) >= (o.showIf.min ?? -Infinity) &&
-              Number(inputsSI[o.showIf.key]) <= (o.showIf.max ?? Infinity)),
-        );
+      : formula.outputs.filter((o) => showIfMatches(o.showIf, inputsSI));
 
   const rows = visible.map((o) => {
     const raw = outputsSI[o.key];
