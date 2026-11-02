@@ -32,6 +32,11 @@ export interface ParamSpec {
   unitGroup?: string;
   /** 参数说明 */
   description?: string;
+  /**
+   * 输入分区标题：相同 group 的连续输入在表单中归为一段，并在段首显示小标题
+   * （如「系统组成」「进气管几何」）。留空则紧接上一段、不另起标题。
+   */
+  group?: string;
   /** 默认值（以 unit 为单位） */
   default?: number;
   kind?: ParamKind;
