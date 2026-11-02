@@ -98,6 +98,15 @@ export const UNIT_GROUPS: Record<string, UnitGroup> = {
       { label: 'cP', factor: 1e-3 },
     ],
   },
+  forchheimerInertia: {
+    si: 'm⁻¹',
+    preferred: '10⁻⁷ m⁻¹',
+    units: [
+      { label: 'm⁻¹', factor: 1 },
+      { label: '10⁻⁷ m⁻¹', factor: 1e-7 },
+      { label: '10⁻⁶ m⁻¹', factor: 1e-6 },
+    ],
+  },
   force: {
     si: 'N',
     preferred: 'N',
@@ -229,8 +238,12 @@ export const UNIT_GROUPS: Record<string, UnitGroup> = {
   /** 多孔介质渗透率 α（m²） */
   permeability: {
     si: 'm²',
-    preferred: 'm²',
-    units: [{ label: 'm²', factor: 1 }],
+    preferred: '10⁻¹¹ m²',
+    units: [
+      { label: 'm²', factor: 1 },
+      { label: '10⁻¹¹ m²', factor: 1e-11 },
+      { label: '10⁻¹² m²', factor: 1e-12 },
+    ],
   },
   /** 面积倒数，用于 Fluent 粘性阻力系数 1/α（m⁻²） */
   inverseArea: {
