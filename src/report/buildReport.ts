@@ -135,7 +135,7 @@ export function buildReportModel(
       return {
         label: o.label,
         symbol: o.symbol,
-        value: typeof disp.value === 'number' ? formatNumber(disp.value, o.digits ?? 6) : '—',
+        value: typeof disp.value === 'number' ? formatNumber(disp.value, o.digits ?? 3) : '—',
         unit: disp.unit,
         primary: !!o.primary,
       };

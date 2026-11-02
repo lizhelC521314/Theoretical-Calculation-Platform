@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as echarts from 'echarts';
 import type { FormulaSpec, ShowIf } from '../formula/types';
 import { showIfMatches } from '../formula/types';
+import { formatNumber } from '../formula/units';
 
 interface Props {
   formula: FormulaSpec;
@@ -70,7 +71,10 @@ export function SensitivityChart({ formula, inputsSI }: Props) {
     chart.setOption(
       {
         grid: { left: 62, right: 18, top: 34, bottom: 40 },
-        tooltip: { trigger: 'axis' },
+        tooltip: {
+          trigger: 'axis',
+          valueFormatter: (val: number) => formatNumber(val),
+        },
         xAxis: {
           type: 'value',
           name: `${xSpec?.symbol ?? xKey} (${xSpec?.unit ?? ''})`,

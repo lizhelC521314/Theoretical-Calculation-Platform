@@ -137,7 +137,7 @@ export function CalculatorPage({ formula, user, project, onBack }: Props) {
     for (const o of visibleOutputs) {
       const raw = computed.outputsSI[o.key];
       const { value, unit } = o.unitGroup ? autoUnit(raw, o.unitGroup) : { value: raw, unit: o.unit };
-      lines.push(`${o.label},${o.symbol},${formatNumber(value, o.digits ?? 6)},${unit},${raw}`);
+      lines.push(`${o.label},${o.symbol},${formatNumber(value, o.digits ?? 3)},${unit},${raw}`);
     }
     lines.push('');
     lines.push('适用条件与假设');

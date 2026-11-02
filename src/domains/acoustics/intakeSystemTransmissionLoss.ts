@@ -540,32 +540,32 @@ const filterInputs: ParamSpec[] = [
 ];
 
 const outputList: OutputSpec[] = [
-  { key: 'c', label: '介质声速', symbol: 'c', unit: 'm/s', digits: 1, group: '声学特性', description: 'c ≈ 331.3 + 0.606t（t 为摄氏温度，式11 注意事项）；20 ℃ 约 343.4 m/s' },
-  { key: 'tl_avg', label: '系统平均传递损失', symbol: 'TL_avg', unit: 'dB', digits: 1, primary: true, group: '声学特性', description: '频带 [f_min, f_max] 内 201 点系统 TL 的算术平均' },
-  { key: 'tl_max', label: '系统传递损失峰值', symbol: 'TL_max', unit: 'dB', digits: 1, primary: true, group: '声学特性', description: '频带内系统 TL 的最大值' },
-  { key: 'f_peak', label: '峰值频率', symbol: 'f_p', unit: 'Hz', digits: 0, group: '声学特性', description: 'TL 峰值对应的频率（采样点）' },
+  { key: 'c', label: '介质声速', symbol: 'c', unit: 'm/s', digits: 3, group: '声学特性', description: 'c ≈ 331.3 + 0.606t（t 为摄氏温度，式11 注意事项）；20 ℃ 约 343.4 m/s' },
+  { key: 'tl_avg', label: '系统平均传递损失', symbol: 'TL_avg', unit: 'dB', digits: 3, primary: true, group: '声学特性', description: '频带 [f_min, f_max] 内 201 点系统 TL 的算术平均' },
+  { key: 'tl_max', label: '系统传递损失峰值', symbol: 'TL_max', unit: 'dB', digits: 3, primary: true, group: '声学特性', description: '频带内系统 TL 的最大值' },
+  { key: 'f_peak', label: '峰值频率', symbol: 'f_p', unit: 'Hz', digits: 3, group: '声学特性', description: 'TL 峰值对应的频率（采样点）' },
 
-  { key: 'tl250', label: '250 Hz 系统传递损失', symbol: 'TL(250)', unit: 'dB', digits: 1, group: '指定频率', description: '用于与文档第 10 节算例表（250/500/1000/1500 Hz）逐点对照' },
-  { key: 'tl500', label: '500 Hz 系统传递损失', symbol: 'TL(500)', unit: 'dB', digits: 1, group: '指定频率', description: '固定频点 TL，便于与实测/文档表格对比' },
-  { key: 'tl1000', label: '1000 Hz 系统传递损失', symbol: 'TL(1000)', unit: 'dB', digits: 1, group: '指定频率', description: '固定频点 TL' },
-  { key: 'tl1500', label: '1500 Hz 系统传递损失', symbol: 'TL(1500)', unit: 'dB', digits: 1, group: '指定频率', description: '固定频点 TL' },
+  { key: 'tl250', label: '250 Hz 系统传递损失', symbol: 'TL(250)', unit: 'dB', digits: 3, group: '指定频率', description: '用于与文档第 10 节算例表（250/500/1000/1500 Hz）逐点对照' },
+  { key: 'tl500', label: '500 Hz 系统传递损失', symbol: 'TL(500)', unit: 'dB', digits: 3, group: '指定频率', description: '固定频点 TL，便于与实测/文档表格对比' },
+  { key: 'tl1000', label: '1000 Hz 系统传递损失', symbol: 'TL(1000)', unit: 'dB', digits: 3, group: '指定频率', description: '固定频点 TL' },
+  { key: 'tl1500', label: '1500 Hz 系统传递损失', symbol: 'TL(1500)', unit: 'dB', digits: 3, group: '指定频率', description: '固定频点 TL' },
 
-  { key: 'tlInAvg', label: '进气管侧平均传递损失', symbol: 'TL_in', unit: 'dB', digits: 1, group: '分部件平均传递损失', description: '仅进气管已启用各段（1~nIn）串联（含各段所选旁支）的频带平均 TL；等截面直管段自身 TL ≈ 0' },
-  { key: 'tlBoxAvg', label: '空滤器总成平均传递损失', symbol: 'TL_airbox', unit: 'dB', digits: 1, group: '分部件平均传递损失', description: '膨胀腔 + 滤芯 + 谐振腔 + 四分之一波长支管的频带平均 TL' },
-  { key: 'tlOutAvg', label: '出气管侧平均传递损失', symbol: 'TL_out', unit: 'dB', digits: 1, group: '分部件平均传递损失', description: '出气管已启用各段（1~nOut）串联（含各段所选旁支）的频带平均 TL' },
-  { key: 'tlBraidAvg', label: '编织管平均传递损失', symbol: 'TL_braid', unit: 'dB', digits: 1, group: '分部件平均传递损失', description: '仅编织管段串联的平均 TL；论文样件（L=145 mm、D=49.36 mm、t=2.7 mm）20~2000 Hz 平均 TL ≈ 16.4 dB' },
-  { key: 'tlBellowsAvg', label: '波纹管平均传递损失', symbol: 'TL_bel', unit: 'dB', digits: 1, group: '分部件平均传递损失', description: '仅波纹管段串联的平均 TL，通常 1~3 dB，远小于其隔振贡献' },
-  { key: 'tlSilAvg', label: '多腔消音器平均传递损失', symbol: 'TL_muf', unit: 'dB', digits: 1, group: '分部件平均传递损失', description: '仅多腔穿孔消音器段串联的平均 TL；R0 为建议取值，结果仅供参考' },
+  { key: 'tlInAvg', label: '进气管侧平均传递损失', symbol: 'TL_in', unit: 'dB', digits: 3, group: '分部件平均传递损失', description: '仅进气管已启用各段（1~nIn）串联（含各段所选旁支）的频带平均 TL；等截面直管段自身 TL ≈ 0' },
+  { key: 'tlBoxAvg', label: '空滤器总成平均传递损失', symbol: 'TL_airbox', unit: 'dB', digits: 3, group: '分部件平均传递损失', description: '膨胀腔 + 滤芯 + 谐振腔 + 四分之一波长支管的频带平均 TL' },
+  { key: 'tlOutAvg', label: '出气管侧平均传递损失', symbol: 'TL_out', unit: 'dB', digits: 3, group: '分部件平均传递损失', description: '出气管已启用各段（1~nOut）串联（含各段所选旁支）的频带平均 TL' },
+  { key: 'tlBraidAvg', label: '编织管平均传递损失', symbol: 'TL_braid', unit: 'dB', digits: 3, group: '分部件平均传递损失', description: '仅编织管段串联的平均 TL；论文样件（L=145 mm、D=49.36 mm、t=2.7 mm）20~2000 Hz 平均 TL ≈ 16.4 dB' },
+  { key: 'tlBellowsAvg', label: '波纹管平均传递损失', symbol: 'TL_bel', unit: 'dB', digits: 3, group: '分部件平均传递损失', description: '仅波纹管段串联的平均 TL，通常 1~3 dB，远小于其隔振贡献' },
+  { key: 'tlSilAvg', label: '多腔消音器平均传递损失', symbol: 'TL_muf', unit: 'dB', digits: 3, group: '分部件平均传递损失', description: '仅多腔穿孔消音器段串联的平均 TL；R0 为建议取值，结果仅供参考' },
 
-  { key: 'fExpPeak1', label: '膨胀腔一阶峰值频率', symbol: 'f_max,1', unit: 'Hz', digits: 1, group: '膨胀腔高频特性', description: 'fmax,1 = c/(4L)，即式(24c) 取 n=1；高阶峰值 fmax,n = (2n−1)c/(4L)，峰谷交替、间隔约 c/(2L)' },
-  { key: 'fExpMin1', label: '膨胀腔一阶谷值频率', symbol: 'f_min,1', unit: 'Hz', digits: 1, group: '膨胀腔高频特性', description: 'fmin,1 = c/(2L)，即式(24b) 取 n=1；谷值处 sin²(kL)=0，膨胀腔 TL 回到 0 dB' },
-  { key: 'tlExpMax', label: '膨胀腔峰值传递损失', symbol: 'TL_max', unit: 'dB', digits: 1, group: '膨胀腔高频特性', description: 'TLmax = 10lg[1 + 0.25(m − 1/m)²]（式24d）；峰值不随阶次升高而增大，只是频率变密' },
-  { key: 'tlExpAvg', label: '膨胀腔高频平均传递损失', symbol: 'TL_avg,exp', unit: 'dB', digits: 1, group: '膨胀腔高频特性', description: 'TLavg = 10lg[1 + 0.125(m − 1/m)²]（式24e，sin² 取 1/2），用于评价高频段整体消音量' },
-  { key: 'fcMode1', label: '腔体一阶高阶模态截止频率', symbol: 'f_c,1', unit: 'Hz', digits: 1, group: '膨胀腔高频特性', description: 'fc,1 = 1.84c/(πD_chamber)（式24f）；频率超过该值后平面波假设失效，需用三维模型或实测' },
-  { key: 'fcDuct', label: '最细管段一阶高阶模态截止频率', symbol: 'f_c,duct', unit: 'Hz', digits: 1, group: '膨胀腔高频特性', description: 'fc = 1.84c/(πD_min)（式6d，D_min 为各管段进出口内径的最小值）；渐变管按最小直径校核平面波假设，超过该频率后应改用三维模型或实测' },
+  { key: 'fExpPeak1', label: '膨胀腔一阶峰值频率', symbol: 'f_max,1', unit: 'Hz', digits: 3, group: '膨胀腔高频特性', description: 'fmax,1 = c/(4L)，即式(24c) 取 n=1；高阶峰值 fmax,n = (2n−1)c/(4L)，峰谷交替、间隔约 c/(2L)' },
+  { key: 'fExpMin1', label: '膨胀腔一阶谷值频率', symbol: 'f_min,1', unit: 'Hz', digits: 3, group: '膨胀腔高频特性', description: 'fmin,1 = c/(2L)，即式(24b) 取 n=1；谷值处 sin²(kL)=0，膨胀腔 TL 回到 0 dB' },
+  { key: 'tlExpMax', label: '膨胀腔峰值传递损失', symbol: 'TL_max', unit: 'dB', digits: 3, group: '膨胀腔高频特性', description: 'TLmax = 10lg[1 + 0.25(m − 1/m)²]（式24d）；峰值不随阶次升高而增大，只是频率变密' },
+  { key: 'tlExpAvg', label: '膨胀腔高频平均传递损失', symbol: 'TL_avg,exp', unit: 'dB', digits: 3, group: '膨胀腔高频特性', description: 'TLavg = 10lg[1 + 0.125(m − 1/m)²]（式24e，sin² 取 1/2），用于评价高频段整体消音量' },
+  { key: 'fcMode1', label: '腔体一阶高阶模态截止频率', symbol: 'f_c,1', unit: 'Hz', digits: 3, group: '膨胀腔高频特性', description: 'fc,1 = 1.84c/(πD_chamber)（式24f）；频率超过该值后平面波假设失效，需用三维模型或实测' },
+  { key: 'fcDuct', label: '最细管段一阶高阶模态截止频率', symbol: 'f_c,duct', unit: 'Hz', digits: 3, group: '膨胀腔高频特性', description: 'fc = 1.84c/(πD_min)（式6d，D_min 为各管段进出口内径的最小值）；渐变管按最小直径校核平面波假设，超过该频率后应改用三维模型或实测' },
 
-  { key: 'fH', label: '亥姆霍兹谐振频率', symbol: 'f_0', unit: 'Hz', digits: 1, group: '谐振频率', showIf: { key: 'hOn', min: 1, max: 1 }, description: 'f0 = (c/2π)·[An/(V·Leff)]^(1/2)，Leff = ln + 0.85dn（式22）' },
-  { key: 'fQ', label: '四分之一波长首阶频率', symbol: 'f_q', unit: 'Hz', digits: 1, group: '谐振频率', showIf: { key: 'qOn', min: 1, max: 1 }, description: 'fq = (2k−1)·c/(4L)，k=1,2,…；结果为首阶 c/(4L)（式23）' },
+  { key: 'fH', label: '亥姆霍兹谐振频率', symbol: 'f_0', unit: 'Hz', digits: 3, group: '谐振频率', showIf: { key: 'hOn', min: 1, max: 1 }, description: 'f0 = (c/2π)·[An/(V·Leff)]^(1/2)，Leff = ln + 0.85dn（式22）' },
+  { key: 'fQ', label: '四分之一波长首阶频率', symbol: 'f_q', unit: 'Hz', digits: 3, group: '谐振频率', showIf: { key: 'qOn', min: 1, max: 1 }, description: 'fq = (2k−1)·c/(4L)，k=1,2,…；结果为首阶 c/(4L)（式23）' },
 ];
 
 /**

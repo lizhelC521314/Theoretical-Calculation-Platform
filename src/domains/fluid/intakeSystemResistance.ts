@@ -181,14 +181,14 @@ const inSegOutputs: OutputSpec[] = [];
 const outSegOutputs: OutputSpec[] = [];
 for (let i = 1; i <= SEG_MAX; i++) {
   inSegOutputs.push(
-    { key: `dpIn${i}`, label: `进气管段 ${i} 压降`, symbol: `Δp_in${i}`, unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '进气管段', showIf: { key: 'nIn', min: i }, description: '[f·(L/D) + ΣK]·(ρv²/2)，按本段内径、管型与渐变管修正计算' },
-    { key: `lk${i}`, label: `进气管段 ${i} 编织壁泄漏量`, symbol: `q_leak${i}`, unit: 'm³/s', unitGroup: 'volumeFlow', digits: 5, group: '进气管段', showIf: [{ key: `t${i}`, min: 3, max: 3 }, { key: 'nIn', min: i }], description: 'q = C_d·A_h·(2Δp/ρ)^(1/2)，不计入压降，仅用于评估过滤旁通' },
+    { key: `dpIn${i}`, label: `进气管段 ${i} 压降`, symbol: `Δp_in${i}`, unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '进气管段', showIf: { key: 'nIn', min: i }, description: '[f·(L/D) + ΣK]·(ρv²/2)，按本段内径、管型与渐变管修正计算' },
+    { key: `lk${i}`, label: `进气管段 ${i} 编织壁泄漏量`, symbol: `q_leak${i}`, unit: 'm³/s', unitGroup: 'volumeFlow', digits: 3, group: '进气管段', showIf: [{ key: `t${i}`, min: 3, max: 3 }, { key: 'nIn', min: i }], description: 'q = C_d·A_h·(2Δp/ρ)^(1/2)，不计入压降，仅用于评估过滤旁通' },
   );
   outSegOutputs.push(
-    { key: `dpOut${i}`, label: `出气管段 ${i} 压降`, symbol: `Δp_out${i}`, unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '出气管段', showIf: { key: 'nOut', min: i }, description: '按本段所选管型计算（穿孔消音器含穿孔率放大、进出口 K、隔板 K、突扩/突缩）' },
-    { key: `dpJet${i}`, label: `出气管段 ${i} 孔口射流损失`, symbol: `Δp_jet${i}`, unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '出气管段', showIf: [{ key: `o${i}`, min: 3, max: 3 }, { key: 'nOut', min: i }], description: '(1/C_d² − 1)·(ρv_h²/2)，v_h = Q_th/A_h；封闭环腔无穿流时为 0' },
-    { key: `phiA${i}`, label: `出气管段 ${i} 穿孔率`, symbol: `φ_${i}`, unit: '-', unitGroup: 'dimensionless', digits: 4, group: '出气管段', showIf: [{ key: `o${i}`, min: 3, max: 3 }, { key: 'nOut', min: i }], description: 'φ = A_h/(π·D·L)，用于 f_m = f_s·(1 + a·φ)；L 为 0 时为 0' },
-    { key: `dpB${i}`, label: `出气管段 ${i} 弯曲开孔附加损失`, symbol: `Δp_bend${i}`, unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '出气管段', showIf: [{ key: `o${i}`, min: 3, max: 3 }, { key: 'nOut', min: i }], description: '式 15b/15c：K_bend,perf 相对光滑弯头 K_bend,0 的增量乘以动压；无弯曲或 φ_b = 0 时为 0' },
+    { key: `dpOut${i}`, label: `出气管段 ${i} 压降`, symbol: `Δp_out${i}`, unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '出气管段', showIf: { key: 'nOut', min: i }, description: '按本段所选管型计算（穿孔消音器含穿孔率放大、进出口 K、隔板 K、突扩/突缩）' },
+    { key: `dpJet${i}`, label: `出气管段 ${i} 孔口射流损失`, symbol: `Δp_jet${i}`, unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '出气管段', showIf: [{ key: `o${i}`, min: 3, max: 3 }, { key: 'nOut', min: i }], description: '(1/C_d² − 1)·(ρv_h²/2)，v_h = Q_th/A_h；封闭环腔无穿流时为 0' },
+    { key: `phiA${i}`, label: `出气管段 ${i} 穿孔率`, symbol: `φ_${i}`, unit: '-', unitGroup: 'dimensionless', digits: 3, group: '出气管段', showIf: [{ key: `o${i}`, min: 3, max: 3 }, { key: 'nOut', min: i }], description: 'φ = A_h/(π·D·L)，用于 f_m = f_s·(1 + a·φ)；L 为 0 时为 0' },
+    { key: `dpB${i}`, label: `出气管段 ${i} 弯曲开孔附加损失`, symbol: `Δp_bend${i}`, unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '出气管段', showIf: [{ key: `o${i}`, min: 3, max: 3 }, { key: 'nOut', min: i }], description: '式 15b/15c：K_bend,perf 相对光滑弯头 K_bend,0 的增量乘以动压；无弯曲或 φ_b = 0 时为 0' },
   );
 }
 
@@ -237,27 +237,27 @@ export const intakeSystemResistance: FormulaSpec = {
     ...withGroup(outInputs, SEC_OUT),
   ],
   outputs: [
-    { key: 'vIn', label: '入口截面流速', symbol: 'v_in', unit: 'm/s', unitGroup: 'velocity', digits: 2, group: '大气入口段', description: 'v_in = Q/(πD_in1²/4)，动压按此流速计算' },
-    { key: 'dpEntrance', label: '大气入口段压降', symbol: 'Δp_entrance', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '大气入口段', primary: true, description: 'Δp = (1 + K_in)·(ρv_in²/2) − (ρV²/2) + p_bay' },
-    { key: 'rhoUsed', label: '计算用空气密度', symbol: 'ρ', unit: 'kg/m³', unitGroup: 'density', digits: 4, group: '大气入口段', description: '方式 1 为输入值；方式 2 按 p(z)、T 与相对湿度计算（式 20~22）' },
+    { key: 'vIn', label: '入口截面流速', symbol: 'v_in', unit: 'm/s', unitGroup: 'velocity', digits: 3, group: '大气入口段', description: 'v_in = Q/(πD_in1²/4)，动压按此流速计算' },
+    { key: 'dpEntrance', label: '大气入口段压降', symbol: 'Δp_entrance', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '大气入口段', primary: true, description: 'Δp = (1 + K_in)·(ρv_in²/2) − (ρV²/2) + p_bay' },
+    { key: 'rhoUsed', label: '计算用空气密度', symbol: 'ρ', unit: 'kg/m³', unitGroup: 'density', digits: 3, group: '大气入口段', description: '方式 1 为输入值；方式 2 按 p(z)、T 与相对湿度计算（式 20~22）' },
 
     ...inSegOutputs,
 
-    { key: 'dpBox', label: '空滤器箱体压降', symbol: 'Δp_box', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '空滤器', description: 'ΣK_box·(ρv_box²/2)，v_box = Q/A_box' },
-    { key: 'dpFilter', label: '滤芯压降', symbol: 'Δp_f', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '空滤器', description: 'a·v_eff + b·v_eff²，v_eff = v_f/η（未含容尘）' },
+    { key: 'dpBox', label: '空滤器箱体压降', symbol: 'Δp_box', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '空滤器', description: 'ΣK_box·(ρv_box²/2)，v_box = Q/A_box' },
+    { key: 'dpFilter', label: '滤芯压降', symbol: 'Δp_f', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '空滤器', description: 'a·v_eff + b·v_eff²，v_eff = v_f/η（未含容尘）' },
     { key: 'vEff', label: '滤芯有效面速度', symbol: 'v_eff', unit: 'm/s', unitGroup: 'velocity', digits: 3, group: '空滤器', description: '式(13b)：v_eff = v_f/η，η < 1 时表示箱内流场不均匀、局部面速度升高' },
-    { key: 'dpAirbox', label: '空滤器总压降', symbol: 'Δp_airbox', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '空滤器', primary: true, description: '箱体 + 滤芯 + 容尘（k_d·m_dust）' },
+    { key: 'dpAirbox', label: '空滤器总压降', symbol: 'Δp_airbox', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '空滤器', primary: true, description: '箱体 + 滤芯 + 容尘（k_d·m_dust）' },
 
     ...outSegOutputs,
 
-    { key: 'dpTotal', label: '系统总阻力', symbol: 'Δp_sys', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '汇总', primary: true, description: '入口段 + 进气管 N_in 段 + 空滤器 + 出气管 N_out 段各段静压损失之和（不含出口动压）' },
+    { key: 'dpTotal', label: '系统总阻力', symbol: 'Δp_sys', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '汇总', primary: true, description: '入口段 + 进气管 N_in 段 + 空滤器 + 出气管 N_out 段各段静压损失之和（不含出口动压）' },
     { key: 'vOut', label: '系统出口流速', symbol: 'v_out', unit: 'm/s', unitGroup: 'velocity', digits: 3, group: '汇总', description: '按出气管末段（第 N_out 段）的出口内径计算，v_out = Q/(πD_out,out,N_out²/4)' },
-    { key: 'dpDyn', label: '出口动压', symbol: 'Δp_dyn,out', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '汇总', description: '式(4g)：Δp_dyn = ½ρv_out²，入口为静止大气时这部分动压同样由系统提供' },
-    { key: 'dpTotalStatic', label: '系统总静压降', symbol: 'Δp_sys,static', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '汇总', description: '式(4g)：Δp_sys,static = Δp_sys + ½ρv_out²，与各段损失之和分开输出' },
-    { key: 'thetaMax', label: '最大全锥角', symbol: 'θ_max', unit: '°', digits: 2, group: '汇总', description: '式(4d)：θ = 2arctan[(D_out − D_in)/(2L)]，各段中绝对值最大者；θ ≤ 10° 渐变损失可忽略，θ > 45° 渐扩接近突扩' },
+    { key: 'dpDyn', label: '出口动压', symbol: 'Δp_dyn,out', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '汇总', description: '式(4g)：Δp_dyn = ½ρv_out²，入口为静止大气时这部分动压同样由系统提供' },
+    { key: 'dpTotalStatic', label: '系统总静压降', symbol: 'Δp_sys,static', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '汇总', description: '式(4g)：Δp_sys,static = Δp_sys + ½ρv_out²，与各段损失之和分开输出' },
+    { key: 'thetaMax', label: '最大全锥角', symbol: 'θ_max', unit: '°', digits: 3, group: '汇总', description: '式(4d)：θ = 2arctan[(D_out − D_in)/(2L)]，各段中绝对值最大者；θ ≤ 10° 渐变损失可忽略，θ > 45° 渐扩接近突扩' },
     { key: 'Mmax', label: '最大马赫数', symbol: 'M_max', unit: '-', unitGroup: 'dimensionless', digits: 3, group: '汇总', description: '各段 M = v/c 的最大值；M > 0.3 需做可压缩修正，M > 0.6 需 Fanno/CFD 并校核堵塞' },
-    { key: 'dpComp', label: '可压缩修正后总阻力', symbol: 'Δp_comp', unit: 'Pa', unitGroup: 'pressure', digits: 0, group: '汇总', description: 'Δp_comp ≈ Δp_sys·(1 + M_max²/4)，M > 0.5 时误差变大，应逐段迭代 p、ρ、v' },
-    { key: 'S', label: '系统阻力系数', symbol: 'S', unit: 'Pa·s²/m³', digits: 4, group: '汇总', description: 'S = Δp_sys/Q²，用于绘制 Δp = S·Q² 曲线并与发动机需求曲线匹配' },
+    { key: 'dpComp', label: '可压缩修正后总阻力', symbol: 'Δp_comp', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '汇总', description: 'Δp_comp ≈ Δp_sys·(1 + M_max²/4)，M > 0.5 时误差变大，应逐段迭代 p、ρ、v' },
+    { key: 'S', label: '系统阻力系数', symbol: 'S', unit: 'Pa·s²/m³', digits: 3, group: '汇总', description: 'S = Δp_sys/Q²，用于绘制 Δp = S·Q² 曲线并与发动机需求曲线匹配' },
   ],
   latex: [
     { label: '系统总阻力（各段串联求和）', tex: '\\Delta p_{sys} = \\Delta p_{entrance} + \\sum_{i=1}^{N_{in}}\\Delta p_{in,i} + \\Delta p_{airbox} + \\sum_{i=1}^{N_{out}}\\Delta p_{out,i}' },

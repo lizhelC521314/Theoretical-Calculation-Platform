@@ -184,8 +184,8 @@ export function ComparePanel({ a, b, onBack }: { a: HistoryEntry; b: HistoryEntr
             return (
               <tr key={k}>
                 <td>{k}</td>
-                <td>{Number.isFinite(na) ? formatNumber(na, 6) : '—'}</td>
-                <td>{Number.isFinite(nb) ? formatNumber(nb, 6) : '—'}</td>
+                <td>{Number.isFinite(na) ? formatNumber(na, 3) : '—'}</td>
+                <td>{Number.isFinite(nb) ? formatNumber(nb, 3) : '—'}</td>
                 <td className={Number.isFinite(diff) ? (diff > 0 ? 'up' : 'down') : ''}>
                   {Number.isFinite(diff) ? `${diff > 0 ? '+' : ''}${diff.toFixed(1)}%` : '—'}
                 </td>

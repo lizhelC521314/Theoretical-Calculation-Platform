@@ -35,7 +35,7 @@ export function ResultPanel({ formula, outputsSI, inputsSI, onSensitivity, sensi
     const { value, unit } = o.unitGroup ? autoUnit(num, o.unitGroup) : { value: num, unit: o.unit };
     return {
       ...o,
-      display: formatNumber(value, o.digits ?? 4),
+      display: formatNumber(value, o.digits ?? 3),
       unit,
     };
   });

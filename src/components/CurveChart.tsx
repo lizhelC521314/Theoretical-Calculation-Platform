@@ -39,7 +39,7 @@ export function CurveChart({ spec, inputsSI }: Props) {
         grid: { left: 62, right: 18, top: 34, bottom: 42 },
         tooltip: {
           trigger: 'axis',
-          valueFormatter: (val: number) => `${val.toFixed(2)}`,
+          valueFormatter: (val: number) => `${val.toFixed(3)}`,
         },
         xAxis: {
           type: 'value',

@@ -313,12 +313,9 @@ export function autoUnit(valueSI: number, group?: string): { value: number; unit
   return { value: valueSI / smallest.factor, unit: smallest.label };
 }
 
-/** 数值格式化 */
-export function formatNumber(v: number, digits = 4): string {
+/** 数值格式化：软件内所有输出结果统一保留 3 位小数 */
+export function formatNumber(v: number, digits = 3): string {
   if (!Number.isFinite(v)) return '—';
-  if (v === 0) return '0';
-  const abs = Math.abs(v);
-  if (abs >= 1e6 || abs < 1e-4) return v.toExponential(3);
-  const d = abs >= 1000 ? Math.min(digits, 2) : abs >= 10 ? Math.min(digits, 3) : digits;
-  return Number(v.toFixed(d)).toString();
+  const s = v.toFixed(digits);
+  return Number(s) === 0 ? (0).toFixed(digits) : s;
 }
