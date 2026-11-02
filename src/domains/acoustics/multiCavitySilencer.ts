@@ -407,7 +407,7 @@ export const multiCavitySilencer: FormulaSpec = {
   id: 'acoustics.muffler.multiCavity',
   domain: 'acoustics',
   subsystem: '消声器',
-  title: '★ 多腔穿孔消音器',
+  title: '多腔穿孔消音器',
   summary:
     '按 PPT 的一维传递矩阵（TMM）模型，逐腔输入长度、腔外径、开孔直径与开孔数量，各腔分别按式(1) 计算穿孔率 σ_i、按式(5) 由该腔 σ_i 单独计算端部修正 α0,i，并以 σ_i 乘入该腔的耦合项（σ_i·P/(S·ξ_i)），由穿孔比声阻抗 ξ_i 构造单腔 4×4 耦合方程，取 Φ = exp(A·Lc) 的矩阵分块得到单腔传递矩阵，多腔串联后给出传递损失 TL 并绘制 TL - Frequency 曲线。★ 公式验证不充分，结果仅供参考。',
   tags: ['多腔', '穿孔', '消声器', '消音器', '传递损失', 'TL', 'TMM', '宽频', 'NVH', '进气系统', '排气系统'],

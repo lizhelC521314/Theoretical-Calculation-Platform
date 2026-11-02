@@ -1,7 +1,7 @@
 /** 声学（NVH）领域示意图（内联 SVG，随公式元数据一起交付，离线可用） */
 
 export const HELMHOLTZ_DIAGRAM = `
-<svg viewBox="0 0 520 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="赫姆霍兹消音器几何示意">
+<svg viewBox="0 0 520 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="亥姆霍兹消音器几何示意">
   <!-- 主管道：宽扁矩形 -->
   <rect x="30" y="228" width="460" height="44" fill="#ffffff" stroke="#222222" stroke-width="1.8"/>
   <!-- 共振腔：圆形 -->

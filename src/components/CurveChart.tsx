@@ -10,7 +10,7 @@ interface Props {
 
 /**
  * 结果曲线图：绘制公式在当前输入下随自变量变化的连续曲线
- * （如赫姆霍兹消音器的 TL - Frequency 曲线）。
+ * （如亥姆霍兹消音器的 TL - Frequency 曲线）。
  */
 export function CurveChart({ spec, inputsSI }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);

@@ -37,7 +37,7 @@ export const pressureCorrection: FormulaSpec = {
   id: 'fluid.pressureCorrection',
   domain: 'fluid',
   subsystem: '压降修正',
-  title: '压力修正公式',
+  title: '压力修正',
   summary: '将非标准环境下测得的压降修正到标准大气压与标准温度，并扣除出口动压得到总压降。',
   tags: ['压力修正', '压降', '标准条件', '动压', '总压降', '流量', '空气滤清器', '进排气系统'],
   description:

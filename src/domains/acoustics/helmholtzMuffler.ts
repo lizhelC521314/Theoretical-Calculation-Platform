@@ -2,7 +2,7 @@ import type { FormulaSpec } from '../../formula/types';
 import { HELMHOLTZ_DIAGRAM } from './diagrams';
 
 /**
- * 赫姆霍兹消音器（Helmholtz Resonator Muffler）
+ * 亥姆霍兹消音器（Helmholtz Resonator Muffler）
  *
  * 主公式（与参考 PPT 严格一致）：
  *   中心频率  f = c/(2π)·√(Sc / (V·(lc + 1.5d/2)))
@@ -62,20 +62,20 @@ export const helmholtzMuffler: FormulaSpec = {
   id: 'acoustics.muffler.helmholtz',
   domain: 'acoustics',
   subsystem: '消声器',
-  title: '赫姆霍兹消音器',
+  title: '亥姆霍兹消音器',
   summary: '由腔体体积、喉管尺寸与管道直径计算共振中心频率与传递损失 TL 曲线，用于进气/排气消声器的调谐设计。',
-  tags: ['赫姆霍兹', '消音器', '消声器', '传递损失', 'TL', '共振频率', 'NVH', '进气系统', '排气系统'],
+  tags: ['亥姆霍兹', '消音器', '消声器', '传递损失', 'TL', '共振频率', 'NVH', '进气系统', '排气系统'],
   description:
-    '赫姆霍兹消音器由管道旁接的共振腔与喉管组成，在共振频率 f_r 附近产生最大传递损失。本公式按参考 PPT 计算：中心频率 f = c/(2π)·√(Sc/(V·(lc+1.5d/2)))，传递损失 TL = 10lg[1+( (√(Sc·V/(lc+1.5d/2))/(2Sp)) / (f/f_r − f_r/f) )²]，其中 Sc = πd²/4、Sp = πD²/4、声速 c ≈ 331.3 + 0.606t（t 为摄氏温度）。结果区输出中心频率与中间量，并绘制 TL - Frequency 曲线（纵轴 TL/dB，横轴 Frequency/Hz）。',
+    '亥姆霍兹消音器由管道旁接的共振腔与喉管组成，在共振频率 f_r 附近产生最大传递损失。本公式按参考 PPT 计算：中心频率 f = c/(2π)·√(Sc/(V·(lc+1.5d/2)))，传递损失 TL = 10lg[1+( (√(Sc·V/(lc+1.5d/2))/(2Sp)) / (f/f_r − f_r/f) )²]，其中 Sc = πd²/4、Sp = πD²/4、声速 c ≈ 331.3 + 0.606t（t 为摄氏温度）。结果区输出中心频率与中间量，并绘制 TL - Frequency 曲线（纵轴 TL/dB，横轴 Frequency/Hz）。',
   inputs: [
-    { key: 'V', label: '赫姆霍兹腔体的体积', symbol: 'V', unit: 'L', unitGroup: 'volume', default: 0.5, min: 0, required: true, description: '共振腔净容积' },
+    { key: 'V', label: '亥姆霍兹腔体的体积', symbol: 'V', unit: 'L', unitGroup: 'volume', default: 0.5, min: 0, required: true, description: '共振腔净容积' },
     { key: 'lc', label: '喉管长度', symbol: 'lc', unit: 'mm', unitGroup: 'length', default: 30, min: 0, required: true, description: '喉管（连接管）的几何长度' },
     { key: 'd', label: '喉管的直径', symbol: 'd', unit: 'mm', unitGroup: 'diameter', default: 20, min: 0, required: true, description: '喉管内径，决定喉管截面积 Sc' },
     { key: 't', label: '温度', symbol: 't', unit: '℃', unitGroup: 'temperature', default: 25, required: true, description: '介质温度，用于计算声速 c ≈ 331.3 + 0.606t' },
     { key: 'D', label: '主管道直径', symbol: 'D', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, description: '主管道内径，决定管道截面积 Sp' },
   ],
   outputs: [
-    { key: 'fr', label: '中心频率', symbol: 'f', unit: 'Hz', primary: true, group: '声学特性', description: '赫姆霍兹共振中心频率 f_r，TL 在该频率达到峰值' },
+    { key: 'fr', label: '中心频率', symbol: 'f', unit: 'Hz', primary: true, group: '声学特性', description: '亥姆霍兹共振中心频率 f_r，TL 在该频率达到峰值' },
     { key: 'tl', label: '传递损失', symbol: 'TL', unit: 'dB', primary: true, group: '声学特性', description: '中心频率处的传递损失峰值。理论模型在 f = f_r 处趋于无穷大（无阻尼），此处取最接近中心频率的采样点 0.995·f_r 对应的 TL 值' },
     { key: 'c', label: '介质声速', symbol: 'c', unit: 'm/s', group: '声学特性', description: 'c ≈ 331.3 + 0.606·t（t 为摄氏温度）' },
     { key: 'sc', label: '喉管截面积', symbol: 'Sc', unit: 'mm²', unitGroup: 'area', group: '中间量', description: 'Sc = π·d²/4' },
@@ -107,7 +107,7 @@ export const helmholtzMuffler: FormulaSpec = {
     '喉管有效长度取 l_eff = lc + 1.5d/2，即包含 1.5·d/2 的末端修正',
     '声速按经验式 c ≈ 331.3 + 0.606t 计算（t 为摄氏温度），未计湿度与压力影响',
     '模型忽略喉管与腔体的声阻尼（粘性、热传导），理论 TL 在 f = f_r 处趋于无穷大，实际峰值受声阻限制为有限值',
-    'TL 公式适用于单腔旁支赫姆霍兹共振器，腔体尺寸远小于波长（低频近似）',
+    'TL 公式适用于单腔旁支亥姆霍兹共振器，腔体尺寸远小于波长（低频近似）',
     'TL 曲线频比点按 PPT 给定列表（0.05f ~ 0.995f）并在 f_r 上侧按同间距镜像至 1.95f',
     '工程设计中 TL 峰值频率应正对噪声主导频率；带宽较窄，宽频降噪需组合多腔或与扩张腔配合',
   ],
