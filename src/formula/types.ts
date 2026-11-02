@@ -37,6 +37,13 @@ export interface ParamSpec {
    * （如「系统组成」「进气管几何」）。留空则紧接上一段、不另起标题。
    */
   group?: string;
+  /**
+   * 横排流程分组：相同 row 的连续输入在同一行内按列并排显示，用于「系统组成」这类
+   * 「段 → 旁支消音器 → 数量」的串联结构；留空则独立占一整行。
+   */
+  row?: string;
+  /** 横排时单元格的小标题（留空则用 label） */
+  cellTitle?: string;
   /** 默认值（以 unit 为单位） */
   default?: number;
   kind?: ParamKind;

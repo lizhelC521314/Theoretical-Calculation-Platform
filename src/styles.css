@@ -805,6 +805,60 @@ select {
 .param-row:last-child {
   border-bottom: none;
 }
+/* 横排流程行：「段 → 旁支消音器 → 数量」并排，行间用竖向流程线串起来 */
+.flow-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.06fr) minmax(0, 1.2fr) minmax(0, 0.5fr);
+  column-gap: 10px;
+  align-items: end;
+  padding: 8px 0 16px;
+}
+.flow-cell {
+  position: relative;
+  min-width: 0;
+}
+.flow-cell-title {
+  font-size: 12px;
+  color: #44546a;
+  line-height: 1.35;
+  margin-bottom: 5px;
+}
+/* 行内相邻单元格之间的横向连接线（对齐下拉框竖向中心，与标题行数无关） */
+.flow-cell + .flow-cell::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  bottom: 15px;
+  width: 10px;
+  height: 1px;
+  background: #c7d3e2;
+}
+/* 各段之间的竖向流程线与箭头（落在第一列「段名」下方） */
+.flow-cell:first-child::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -16px;
+  width: 2px;
+  height: 10px;
+  background: #c7d3e2;
+  transform: translateX(-50%);
+}
+.flow-cell:first-child::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -10px;
+  transform: translateX(-50%);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #c7d3e2;
+}
+/* 流程行内的下拉框压缩一点，保证三段在窄栏内也能读全 */
+.flow-cell .param-select {
+  font-size: 12px;
+  padding: 6px 4px;
+}
 .param-label {
   display: flex;
   align-items: baseline;

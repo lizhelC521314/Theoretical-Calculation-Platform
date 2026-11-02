@@ -1,4 +1,30 @@
 /** 构建配置：打包 Windows 安装包（NSIS），完全离线安装 */
+
+/**
+ * 代码签名（消除 SmartScreen「未知发布者」警告）。
+ *
+ * 只能使用 CA 签发的代码签名证书，自签名证书无效（仍会提示未知发布者）。
+ * 提供以下任一环境变量后自动开启签名，未提供时保持不签名，打包流程与原来一致：
+ *   1) 证书文件（OV）：CSC_LINK=证书.pfx 的路径，CSC_KEY_PASSWORD=证书密码
+ *   2) 证书已装入 Windows 证书存储（EV / UKey）：WIN_CSC_SUBJECT_NAME=证书「颁发给」名称
+ * 注意：开启签名后 electron-builder 会下载并运行 winCodeSign（内含 signtool），
+ * 其压缩包含 macOS 符号链接，需以管理员运行或开启 Windows「开发人员模式」才能解压，
+ * 否则打包会中断。
+ */
+const certFile = process.env.CSC_LINK || process.env.WIN_CSC_LINK;
+const certSubject = process.env.WIN_CSC_SUBJECT_NAME;
+const canSign = Boolean(certFile || certSubject);
+
+/** 证书签名（SHA-256 + RFC3161 时间戳），时间戳保证证书过期后历史安装包签名仍有效 */
+const signtoolOptions = canSign
+  ? {
+      ...(certFile ? { certificateFile: certFile } : {}),
+      ...(certSubject ? { certificateSubjectName: certSubject } : {}),
+      signingHashAlgorithms: ['sha256'],
+      rfc3161TimeStampServer: process.env.CSC_TIMESTAMP_SERVER || 'http://timestamp.digicert.com',
+    }
+  : undefined;
+
 module.exports = {
   appId: 'com.ctr.theory-calc',
   productName: '汽车零部件理论计算平台',
@@ -18,16 +44,16 @@ module.exports = {
     target: [{ target: 'nsis', arch: ['x64'] }],
     icon: 'build/icon.ico',
     /**
-     * 关闭“签名并改写 exe 资源”步骤。
+     * 未提供签名证书时关闭“签名并改写 exe 资源”步骤。
      *
      * 原因：该步骤会触发下载 electron-builder 的 winCodeSign 工具包，而其压缩包内含
      * macOS 符号链接，在无管理员权限 / 未开启 Windows“开发人员模式”的电脑上解压会失败，
      * 导致打包中断。关闭后安装包与快捷方式图标仍使用上面的 icon 配置。
      *
-     * 若已具备代码签名证书（或已开启开发人员模式），可改为 true 以写入公司版权信息、
-     * 产品版本号到 exe 资源，并按 signtoolOptions 配置进行签名。
+     * 配置证书环境变量后自动改为 true，按 signtoolOptions 写入公司版权信息并签名。
      */
-    signAndEditExecutable: false,
+    signAndEditExecutable: canSign,
+    ...(signtoolOptions ? { signtoolOptions } : {}),
   },
   nsis: {
     oneClick: false,

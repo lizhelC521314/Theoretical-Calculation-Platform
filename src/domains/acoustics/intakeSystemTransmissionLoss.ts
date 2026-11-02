@@ -150,6 +150,45 @@ function areaMat(sd: number, su: number): Mat2 {
   return [[cx(1), cx(0)], [cx(0), cx(sd / su)]];
 }
 
+/**
+ * 渐变管离散段数（式6b/6c 约束）：N ≥ 10，且 ΔL = L/N ≤ λ_min/10（λ_min = c0/f_max）。
+ * 上限 40 仅用于控制计算量；波纹管按自身波距给定的段数（nMin）不受该上限约束。
+ */
+function taperSegCount(L: number, c0: number, fMax: number): number {
+  if (!(L > 0) || !(c0 > 0) || !(fMax > 0)) return 10;
+  const nReq = (10 * L * fMax) / c0;
+  return Math.max(10, Math.min(40, Math.ceil(nReq)));
+}
+
+/**
+ * 渐变管（式6a~6c）：S(x) = πD(x)²/4，D_i = D_in + (D_out − D_in)(i − 0.5)/N，
+ * T = Tarea(S_N→S_out)·Tduct(D_N)·…·Tduct(D_1)·Tarea(S_in→S_1)。
+ * nodeAt(D, l) 给出该子段的本体矩阵（直管 / 波纹管 / 编织管各自实现）；
+ * D_in = D_out 时各面积项均为单位阵，节点数退化为 nMin（直管为 1），即式(6) 等截面直管。
+ */
+function taperMat(
+  din: number,
+  dout: number,
+  L: number,
+  c0: number,
+  fMax: number,
+  nodeAt: (D: number, l: number) => Mat2,
+  nMin = 1,
+): Mat2 {
+  if (!(L > 0)) return eye2();
+  const tapered = Math.abs(dout / din - 1) > 1e-9;
+  const N = tapered ? Math.max(nMin, taperSegCount(L, c0, fMax)) : Math.max(1, nMin);
+  const dl = L / N;
+  const dAt = (i: number) => (tapered ? din + (dout - din) * ((i - 0.5) / N) : din);
+  const sAt = (i: number) => (Math.PI * dAt(i) * dAt(i)) / 4;
+  let T = areaMat(sAt(1), (Math.PI * din * din) / 4);
+  for (let i = 1; i <= N; i++) {
+    T = matMul(nodeAt(dAt(i), dl), T);
+    if (i < N) T = matMul(areaMat(sAt(i + 1), sAt(i)), T);
+  }
+  return matMul(areaMat((Math.PI * dout * dout) / 4, sAt(N)), T);
+}
+
 /** TL = 20·lg(|T11+T12+T21+T22|/2) + 10·lg(Sin/Sout)（式3，含式33 的面积修正） */
 function tlOf(T: Cx[][], sin: number, sout: number): number {
   const s: Cx = [
@@ -233,16 +272,16 @@ function wallZeta(f: number, m: Medium, p: JcaParams, thickness: number): Cx | n
 }
 
 /**
- * 编织管衰减系数 α = (2/D)·Rw/(Rw² + Xw²)（式17），
- * TL ≈ 8.686·α·L（式18）。衰减系数恒取非负。
+ * 编织管壁面耗散因子 K = Rw/(Rw² + Xw²)（式17）：α = (2/D)·K，TL ≈ 8.686·α·L（式18）。
+ * 渐变段按各子段自身直径取 α_i = 2K/D_i，K 与频率、壁厚有关，逐频点只算一次即可。
  */
-function braidAlpha(f: number, D: number, thickness: number, m: Medium, p: JcaParams): number {
-  if (!(f > 0) || !(D > 0) || !(thickness > 0)) return 0;
+function braidDissipation(f: number, thickness: number, m: Medium, p: JcaParams): number {
+  if (!(f > 0) || !(thickness > 0)) return 0;
   const z = wallZeta(f, m, p, thickness);
   if (!z) return 0;
   const den = z[0] * z[0] + z[1] * z[1];
   if (!(den > 1e-300) || !(z[0] > 0)) return 0;
-  return (2 / D) * (z[0] / den);
+  return z[0] / den;
 }
 
 /** 单腔穿孔消音器传递矩阵（式25~30，与多腔模块同一实现） */
@@ -387,27 +426,28 @@ const withGroup = (list: ParamSpec[], group: string): ParamSpec[] =>
 /**
  * 系统组成（放在所有输入参数之前）：先由操作者按「进气管 1/2/3 + 空滤器 + 出气管 1/2/3」
  * 逐件组建——每段选定管型，并在同段选择是否加装旁支消音器与数量；
+ * 表单按图上流程横排为「段 → 旁支消音器 → 数量」，段与段之间竖向串联，
  * 后续几何参数与公式区按所选组成展开。
  */
 const compInputs: ParamSpec[] = [];
 for (let i = 1; i <= 3; i++) {
   const d = IN_SEG_DEFAULT[i - 1];
   compInputs.push(
-    { key: `t${i}`, label: `进气管段 ${i} 管型`, symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '进气管' }, { value: 2, label: '波纹管' }, { value: 3, label: '编织管' }], default: d.type, required: true, group: SEC_COMP, description: `按实际走向把进气管分为 3 段，每段单独选型；段 ${i} 默认${d.type === 1 ? '进气管' : d.type === 2 ? '波纹管' : '编织管'}` },
-    { key: `br${i}`, label: `进气管段 ${i} 旁支消音器`, symbol: '-', unit: '-', kind: 'select', options: BRANCH_OPTIONS, default: 0, required: true, group: SEC_COMP, description: '默认「无」；选择四分之一波长管或亥姆霍兹消音器后，紧接着出现数量选择，并在下方展开对应几何参数' },
-    { key: `brN${i}`, label: `进气管段 ${i} 旁支数量`, symbol: `N_in${i}`, unit: '个', kind: 'select', options: BRANCH_N_OPTIONS, default: 1, min: 1, max: 6, required: true, showIf: { key: `br${i}`, min: 1 }, group: SEC_COMP, description: '在该段下游端并联的相同旁支个数；N 个并联的等效归一化阻抗取 ζb/N' },
+    { key: `t${i}`, label: `进气管段 ${i} 管型`, cellTitle: `进气管 ${i}`, row: `in${i}`, symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '进气管' }, { value: 2, label: '波纹管' }, { value: 3, label: '编织管' }], default: d.type, required: true, group: SEC_COMP, description: `按实际走向把进气管分为 3 段，每段单独选型；段 ${i} 默认${d.type === 1 ? '进气管' : d.type === 2 ? '波纹管' : '编织管'}` },
+    { key: `br${i}`, label: `进气管段 ${i} 旁支消音器`, cellTitle: '旁支消音器', row: `in${i}`, symbol: '-', unit: '-', kind: 'select', options: BRANCH_OPTIONS, default: 0, required: true, group: SEC_COMP, description: '默认「无」；选择四分之一波长管或亥姆霍兹消音器后，紧接着出现数量选择，并在下方展开对应几何参数' },
+    { key: `brN${i}`, label: `进气管段 ${i} 旁支数量`, cellTitle: '数量', row: `in${i}`, symbol: `N_in${i}`, unit: '个', kind: 'select', options: BRANCH_N_OPTIONS, default: 1, min: 1, max: 6, required: true, showIf: { key: `br${i}`, min: 1 }, group: SEC_COMP, description: '在该段下游端并联的相同旁支个数；N 个并联的等效归一化阻抗取 ζb/N' },
   );
 }
 compInputs.push(
-  { key: 'hOn', label: '空滤器亥姆霍兹谐振腔', symbol: '-', unit: '-', kind: 'select', options: [{ value: 0, label: '不设置' }, { value: 1, label: '设置' }], default: 1, required: true, group: SEC_COMP, description: '设置在空滤器入口主管上的旁支谐振腔，用于对准目标噪声峰值（式22）' },
-  { key: 'qOn', label: '空滤器四分之一波长支管', symbol: '-', unit: '-', kind: 'select', options: [{ value: 0, label: '不设置' }, { value: 1, label: '设置' }], default: 0, required: true, group: SEC_COMP, description: '设置在空滤器入口主管上的封闭支管，fq = c/(4L) 处形成 TL 峰值（式23/24）' },
+  { key: 'hOn', label: '空滤器亥姆霍兹谐振腔', cellTitle: '空滤器 · 亥姆霍兹谐振腔', row: 'box', symbol: '-', unit: '-', kind: 'select', options: [{ value: 0, label: '不设置' }, { value: 1, label: '设置' }], default: 1, required: true, group: SEC_COMP, description: '设置在空滤器入口主管上的旁支谐振腔，用于对准目标噪声峰值（式22）' },
+  { key: 'qOn', label: '空滤器四分之一波长支管', cellTitle: '空滤器 · 四分之一波长支管', row: 'box', symbol: '-', unit: '-', kind: 'select', options: [{ value: 0, label: '不设置' }, { value: 1, label: '设置' }], default: 0, required: true, group: SEC_COMP, description: '设置在空滤器入口主管上的封闭支管，fq = c/(4L) 处形成 TL 峰值（式23/24）' },
 );
 for (let i = 1; i <= 3; i++) {
   const d = OUT_SEG_DEFAULT[i - 1];
   compInputs.push(
-    { key: `o${i}`, label: `出气管段 ${i} 管型`, symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '出气管' }, { value: 2, label: '波纹管' }, { value: 3, label: '多腔穿孔消音器' }], default: d.type, required: true, group: SEC_COMP, description: `出气管侧同样分 3 段；段 ${i} 默认${d.type === 1 ? '出气管' : d.type === 2 ? '波纹管' : '多腔穿孔消音器'}` },
-    { key: `bro${i}`, label: `出气管段 ${i} 旁支消音器`, symbol: '-', unit: '-', kind: 'select', options: BRANCH_OPTIONS, default: 0, required: true, group: SEC_COMP, description: '默认「无」；选择四分之一波长管或亥姆霍兹消音器后，紧接着出现数量选择，并在下方展开对应几何参数' },
-    { key: `broN${i}`, label: `出气管段 ${i} 旁支数量`, symbol: `N_out${i}`, unit: '个', kind: 'select', options: BRANCH_N_OPTIONS, default: 1, min: 1, max: 6, required: true, showIf: { key: `bro${i}`, min: 1 }, group: SEC_COMP, description: '在该段下游端并联的相同旁支个数；N 个并联的等效归一化阻抗取 ζb/N' },
+    { key: `o${i}`, label: `出气管段 ${i} 管型`, cellTitle: `出气管 ${i}`, row: `out${i}`, symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '出气管' }, { value: 2, label: '波纹管' }, { value: 3, label: '多腔穿孔消音器' }], default: d.type, required: true, group: SEC_COMP, description: `出气管侧同样分 3 段；段 ${i} 默认${d.type === 1 ? '出气管' : d.type === 2 ? '波纹管' : '多腔穿孔消音器'}` },
+    { key: `bro${i}`, label: `出气管段 ${i} 旁支消音器`, cellTitle: '旁支消音器', row: `out${i}`, symbol: '-', unit: '-', kind: 'select', options: BRANCH_OPTIONS, default: 0, required: true, group: SEC_COMP, description: '默认「无」；选择四分之一波长管或亥姆霍兹消音器后，紧接着出现数量选择，并在下方展开对应几何参数' },
+    { key: `broN${i}`, label: `出气管段 ${i} 旁支数量`, cellTitle: '数量', row: `out${i}`, symbol: `N_out${i}`, unit: '个', kind: 'select', options: BRANCH_N_OPTIONS, default: 1, min: 1, max: 6, required: true, showIf: { key: `bro${i}`, min: 1 }, group: SEC_COMP, description: '在该段下游端并联的相同旁支个数；N 个并联的等效归一化阻抗取 ζb/N' },
   );
 }
 
@@ -416,7 +456,8 @@ const inInputs: ParamSpec[] = [];
 for (let i = 1; i <= 3; i++) {
   const d = IN_SEG_DEFAULT[i - 1];
   inInputs.push(
-    { key: `D${i}`, label: `进气管段 ${i} 内径`, symbol: `D_in${i}`, unit: 'mm', unitGroup: 'diameter', default: d.D, min: 0, required: true, description: '该段管内径，用于截面突变、波数与旁支阻抗归一化计算' },
+    { key: `D${i}`, label: `进气管段 ${i} 进口内径`, symbol: `D_in${i}`, unit: 'mm', unitGroup: 'diameter', default: d.D, min: 0, required: true, description: '该段进口内径，用于截面突变、波数与旁支阻抗归一化计算' },
+    { key: `Dout${i}`, label: `进气管段 ${i} 出口内径`, symbol: `D_out${i}`, unit: 'mm', unitGroup: 'diameter', default: d.D, min: 0, required: true, description: '该段出口内径；与进口内径不同时按渐变管（式6b/6c）离散为 N 段圆柱，相同则退化为等截面直管。直管/波纹管/编织管均按此处理，不能用一个平均直径代替全段' },
     { key: `L${i}`, label: `进气管段 ${i} 长度`, symbol: `L_in${i}`, unit: 'mm', unitGroup: 'length', default: d.L, min: 0, required: true, description: '该段沿程长度，未使用取 0；旁支数量非 0 时长度可取 0，旁支仍按集中元件接入' },
     { key: `h${i}`, label: `进气管段 ${i} 波纹波深`, symbol: `h${i}`, unit: 'mm', unitGroup: 'length', default: d.h, min: 0, showIf: { key: `t${i}`, min: 2, max: 2 }, description: '仅波纹管需要：波深 h；mw = (D+2h)²/D²（式7）' },
     { key: `w${i}`, label: `进气管段 ${i} 波纹波距`, symbol: `w${i}`, unit: 'mm', unitGroup: 'length', default: d.w, min: 0, showIf: { key: `t${i}`, min: 2, max: 2 }, description: '仅波纹管需要：波距 w，每个波节按长度 w 的膨胀腔处理（式8）' },
@@ -434,7 +475,8 @@ const outInputs: ParamSpec[] = [];
 for (let i = 1; i <= 3; i++) {
   const d = OUT_SEG_DEFAULT[i - 1];
   outInputs.push(
-    { key: `Do${i}`, label: `出气管段 ${i} 内径`, symbol: `D_out${i}`, unit: 'mm', unitGroup: 'diameter', default: d.D, min: 0, required: true, description: '出气管段内径；多腔消音器时为穿孔主管内径 d_in' },
+    { key: `Do${i}`, label: `出气管段 ${i} 进口内径`, symbol: `D_out,in${i}`, unit: 'mm', unitGroup: 'diameter', default: d.D, min: 0, required: true, description: '出气管段进口内径；多腔消音器时为穿孔主管内径 d_in（进出口共用）' },
+    { key: `Douto${i}`, label: `出气管段 ${i} 出口内径`, symbol: `D_out,out${i}`, unit: 'mm', unitGroup: 'diameter', default: d.D, min: 0, required: true, description: '出气管段出口内径；与进口内径不同时按渐变管（式6b/6c）离散，多腔消音器段按出口截面突变接入下游' },
     { key: `Lo${i}`, label: `出气管段 ${i} 长度`, symbol: `L_out${i}`, unit: 'mm', unitGroup: 'length', default: d.L, min: 0, required: true, description: '该段长度，未使用取 0；旁支数量非 0 时长度可取 0，旁支仍按集中元件接入' },
     { key: `hO${i}`, label: `出气管段 ${i} 波纹波深`, symbol: `h${i}`, unit: 'mm', unitGroup: 'length', default: d.h, min: 0, showIf: { key: `o${i}`, min: 2, max: 2 }, description: '仅波纹管需要：波深 h' },
     { key: `wO${i}`, label: `出气管段 ${i} 波纹波距`, symbol: `w${i}`, unit: 'mm', unitGroup: 'length', default: d.w, min: 0, showIf: { key: `o${i}`, min: 2, max: 2 }, description: '仅波纹管需要：波距 w' },
@@ -505,6 +547,7 @@ const outputList: OutputSpec[] = [
   { key: 'tlExpMax', label: '膨胀腔峰值传递损失', symbol: 'TL_max', unit: 'dB', digits: 1, group: '膨胀腔高频特性', description: 'TLmax = 10lg[1 + 0.25(m − 1/m)²]（式24d）；峰值不随阶次升高而增大，只是频率变密' },
   { key: 'tlExpAvg', label: '膨胀腔高频平均传递损失', symbol: 'TL_avg,exp', unit: 'dB', digits: 1, group: '膨胀腔高频特性', description: 'TLavg = 10lg[1 + 0.125(m − 1/m)²]（式24e，sin² 取 1/2），用于评价高频段整体消音量' },
   { key: 'fcMode1', label: '腔体一阶高阶模态截止频率', symbol: 'f_c,1', unit: 'Hz', digits: 1, group: '膨胀腔高频特性', description: 'fc,1 = 1.84c/(πD_chamber)（式24f）；频率超过该值后平面波假设失效，需用三维模型或实测' },
+  { key: 'fcDuct', label: '最细管段一阶高阶模态截止频率', symbol: 'f_c,duct', unit: 'Hz', digits: 1, group: '膨胀腔高频特性', description: 'fc = 1.84c/(πD_min)（式6d，D_min 为各管段进出口内径的最小值）；渐变管按最小直径校核平面波假设，超过该频率后应改用三维模型或实测' },
 
   { key: 'fH', label: '亥姆霍兹谐振频率', symbol: 'f_0', unit: 'Hz', digits: 1, group: '谐振频率', showIf: { key: 'hOn', min: 1, max: 1 }, description: 'f0 = (c/2π)·[An/(V·Leff)]^(1/2)，Leff = ln + 0.85dn（式22）' },
   { key: 'fQ', label: '四分之一波长首阶频率', symbol: 'f_q', unit: 'Hz', digits: 1, group: '谐振频率', showIf: { key: 'qOn', min: 1, max: 1 }, description: 'fq = (2k−1)·c/(4L)，k=1,2,…；结果为首阶 c/(4L)（式23）' },
@@ -537,10 +580,10 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
   subsystem: '进气系统',
   title: '进气系统声音传递损失计算（进气管—波纹管—编织管—空滤器—出气管—消音器）',
   summary:
-    '按「系统组成 → 参数 → 公式」组织：输入区最前先由操作者按「进气管 1/2/3 + 空滤器 + 出气管 1/2/3」逐件组建，每段选定管型，并在同段选择是否加装旁支消音器（无 / 四分之一波长管 / 亥姆霍兹消音器，默认无），选定后紧接着选择数量 1/2/3…；其余几何参数与公式区只按所选组成展开。模型按四端参数（传递矩阵）级联，输出系统传递损失 TL 曲线与各分部件平均 TL。',
-  tags: ['进气系统', '传递损失', 'TL', 'NVH', '声学', '进气管', '波纹管', '编织管', 'JCA', '空气滤清器', '滤芯', '膨胀腔', '亥姆霍兹', '四分之一波长', '多腔', '穿孔', '消音器', '传递矩阵', '四端参数', '高频共振', '峰谷频率', '高阶模态'],
+    '按「系统组成 → 参数 → 公式」组织：输入区最前先由操作者按「进气管 1/2/3 + 空滤器 + 出气管 1/2/3」逐件组建，每段选定管型，并在同段选择是否加装旁支消音器（无 / 四分之一波长管 / 亥姆霍兹消音器，默认无），选定后紧接着选择数量 1/2/3…；其余几何参数与公式区只按所选组成展开。每个管段按进口/出口内径建模，两者不同时按渐变管离散（式6b/6c）。模型按四端参数（传递矩阵）级联，输出系统传递损失 TL 曲线与各分部件平均 TL。',
+  tags: ['进气系统', '传递损失', 'TL', 'NVH', '声学', '进气管', '波纹管', '编织管', 'JCA', '空气滤清器', '滤芯', '膨胀腔', '亥姆霍兹', '四分之一波长', '多腔', '穿孔', '消音器', '传递矩阵', '四端参数', '高频共振', '峰谷频率', '高阶模态', '渐变管', '锥形管', '进出口直径'],
   description:
-    '输入区最前为「系统组成」：按「进气管 1/2/3 + 空滤器 + 出气管 1/2/3」逐件组建，每段先选管型，再在同一段选择旁支消音器（无 / 四分之一波长管 / 亥姆霍兹消音器，默认无），选定后紧接数量选择 1/2/3…；空滤器单独选择是否设谐振腔与支管。选定旁支后，下方几何参数区立即展开该元件所需参数，公式区同步显示对应旁支公式；未选中的元件不出现参数、也不显示公式。数量为 N 时，在该段下游端按集中元件并联接入 N 个相同旁支（等效归一化阻抗 ζb/N，传递矩阵 [1, 0; N/ζb, 1]）。传递损失 TL 是消音元件入射声功率与透射声功率之比，只与元件本身有关，与声源和末端反射无关（式1）。本公式统一采用 [p, ρcu] 状态变量（Z0 = 1），按四端参数逐段建立 2×2 传递矩阵并级联：等截面直管 T = [cos(kL), jsin(kL); jsin(kL), cos(kL)]，截面突变 T = [1, 0; 0, Sd/Su]；系统总矩阵 Tsys = Tin·Tbellows·Tbraid·Tairbox·Tmuffler·Tout，最后按 TL = 20lg(|T11+T12+T21+T22|/2) + 10lg(Sin/Sout) 求得（式3 与式33 的面积修正）。进气管侧每段可选进气管（纯直管）、波纹管（按「一串短膨胀腔」逐波节级联，mw = (D+2h)²/D²，单节 TLw = 10lg[1 + 0.25(mw−1/mw)²sin²(kw)]）或编织管（Johnson-Champoux-Allard 等效流体模型：五参数 → ρeq、Keq → Zc、kc → 壁面阻抗 ζw = Rw + jXw → 衰减系数 α = (2/D)·Rw/(Rw²+Xw²) → TL ≈ 8.686·α·L；系统级联时按复波数 kx = k0 − jα 处理）。空滤器按「膨胀腔 + 滤芯 + 可选谐振腔/四分之一波长支管」建模：膨胀腔 TLexp = 10lg[1 + 0.25(m−1/m)²sin²(kL)]（式21，与传递矩阵解严格等价），滤芯按 JCA 多孔层传递矩阵 Tlayer = [cos(kct), jZcsin(kct); jsin(kct)/Zc, cos(kct)]，亥姆霍兹 f0 = (c/2π)[An/(V·Leff)]^(1/2)（Leff = ln + 0.85dn），四分之一波长 fq = (2k−1)c/(4L) 按支管传递矩阵并联接入。出气管侧每段可选普通出气管、波纹管或 Sullivan-Crocker 多腔穿孔消音器（σ = nh·dh²/(4·din·Lc)、ξ = R0 + jk0(tw + α0dh)、4×4 系统矩阵 A → Φ = exp(A·Lc) → 单腔 Tcav → 逐腔串联）。结果区给出系统平均/峰值 TL、250/500/1000/1500 Hz 固定频点 TL、各分部件平均 TL、谐振频率，并按第 6.5 节输出膨胀腔高频峰谷频率、峰值/高频平均 TL 与一阶高阶模态截止频率（fmax,n = (2n−1)c/(4L)、fmin,n = n·c/(2L)、TLmax = 10lg[1+0.25(m−1/m)²]、TLavg = 10lg[1+0.125(m−1/m)²]、fc,1 = 1.84c/(πD)，式24a~24f），同时绘制系统 TL - Frequency 曲线。高频峰来自腔长与波长的干涉：多腔宜错开长度、腔长公差建议 ±2%、按 1/3 倍频程平均评价。选定管型后输入区只显示该元件需要的参数，公式区同步切换为该元件的专用公式。',
+    '输入区最前为「系统组成」：按「进气管 1/2/3 + 空滤器 + 出气管 1/2/3」逐件组建，每段先选管型，再在同一段选择旁支消音器（无 / 四分之一波长管 / 亥姆霍兹消音器，默认无），选定后紧接数量选择 1/2/3…；空滤器单独选择是否设谐振腔与支管。选定旁支后，下方几何参数区立即展开该元件所需参数，公式区同步显示对应旁支公式；未选中的元件不出现参数、也不显示公式。每个管段分别给出进口内径 D_in 与出口内径 D_out：两者不同时按 Webster 方程（式6a）离散为 N 段圆柱（D_i = D_in + (D_out − D_in)(i − 0.5)/N，式6b），逐段建立传递矩阵并按局部截面突变级联（式6c）；离散满足 N ≥ 10 且 ΔL ≤ λ_min/10 时与精确锥形管理论误差 < 1 dB，D_in = D_out 时退化为等截面直管（式6）。数量为 N 时，在该段下游端按集中元件并联接入 N 个相同旁支（等效归一化阻抗 ζb/N，传递矩阵 [1, 0; N/ζb, 1]）。传递损失 TL 是消音元件入射声功率与透射声功率之比，只与元件本身有关，与声源和末端反射无关（式1）。本公式统一采用 [p, ρcu] 状态变量（Z0 = 1），按四端参数逐段建立 2×2 传递矩阵并级联：等截面直管 T = [cos(kL), jsin(kL); jsin(kL), cos(kL)]，截面突变 T = [1, 0; 0, Sd/Su]；系统总矩阵 Tsys = Tin·Tbellows·Tbraid·Tairbox·Tmuffler·Tout，最后按 TL = 20lg(|T11+T12+T21+T22|/2) + 10lg(Sin/Sout) 求得（式3 与式33 的面积修正）。进气管侧每段可选进气管（纯直管）、波纹管（按「一串短膨胀腔」逐波节级联，mw = (D+2h)²/D²，单节 TLw = 10lg[1 + 0.25(mw−1/mw)²sin²(kw)]）或编织管（Johnson-Champoux-Allard 等效流体模型：五参数 → ρeq、Keq → Zc、kc → 壁面阻抗 ζw = Rw + jXw → 衰减系数 α = (2/D)·Rw/(Rw²+Xw²) → TL ≈ 8.686·α·L；系统级联时按复波数 kx = k0 − jα 处理）。空滤器按「膨胀腔 + 滤芯 + 可选谐振腔/四分之一波长支管」建模：膨胀腔 TLexp = 10lg[1 + 0.25(m−1/m)²sin²(kL)]（式21，与传递矩阵解严格等价），滤芯按 JCA 多孔层传递矩阵 Tlayer = [cos(kct), jZcsin(kct); jsin(kct)/Zc, cos(kct)]，亥姆霍兹 f0 = (c/2π)[An/(V·Leff)]^(1/2)（Leff = ln + 0.85dn），四分之一波长 fq = (2k−1)c/(4L) 按支管传递矩阵并联接入。出气管侧每段可选普通出气管、波纹管或 Sullivan-Crocker 多腔穿孔消音器（σ = nh·dh²/(4·din·Lc)、ξ = R0 + jk0(tw + α0dh)、4×4 系统矩阵 A → Φ = exp(A·Lc) → 单腔 Tcav → 逐腔串联）。结果区给出系统平均/峰值 TL、250/500/1000/1500 Hz 固定频点 TL、各分部件平均 TL、谐振频率，并按第 6.5 节输出膨胀腔高频峰谷频率、峰值/高频平均 TL 与一阶高阶模态截止频率（fmax,n = (2n−1)c/(4L)、fmin,n = n·c/(2L)、TLmax = 10lg[1+0.25(m−1/m)²]、TLavg = 10lg[1+0.125(m−1/m)²]、fc,1 = 1.84c/(πD)，式24a~24f），同时绘制系统 TL - Frequency 曲线。高频峰来自腔长与波长的干涉：多腔宜错开长度、腔长公差建议 ±2%、按 1/3 倍频程平均评价。选定管型后输入区只显示该元件需要的参数，公式区同步切换为该元件的专用公式。',
   inputs: [
     ...compInputs,
 
@@ -558,7 +601,8 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
 
     ...withGroup(inInputs, SEC_IN),
 
-    { key: 'dBoxIn', label: '空滤器进出口管直径', symbol: 'd_box', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, group: SEC_BOX, description: '膨胀腔进/出口管直径，决定截面突变面积比 m = (D_chamber/d_box)²' },
+    { key: 'dBoxIn', label: '空滤器进口管直径', symbol: 'd_box,in', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, group: SEC_BOX, description: '膨胀腔进口管直径，决定进口截面突变面积比 m = (D_chamber/d_box,in)²' },
+    { key: 'dBoxOut', label: '空滤器出口管直径', symbol: 'd_box,out', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, group: SEC_BOX, description: '膨胀腔出口管直径，可与进口不同；膨胀腔到出口管按截面突变（式5）接入' },
     { key: 'dBoxCh', label: '空滤器腔体直径', symbol: 'D_chamber', unit: 'mm', unitGroup: 'diameter', default: 200, min: 0, required: true, group: SEC_BOX, description: '膨胀腔腔体直径，须不小于进出口管直径' },
     { key: 'LBox', label: '空滤器腔体长度', symbol: 'L_airbox', unit: 'mm', unitGroup: 'length', default: 300, min: 0, required: true, group: SEC_BOX, description: '膨胀腔有效长度，决定 TL 峰值位置 f ≈ (2n−1)c/(4L)' },
     { key: 'Vh', label: '谐振腔容积', symbol: 'V', unit: 'L', unitGroup: 'volume', default: 0.5, min: 0, showIf: { key: 'hOn', min: 1, max: 1 }, group: SEC_BOX, description: '仅谐振腔需要：腔体容积 V，示例 0.5 L = 5×10⁻⁴ m³' },
@@ -576,6 +620,8 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     { label: '四端参数传递损失（[p, ρcu] 状态，Z0 = 1）', tex: 'TL = 20\\lg\\frac{\\left|T_{11}+T_{12}+T_{21}+T_{22}\\right|}{2} + 10\\lg\\frac{S_{in}}{S_{out}}' },
     { label: '系统总传递矩阵（按气流方向级联，式32）', tex: 'T_{sys} = T_{in}\\,T_{bellows}\\,T_{braid}\\,T_{airbox}\\,T_{muffler}\\,T_{out}' },
     { label: '截面突变与等截面直管（式5/6）', tex: 'T_{area} = \\begin{bmatrix}1 & 0 \\\\ 0 & S_d/S_u\\end{bmatrix},\\qquad T_{duct} = \\begin{bmatrix}\\cos(kL) & j\\sin(kL) \\\\ j\\sin(kL) & \\cos(kL)\\end{bmatrix}' },
+    { label: '渐变管离散与级联（式6a~6c，D_in ≠ D_out 时启用）', tex: '\\frac{1}{S}\\frac{d}{dx}\\left(S\\frac{dp}{dx}\\right)+k^2p=0,\\quad D_i=D_{in}+(D_{out}-D_{in})\\frac{i-0.5}{N},\\quad T_{taper}=T_{area}(S_N\\to S_{out})\\,T_{duct}(D_N,\\Delta L)\\cdots T_{duct}(D_1,\\Delta L)\\,T_{area}(S_{in}\\to S_1)' },
+    { label: '渐变管离散约束与截止频率（式6d）', tex: 'N\\ge 10,\\qquad \\Delta L=\\frac{L}{N}\\le\\frac{\\lambda_{\\min}}{10},\\qquad f_c=\\frac{1.84\\,c}{\\pi D_{\\min}}' },
     { label: '进气管段 1：波纹管（式7/8）', tex: 'm_w = \\frac{(D+2h)^2}{D^2},\\qquad TL_w = 10\\lg\\left[1+0.25\\left(m_w-\\frac{1}{m_w}\\right)^2\\sin^2(kw)\\right]', showIf: { key: 't1', min: 2, max: 2 } },
     { label: '进气管段 2：波纹管（式7/8）', tex: 'm_w = \\frac{(D+2h)^2}{D^2},\\qquad TL_w = 10\\lg\\left[1+0.25\\left(m_w-\\frac{1}{m_w}\\right)^2\\sin^2(kw)\\right]', showIf: { key: 't2', min: 2, max: 2 } },
     { label: '进气管段 3：波纹管（式7/8）', tex: 'm_w = \\frac{(D+2h)^2}{D^2},\\qquad TL_w = 10\\lg\\left[1+0.25\\left(m_w-\\frac{1}{m_w}\\right)^2\\sin^2(kw)\\right]', showIf: { key: 't3', min: 2, max: 2 } },
@@ -603,7 +649,11 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
   assumptions: [
     '公式与《进气系统传递损失计算（进气管-波纹管-编织管-空滤器-出气管-消音器）》一致：统一采用 [p, ρcu] 状态变量（Z0 = 1），TL = 20lg(|T11+T12+T21+T22|/2) + 10lg(Sin/Sout)；等截面进出口时面积项为 0，与文档式(3) 完全一致，截面不同时该面积项对应式(33) 的 10lg(Si/So)',
     '目标是把传递损失（元件本身属性，与声源/末端无关）与插入损失区分开：本公式只算 TL，插入损失还需计入声源阻抗与末端反射，不能直接互换',
-    '进气管与出气管的等截面直管段 TL ≈ 0 dB；实际进气/出气管的 TL 主要来自截面突变、急弯与支管，量级通常 < 1~2 dB。弯头本身不产生明显 TL，按文档第 3 节忽略',
+    '每个管道元件都同时给出进口直径 D_in 与出口直径 D_out：进气管、波纹管、编织管、空滤器进出口、出气管、消音器进出口均按式(6b)(6c) 处理，不能用一个平均直径代替全段。D_in = D_out 时按等截面直管退化处理（式6）',
+    '渐变管按 Webster 方程（式6a）离散：S(x) = πD(x)²/4，D_i = D_in + (D_out − D_in)(i − 0.5)/N；每段子圆柱取自身直径建立传递矩阵，段间按局部截面突变（式5）接入。离散约束为 N ≥ 10 且 ΔL = L/N ≤ λ_min/10（λ_min = c/f_max），满足时与精确锥形管理论误差 < 1 dB；本实现取 N = max(10, ⌈10Lf_max/c⌉) 并限制在 40 以内以控制计算量',
+    '波纹管与编织管在渐变段中同样逐子段处理：波纹管每个子段的直径为渐变插值值、波节数按 L/w 给定；编织管壁面耗散因子 K = Rw/(Rw²+Xw²) 逐频点只算一次，各子段按自身直径取 α_i = 2K/D_i 后按复波数级联',
+    '旁支消音器接在所在管段的下游端，按该处局部截面（该段出口内径）归一化支管阻抗；多腔穿孔消音器本体按穿孔主管进口内径建模，进出口直径不同时在出口端按截面突变接入，不改变其内部穿孔参数定义',
+    '渐变段最小直径 D_min 决定平面波假设的上限：f_c = 1.84c/(πD_min)（式6d），计算频率超过该值时一维结果不可信，应以三维声学或实测为准',
     '波纹管按「一串短膨胀腔」处理：每个波节取 mw = (D+2h)²/D²、长度 w，单节 TLw = 10lg[1 + 0.25(mw−1/mw)²sin²(kw)]（式8）；波节数 N = round(L/w)，余量并入每节长度。波纹管本体 TL 通常 1~3 dB，其声学贡献远小于隔振贡献',
     '编织管用 JCA 五参数（σ_f=240 kPa·s/m²、φ=0.35、α∞=2.5、Λ=0.027 mm、Λ′=0.054 mm）算等效流体，再由壁面阻抗得 ζw = Rw + jXw，按 α = (2/D)·Rw/(Rw²+Xw²)（式17）与 TL ≈ 8.686·α·L（式18）计算；本实现按复波数 kx = k0 − jα 级联，单件时与式18 严格一致',
     '编织管校核：按论文样件（L=145 mm、D=49.36 mm、t=2.7 mm）20~2000 Hz 的频带平均 TL 本实现约 18.4 dB（论文约 16.4 dB，580 Hz 附近论文约 20 dB、本实现约 19.5 dB）；差异来自式17/18 的端部与背衬简化，工程定型前应按实测两负载法标定',
@@ -633,7 +683,7 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       c: NaN, tl_avg: NaN, tl_max: NaN, f_peak: NaN,
       tl250: NaN, tl500: NaN, tl1000: NaN, tl1500: NaN,
       tlInAvg: NaN, tlBoxAvg: NaN, tlOutAvg: NaN, tlBraidAvg: NaN, tlBellowsAvg: NaN, tlSilAvg: NaN,
-      fExpPeak1: NaN, fExpMin1: NaN, tlExpMax: NaN, tlExpAvg: NaN, fcMode1: NaN,
+      fExpPeak1: NaN, fExpMin1: NaN, tlExpMax: NaN, tlExpAvg: NaN, fcMode1: NaN, fcDuct: NaN,
       fH: NaN, fQ: NaN,
     };
 
@@ -647,8 +697,8 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
 
     for (let i = 1; i <= 3; i++) {
       if (!(v[`t${i}`] >= 1 && v[`t${i}`] <= 3) || !(v[`o${i}`] >= 1 && v[`o${i}`] <= 3)) return empty;
-      if (!pos(v[`D${i}`]) || !nn(v[`L${i}`]) || !nn(v[`h${i}`]) || !nn(v[`w${i}`]) || !nn(v[`twB${i}`])) return empty;
-      if (!pos(v[`Do${i}`]) || !nn(v[`Lo${i}`]) || !nn(v[`hO${i}`]) || !nn(v[`wO${i}`])) return empty;
+      if (!pos(v[`D${i}`]) || !pos(v[`Dout${i}`] ?? v[`D${i}`]) || !nn(v[`L${i}`]) || !nn(v[`h${i}`]) || !nn(v[`w${i}`]) || !nn(v[`twB${i}`])) return empty;
+      if (!pos(v[`Do${i}`]) || !pos(v[`Douto${i}`] ?? v[`Do${i}`]) || !nn(v[`Lo${i}`]) || !nn(v[`hO${i}`]) || !nn(v[`wO${i}`])) return empty;
       // 多腔消音器参数只在该段选为消音器时校验，未使用段的默认值不参与计算
       if (v[`o${i}`] === 3) {
         const nc = Math.round(v[`nc${i}`] ?? 0);
@@ -671,7 +721,8 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       if (bro === 1 && (!pos(v[`qwLo${i}`]) || !pos(v[`qwDo${i}`]))) return empty;
     }
 
-    if (!pos(v.dBoxIn) || !(v.dBoxCh >= v.dBoxIn) || !nn(v.LBox)) return empty;
+    const dBOut = v.dBoxOut ?? v.dBoxIn;
+    if (!pos(v.dBoxIn) || !pos(dBOut) || !(v.dBoxCh >= v.dBoxIn) || !(v.dBoxCh >= dBOut) || !nn(v.LBox)) return empty;
     if (!(v.hOn === 0 || v.hOn === 1) || !(v.qOn === 0 || v.qOn === 1)) return empty;
     if (v.hOn === 1 && (!pos(v.Vh) || !nn(v.ln) || !pos(v.dn))) return empty;
     if (v.qOn === 1 && (!pos(v.Lq) || !pos(v.dq))) return empty;
@@ -690,8 +741,15 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     };
 
     const area = (d: number) => (Math.PI * d * d) / 4;
-    const aIn = [1, 2, 3].map((i) => area(v[`D${i}`]));
-    const aOut = [1, 2, 3].map((i) => area(v[`Do${i}`]));
+    /** 每段进口/出口内径（SI，m）：段内 D_in ≠ D_out 时按渐变管离散（式6b/6c） */
+    const dinIn = [1, 2, 3].map((i) => v[`D${i}`]);
+    const doutIn = [1, 2, 3].map((i) => v[`Dout${i}`] ?? v[`D${i}`]);
+    const dinOut = [1, 2, 3].map((i) => v[`Do${i}`]);
+    const doutOut = [1, 2, 3].map((i) => v[`Douto${i}`] ?? v[`Do${i}`]);
+    const aInI = dinIn.map(area);
+    const aInO = doutIn.map(area);
+    const aOutI = dinOut.map(area);
+    const aOutO = doutOut.map(area);
 
     /** 集中旁支（N 个相同元件并联）：T = [1, 0; N/ζb, 1]，ζb 为相对主管特性阻抗的归一化值 */
     const branchMat = (zeta: Cx, n: number): Cx[][] => {
@@ -724,7 +782,8 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
 
     /** 进气管段旁支矩阵：选定旁支类型后在该段下游端并联 N 个（段长取 0 时仍接入） */
     const inBranchMat = (i: number, f: number, k0: number): Cx[][] => {
-      const S = aIn[i - 1];
+      // 旁支接在该段下游端，按该处局部截面（出口内径）归一化
+      const S = aInO[i - 1];
       let T = eye2();
       const br = Math.round(v[`br${i}`] ?? 0);
       const brN = Math.round(v[`brN${i}`] ?? 0);
@@ -735,7 +794,8 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
 
     /** 出气管段旁支矩阵：选定旁支类型后在该段下游端并联 N 个（段长取 0 时仍接入） */
     const outBranchMat = (i: number, f: number, k0: number): Cx[][] => {
-      const S = aOut[i - 1];
+      // 旁支接在该段下游端，按该处局部截面（出口内径）归一化
+      const S = aOutO[i - 1];
       let T = eye2();
       const bro = Math.round(v[`bro${i}`] ?? 0);
       const broN = Math.round(v[`broN${i}`] ?? 0);
@@ -744,64 +804,62 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       return T;
     };
 
-    /** 进气管段本体矩阵（不含旁支；type 3 = 编织管） */
+    /** 进气管段本体矩阵（不含旁支；type 1 直管、2 波纹管、3 编织管，均按 D_in→D_out 渐变离散） */
     const inSegBaseMat = (i: number, f: number, k0: number): Cx[][] => {
-      const D = v[`D${i}`];
+      const din = dinIn[i - 1];
+      const dout = doutIn[i - 1];
       const L = v[`L${i}`];
       const type = v[`t${i}`];
-      const kL = cx(k0 * L);
       if (!(L > 0)) return eye2();
-      if (type === 1) return ductMat(L, kL);
+      const straight = (_D: number, l: number): Mat2 => ductMat(l, cx(k0 * l));
+      if (type === 1) return taperMat(din, dout, L, c, v.fmax, straight);
       if (type === 2) {
         const h = v[`h${i}`];
         const w = v[`w${i}`];
-        if (!(h > 0) || !(w > 0)) return ductMat(L, kL);
-        const N = Math.max(1, Math.round(L / w));
-        const segL = L / N;
-        const m = ((D + 2 * h) * (D + 2 * h)) / (D * D);
-        const node = matMul(
-          matMul(areaMat(m, 1), ductMat(segL, cx(k0 * segL))),
-          areaMat(1, m),
-        );
-        let T = eye2();
-        for (let n = 0; n < N; n++) T = matMul(T, node);
-        return T;
+        if (!(h > 0) || !(w > 0)) return taperMat(din, dout, L, c, v.fmax, straight);
+        // 每个波节按「扩到 D+2h → 直管 → 缩回」的短膨胀腔处理（式7/8），直径随渐变段插值
+        const wave = (D: number, l: number): Mat2 => {
+          const m = ((D + 2 * h) * (D + 2 * h)) / (D * D);
+          return matMul(matMul(areaMat(m, 1), ductMat(l, cx(k0 * l))), areaMat(1, m));
+        };
+        return taperMat(din, dout, L, c, v.fmax, wave, Math.max(1, Math.round(L / w)));
       }
       const tw = v[`twB${i}`];
-      const alpha = braidAlpha(f, D, tw, med, braidP);
-      return ductMat(L, cx(k0 * L, -alpha * L));
+      // 壁面耗散因子逐频点只算一次；各子段按自身直径取 α_i = 2K/D_i（式17），复波数级联
+      const kd = braidDissipation(f, tw, med, braidP);
+      const braid = (D: number, l: number): Mat2 => ductMat(l, cx(k0 * l, -((2 * kd) / D) * l));
+      return taperMat(din, dout, L, c, v.fmax, braid);
     };
 
-    /** 出气管段本体矩阵（不含旁支；type 3 = 多腔穿孔消音器） */
+    /** 出气管段本体矩阵（不含旁支；type 1 直管、2 波纹管、3 多腔穿孔消音器） */
     const outSegBaseMat = (i: number, f: number, k0: number): Cx[][] => {
-      const D = v[`Do${i}`];
+      const din = dinOut[i - 1];
+      const dout = doutOut[i - 1];
       const L = v[`Lo${i}`];
       const type = v[`o${i}`];
       if (!(L > 0)) return eye2();
-      if (type === 1) return ductMat(L, cx(k0 * L));
+      const straight = (_D: number, l: number): Mat2 => ductMat(l, cx(k0 * l));
+      if (type === 1) return taperMat(din, dout, L, c, v.fmax, straight);
       if (type === 2) {
         const h = v[`hO${i}`];
         const w = v[`wO${i}`];
-        if (!(h > 0) || !(w > 0)) return ductMat(L, cx(k0 * L));
-        const N = Math.max(1, Math.round(L / w));
-        const segL = L / N;
-        const m = ((D + 2 * h) * (D + 2 * h)) / (D * D);
-        const node = matMul(
-          matMul(areaMat(m, 1), ductMat(segL, cx(k0 * segL))),
-          areaMat(1, m),
-        );
-        let T = eye2();
-        for (let n = 0; n < N; n++) T = matMul(T, node);
-        return T;
+        if (!(h > 0) || !(w > 0)) return taperMat(din, dout, L, c, v.fmax, straight);
+        const wave = (D: number, l: number): Mat2 => {
+          const m = ((D + 2 * h) * (D + 2 * h)) / (D * D);
+          return matMul(matMul(areaMat(m, 1), ductMat(l, cx(k0 * l))), areaMat(1, m));
+        };
+        return taperMat(din, dout, L, c, v.fmax, wave, Math.max(1, Math.round(L / w)));
       }
       const nc = Math.round(v[`nc${i}`]);
       const lcs: number[] = [];
       for (let j = 1; j <= nc; j++) lcs.push(v[`Lc${i}_${j}`]);
       const m = mufflerMat(
-        f, c, D, v[`DoutS${i}`], v[`dhS${i}`], v[`nhS${i}`], v[`twS${i}`],
+        f, c, din, v[`DoutS${i}`], v[`dhS${i}`], v[`nhS${i}`], v[`twS${i}`],
         v[`ctS${i}`], lcs, v.M1, v.R0,
       );
-      return m ?? eye2();
+      if (!m) return eye2();
+      // 多腔消音器本体按穿孔主管进口内径建模，进出口直径不同时在出口端按截面突变接入
+      return Math.abs(dout / din - 1) > 1e-9 ? matMul(areaMat(area(dout), area(din)), m) : m;
     };
 
     /** 段矩阵 = 旁支（下游端）· 本体 */
@@ -813,6 +871,7 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     /** 空滤器总成矩阵：谐振腔/支管 → 膨胀腔（含滤芯层） */
     const boxMat = (f: number, k0: number): Cx[][] | null => {
       const sIn = area(v.dBoxIn);
+      const sOut = area(v.dBoxOut ?? v.dBoxIn);
       const sCh = area(v.dBoxCh);
       const tFil = v.tFil;
       let T = areaMat(sCh, sIn);
@@ -830,7 +889,7 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
         T = matMul(T, layer);
       }
       T = matMul(T, ductMat(v.LBox / 2, cx(k0 * v.LBox / 2)));
-      T = matMul(T, areaMat(sIn, sCh));
+      T = matMul(T, areaMat(sOut, sCh));
 
       // 亥姆霍兹谐振腔旁支：ζb = Zb·S/(ρ0c0)，Zb = jωρ0Leff/An + ρ0c0²/(jωV)
       if (v.hOn === 1) {
@@ -871,20 +930,21 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       const inAct = [1, 2, 3].filter((i) => v[`L${i}`] > 0 || inHasBranch(i));
       const outAct = [1, 2, 3].filter((i) => v[`Lo${i}`] > 0 || outHasBranch(i));
       const sBox = area(v.dBoxIn);
-      const inTerm = inAct.length ? area(v[`D${inAct[0]}`]) : sBox;
-      const inLast = inAct.length ? area(v[`D${inAct[inAct.length - 1]}`]) : sBox;
-      const outFirst = outAct.length ? area(v[`Do${outAct[0]}`]) : sBox;
-      const outTerm = outAct.length ? area(v[`Do${outAct[outAct.length - 1]}`]) : sBox;
+      const sBoxOut = area(v.dBoxOut ?? v.dBoxIn);
+      const inTerm = inAct.length ? aInI[inAct[0] - 1] : sBox;
+      const inLast = inAct.length ? aInO[inAct[inAct.length - 1] - 1] : sBox;
+      const outFirst = outAct.length ? aOutI[outAct[0] - 1] : sBoxOut;
+      const outTerm = outAct.length ? aOutO[outAct[outAct.length - 1] - 1] : sBoxOut;
 
       const inMats = [1, 2, 3].map((i) => inSegMat(i, f, k0));
       const inBases = [1, 2, 3].map((i) => inSegBaseMat(i, f, k0));
-      // 进气管：活跃段级联，相邻段直径不同时插入截面突变矩阵（式5）
+      // 进气管：活跃段级联，前段出口截面 → 后段进口截面按截面突变矩阵接入（式5）
       let tIn = eye2();
       for (let k = 0; k < inAct.length; k++) {
         const i = inAct[k];
         if (k > 0) {
-          const prev = aIn[inAct[k - 1] - 1];
-          if (Math.abs(aIn[i - 1] / prev - 1) > 1e-12) tIn = matMul(tIn, areaMat(aIn[i - 1], prev));
+          const prev = aInO[inAct[k - 1] - 1];
+          if (Math.abs(aInI[i - 1] / prev - 1) > 1e-12) tIn = matMul(tIn, areaMat(aInI[i - 1], prev));
         }
         tIn = matMul(tIn, inMats[i - 1]);
       }
@@ -898,8 +958,8 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       for (let i = 1; i <= 3; i++) {
         if (v[`t${i}`] === 3 && v[`L${i}`] > 0) {
           tBraid = matMul(tBraid, inBases[i - 1]);
-          if (!Number.isFinite(braidMin)) braidMin = aIn[i - 1];
-          braidMax = aIn[i - 1];
+          if (!Number.isFinite(braidMin)) braidMin = aInI[i - 1];
+          braidMax = aInO[i - 1];
         }
       }
       const braidTl = Number.isFinite(braidMin) ? tlOf(tBraid, braidMin, braidMax) : NaN;
@@ -910,15 +970,15 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       for (let i = 1; i <= 3; i++) {
         if (v[`t${i}`] === 2 && v[`L${i}`] > 0) {
           tBel = matMul(tBel, inBases[i - 1]);
-          if (!Number.isFinite(belMin)) belMin = aIn[i - 1];
-          belMax = aIn[i - 1];
+          if (!Number.isFinite(belMin)) belMin = aInI[i - 1];
+          belMax = aInO[i - 1];
         }
       }
       const belTl = Number.isFinite(belMin) ? tlOf(tBel, belMin, belMax) : NaN;
 
-      // 空滤器
+      // 空滤器（进口/出口管直径可不同）
       const tBox = boxMat(f, k0);
-      const boxTl = tBox ? tlOf(tBox, sBox, sBox) : NaN;
+      const boxTl = tBox ? tlOf(tBox, sBox, sBoxOut) : NaN;
 
       // 出气管：活跃段级联，段间与空滤器出口同样按截面突变处理
       const outMats = [1, 2, 3].map((i) => outSegMat(i, f, k0));
@@ -927,10 +987,10 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       for (let k = 0; k < outAct.length; k++) {
         const i = outAct[k];
         if (k === 0) {
-          if (Math.abs(aOut[i - 1] / sBox - 1) > 1e-12) tOut = matMul(tOut, areaMat(aOut[i - 1], sBox));
+          if (Math.abs(aOutI[i - 1] / sBoxOut - 1) > 1e-12) tOut = matMul(tOut, areaMat(aOutI[i - 1], sBoxOut));
         } else {
-          const prev = aOut[outAct[k - 1] - 1];
-          if (Math.abs(aOut[i - 1] / prev - 1) > 1e-12) tOut = matMul(tOut, areaMat(aOut[i - 1], prev));
+          const prev = aOutO[outAct[k - 1] - 1];
+          if (Math.abs(aOutI[i - 1] / prev - 1) > 1e-12) tOut = matMul(tOut, areaMat(aOutI[i - 1], prev));
         }
         tOut = matMul(tOut, outMats[i - 1]);
       }
@@ -942,8 +1002,8 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       for (let i = 1; i <= 3; i++) {
         if (v[`o${i}`] === 3 && v[`Lo${i}`] > 0) {
           tSil = matMul(tSil, outBases[i - 1]);
-          if (!Number.isFinite(silMin)) silMin = aOut[i - 1];
-          silMax = aOut[i - 1];
+          if (!Number.isFinite(silMin)) silMin = aOutI[i - 1];
+          silMax = aOutO[i - 1];
         }
       }
       const silTl = Number.isFinite(silMin) ? tlOf(tSil, silMin, silMax) : NaN;
@@ -1015,6 +1075,12 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     const tlExpMax = 10 * Math.log10(1 + 0.25 * Math.pow(mExp - 1 / mExp, 2));
     const tlExpAvg = 10 * Math.log10(1 + 0.125 * Math.pow(mExp - 1 / mExp, 2));
     const fcMode1 = (1.84 * c) / (Math.PI * v.dBoxCh);
+    // 管段最小截面一阶高阶模态截止（式6d）：取各管段进出口内径（含空滤器进出口管）的最小值
+    const dAll = [
+      ...dinIn, ...doutIn, ...dinOut, ...doutOut,
+      v.dBoxIn, v.dBoxOut ?? v.dBoxIn,
+    ].filter((d) => d > 0);
+    const fcDuct = dAll.length ? (1.84 * c) / (Math.PI * Math.min(...dAll)) : NaN;
 
     return {
       c,
@@ -1028,7 +1094,7 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       tlBraidAvg: nBraid > 0 ? sumBraid / nBraid : NaN,
       tlBellowsAvg: nBel > 0 ? sumBel / nBel : NaN,
       tlSilAvg: nSil > 0 ? sumSil / nSil : NaN,
-      fExpPeak1, fExpMin1, tlExpMax, tlExpAvg, fcMode1,
+      fExpPeak1, fExpMin1, tlExpMax, tlExpAvg, fcMode1, fcDuct,
       fH, fQ,
     };
   },
@@ -1084,8 +1150,8 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     {
       name: '编织管样件：D=49.36 mm、L=145 mm、t=2.7 mm（20~2000 Hz 平均 TL）',
       input: vBase({
-        tFil: 0, hOn: 0, qOn: 0, dBoxIn: 0.06, dBoxCh: 0.06, LBox: 0,
-        t1: 3, D1: 0.04936, L1: 0.145, twB1: 2.7e-3,
+        tFil: 0, hOn: 0, qOn: 0, dBoxIn: 0.06, dBoxOut: 0.06, dBoxCh: 0.06, LBox: 0,
+        t1: 3, D1: 0.04936, Dout1: 0.04936, L1: 0.145, twB1: 2.7e-3,
         t2: 1, L2: 0, t3: 1, L3: 0,
         Lo1: 0, Lo2: 0, Lo3: 0,
       }),
@@ -1112,7 +1178,7 @@ function vBase(over: Record<string, number>): Record<string, number> {
     hOn: 1, Vh: 5e-4, ln: 0.03, dn: 0.02,
     qOn: 0, Lq: 0.4, dq: 0.035,
     tFil: 0.03, sigmaFil: 300000, phiFil: 0.9, alphaFil: 1.5, lambdaVFil: 1e-4, lambdaTFil: 2e-4,
-    dBoxIn: 0.06, dBoxCh: 0.2, LBox: 0.3,
+    dBoxIn: 0.06, dBoxOut: 0.06, dBoxCh: 0.2, LBox: 0.3,
   };
   const inD = [
     { t: 1, D: 0.07, L: 0.3, h: 0.004, w: 0.01, tw: 0.0027 },
@@ -1129,6 +1195,7 @@ function vBase(over: Record<string, number>): Record<string, number> {
     const d = inD[i - 1];
     base[`t${i}`] = d.t;
     base[`D${i}`] = d.D;
+    base[`Dout${i}`] = d.D;
     base[`L${i}`] = d.L;
     base[`h${i}`] = d.h;
     base[`w${i}`] = d.w;
@@ -1136,6 +1203,7 @@ function vBase(over: Record<string, number>): Record<string, number> {
     const o = outD[i - 1];
     base[`o${i}`] = o.o;
     base[`Do${i}`] = o.D;
+    base[`Douto${i}`] = o.D;
     base[`Lo${i}`] = o.L;
     base[`hO${i}`] = o.h;
     base[`wO${i}`] = o.w;
