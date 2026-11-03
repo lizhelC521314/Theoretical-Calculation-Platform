@@ -18,8 +18,11 @@ import type { FormulaSpec, OutputSpec, ParamSpec, ShowIf } from '../../formula/t
  *   空滤器       Δp = ΣK_box·(ρv_box²/2) + Δp_filter + k_d·m_dust + η 流场修正（式 11/13b/13c）；
  *                Δp_filter 三种层级（资料 6.2 节式 13A/13B/13C，**不可混用**）：
  *                方式① 台架拟合：Δp_filter = A·v_f + B·v_f²（A、B 由 ISO 5011 实测 Δp–Q 拟合）
- *                方式② 滤芯级拟合：Δp_filter = [μα_v v_f + (ρ/β)·v_f²]·L_zone（式 13B；
- *                  α_v、β、L_zone 由 CFD 多孔区标定，**不需要 σ、不需要 L_m**——错误地再除以 σ 会把几何算两遍，压降偏一个数量级）
+ *                方式② 滤芯级拟合：Δp_filter = [μ·α_v·Q/(L·W) + (ρ/β)·(Q/(L·W))²]·H（式 13B/13B1；
+ *                  输入滤芯长 L、宽 W、厚 H，α_v、β 已按“单位面积、单位高度”归一化，
+ *                  **不需要 σ、不需要 L_m**——错误地再除以 σ 会把几何算两遍，压降偏一个数量级）；
+ *                  另提供治具两点反算（式 13B3~13B6）：由实测 (Δp₁,v₁)、(Δp₂,v₂) 反推 A、B、
+ *                  α_v = A/μ、C₂ = 2B/ρ、β = 2/C₂，直接给出 Fluent 1/α 与 C₂、STAR-CCM+ P_v 与 P_i
  *                方式③ 滤纸级材料：Δp_filter = (μα_v L_m/σ)·v_f + [(ρ/β)·L_m/σ²]·v_f²（式 13C = 13d~13q；
  *                  α_v、β、L_m（滤纸厚度）、σ（褶皱比），σ 可手动或由褶皱几何自动算）
  *   大气入口段   Δp_entrance = (1 + K_in)·(ρv²/2) − (ρV²/2) + p_bay
@@ -149,20 +152,28 @@ for (let i = 1; i <= SEG_MAX; i++) {
 const boxInputs: ParamSpec[] = [
   { key: 'ABox', label: '空滤器箱体流通面积', symbol: 'A_box', unit: 'm²', unitGroup: 'area', default: 0.00283, min: 0, required: true, description: '箱体入口截面面积，K_box 按此截面流速取动压；示例取与出气管截面相当（φ60 约 0.00283 m²）' },
   { key: 'KBox', label: '箱体局部阻力系数', symbol: 'ΣK_box', unit: '-', unitGroup: 'dimensionless', default: 0.5, min: 0, required: true, description: '箱体进口、出口、内部挡板等局部损失之和，通常 0.5~1.5' },
-  { key: 'Af', label: '滤芯迎风面积', symbol: 'A_f', unit: 'm²', unitGroup: 'area', default: 0.25, min: 0, required: true, showIf: [{ key: 'fMode', min: 1, max: 1 }, { key: 'fMode', min: 2, max: 2 }, { key: 'fMode', min: 3, max: 3 }], description: '滤材有效迎风面积，面速度 v_f = Q/A_f（示例 0.667 m/s）；方式③自动下由褶皱几何自动算出 A_f = L_c·W_c' },
+  { key: 'Af', label: '滤芯迎风面积', symbol: 'A_f', unit: 'm²', unitGroup: 'area', default: 0.25, min: 0, required: true, showIf: [{ key: 'fMode', min: 1, max: 1 }, { key: 'fMode', min: 3, max: 3 }], description: '滤材有效迎风面积，面速度 v_f = Q/A_f（示例 0.667 m/s）；方式②由输入的长×宽自动得出，方式③自动由褶皱几何得出' },
   { key: 'fMode', label: '滤芯阻力计算层级（资料 6.2 节）', symbol: '-', unit: '-', kind: 'select', options: [
     { value: 1, label: '① 台架拟合（A、B，ISO 5011）' },
-    { value: 2, label: '② 滤芯级拟合（α_v、β、L_zone，CFD 标定）' },
+    { value: 2, label: '② 滤芯级拟合（α_v、β、长×宽×高，CFD 标定）' },
     { value: 3, label: '③ 滤纸级材料（α_v、β、L_m、σ，手动输入 σ）' },
     { value: 4, label: '③ 滤纸级自动（褶皱几何算 A_f、σ）' },
-  ], default: 1, required: true, description: '三种参数层级**不可混用**：①用台架实测的 A、B；②用 CFD 多孔区标定的 α_v、β、L_zone（不需要 σ/L_m，错误地再除以 σ 会把几何算两遍，压降偏一个数量级）；③用滤纸材料参数 α_v、β、L_m 和褶皱比 σ，σ 可手动或由褶皱几何自动算（式 13A/13B/13C）' },
+    { value: 5, label: '② 治具两点反算 α_v、β（式 13B3~13B6）' },
+  ], default: 1, required: true, description: '参数层级**不可混用**：①用台架实测 A、B；②用滤芯级 α_v、β 与长×宽×高（不需要 σ、L_m，错误地再除以 σ 会把几何算两遍）；③用滤纸材料 α_v、β、L_m 与褶皱比 σ；②治具反算由两个实测点反推 α_v、β 供 ②/③ 使用（式 13A/13B/13C）' },
   { key: 'aF', label: '方式①：台架拟合线性系数 A', symbol: 'A', unit: 'Pa·s/m', default: 300, min: 0, required: true, showIf: { key: 'fMode', min: 1, max: 1 }, description: 'ISO 5011 台架拟合的 Darcy 项系数（Pa·s/m），必须由本滤芯试验确定，不能套用其它滤芯' },
   { key: 'bF', label: '方式①：台架拟合二次系数 B', symbol: 'B', unit: 'Pa·s²/m²', default: 800, min: 0, required: true, showIf: { key: 'fMode', min: 1, max: 1 }, description: 'ISO 5011 台架拟合的惯性项系数（Pa·s²/m²）' },
-  { key: 'alphaV', label: 'α_v（粘性阻尼系数）', symbol: 'α_v', unit: '10¹⁰ m⁻²', unitGroup: 'viscousDrag', default: 6.6667, min: 0, required: true, showIf: { key: 'fMode', min: 2 }, description: '②③层级通用：α_v = 1/K（K 为渗透率，m⁻²），典型滤材 5~10×10⁹ m⁻²。CFD 对应 Fluent 粘性阻力系数 1/α = α_v、STAR-CCM+ P_v = μ·α_v' },
-  { key: 'betaF', label: 'β（惯性系数）', symbol: 'β', unit: '10⁻⁷ m⁻¹', unitGroup: 'forchheimerInertia', default: 1.0, min: 0, required: true, showIf: { key: 'fMode', min: 2 }, description: '②③层级通用：β 为 Forchheimer 惯性系数（m⁻¹），由 Δp–Q 曲线拟合。CFD 对应 Fluent 惯性阻力 C2 = 2/β、STAR-CCM+ P_i = ρ/β' },
-  { key: 'Lzone', label: '方式②：多孔区厚度 L_zone', symbol: 'L_zone', unit: 'm', unitGroup: 'lengthMeter', default: 0.04, min: 0, required: true, showIf: { key: 'fMode', min: 2, max: 2 }, description: '方式②专属：CFD 多孔区拟合的有效厚度（典型 40~80 mm，即 0.04~0.08 m）。公式 Δp_filter = [μα_v v_f + (ρ/β)·v_f²]·L_zone，**不需要 σ、不需要 L_m**——错误地再除以 σ 会把几何算两遍' },
-  { key: 'Lf', label: '方式③：滤纸厚度 L_m', symbol: 'L_m', unit: 'm', unitGroup: 'lengthMeter', default: 0.001, min: 0, required: true, showIf: [{ key: 'fMode', min: 3, max: 3 }], description: '方式③专属：滤纸本身厚度（0.2~0.6 mm，即 0.0002~0.0006 m），不是多孔区厚度 L_zone。压降公式 Δp_filter = (μα_v L_m/σ)·v_f + [(ρ/β)L_m/σ²]·v_f²（式 13C）' },
-  { key: 'sigmaF', label: '方式③：褶皱比 σ（手动）', symbol: 'σ', unit: '-', unitGroup: 'dimensionless', default: 4, min: 1, max: 10, required: true, showIf: { key: 'fMode', min: 3, max: 3 }, description: '方式③手动：σ = 滤材有效面积 A_m / 迎风面积 A_f（典型 2~10）；σ 加倍时线性项减半、惯性项降为 1/4' },
+  { key: 'alphaV', label: 'α_v（粘性阻尼系数）', symbol: 'α_v', unit: '10¹⁰ m⁻²', unitGroup: 'viscousDrag', default: 6.6667, min: 0, required: true, showIf: [{ key: 'fMode', min: 2, max: 2 }, { key: 'fMode', min: 3, max: 4 }], description: '②③层级输入：α_v = 1/K（K 为渗透率，m⁻²），典型滤纸 5~10×10⁹ m⁻²、滤芯级拟合约 1×10⁸ m⁻²。CFD 对应 Fluent 粘性阻力系数 1/α = α_v、STAR-CCM+ P_v = μ·α_v（式 13B6）。若用②治具反算模式，此处不需填写' },
+  { key: 'betaF', label: 'β（惯性系数）', symbol: 'β', unit: '10⁻⁷ m⁻¹', unitGroup: 'forchheimerInertia', default: 1.0, min: 0, required: true, showIf: [{ key: 'fMode', min: 2, max: 2 }, { key: 'fMode', min: 3, max: 4 }], description: '②③层级输入：β 为 Forchheimer 惯性系数（m⁻¹），β = 2/C₂。CFD 对应 Fluent 惯性阻力 C₂ = 2/β、STAR-CCM+ P_i = ρ/β（式 13B6）' },
+  { key: 'Lf2', label: '方式②：滤芯迎风面长 L', symbol: 'L', unit: 'm', unitGroup: 'lengthMeter', default: 0.5, min: 0, required: true, showIf: [{ key: 'fMode', min: 2, max: 2 }, { key: 'fMode', min: 5, max: 5 }], description: '式(13B)：滤芯迎风面长度，A_f = L·W；改尺寸后必须按式(13B) 重算，不能沿用原压降（式 13B2）' },
+  { key: 'Wf2', label: '方式②：滤芯迎风面宽 W', symbol: 'W', unit: 'm', unitGroup: 'lengthMeter', default: 0.5, min: 0, required: true, showIf: [{ key: 'fMode', min: 2, max: 2 }, { key: 'fMode', min: 5, max: 5 }], description: '式(13B)：滤芯迎风面宽度，A_f = L·W；长或宽加倍时线性项降为 1/2、惯性项降为 1/4' },
+  { key: 'Hf2', label: '方式②：滤芯厚度 H（气流方向）', symbol: 'H', unit: 'm', unitGroup: 'lengthMeter', default: 0.04, min: 0, required: true, showIf: { key: 'fMode', min: 2, max: 2 }, description: '式(13B)(13B1)：滤芯高度即气流方向厚度（拟合多孔区高度，典型 0.04~0.08 m）。a = μ·α_v·H/(L·W) 是 v_f 的系数，b = (ρ/β)·H/(L·W)²；**不需要 σ、不需要 L_m**' },
+  { key: 'vFit1', label: '治具反算：测点 1 流速', symbol: 'v1', unit: 'm/s', unitGroup: 'velocity', default: 0.3, min: 0, required: true, showIf: { key: 'fMode', min: 5, max: 5 }, description: '式(13B3)~(13B5)：治具实测点 1 的面速度，建议取 5~8 个流速点做最小二乘；此处用两点显式解' },
+  { key: 'dpFit1', label: '治具反算：测点 1 压降', symbol: 'Δp1', unit: 'Pa', unitGroup: 'pressure', default: 90, min: 0, required: true, showIf: { key: 'fMode', min: 5, max: 5 }, description: '式(13B4)(13B5)：测点 1 的实测压降（Pa）' },
+  { key: 'vFit2', label: '治具反算：测点 2 流速', symbol: 'v2', unit: 'm/s', unitGroup: 'velocity', default: 0.9, min: 0, required: true, showIf: { key: 'fMode', min: 5, max: 5 }, description: '式(13B3)~(13B5)：测点 2 的面速度，应与测点 1 拉开 2~3 倍以减小拟合误差' },
+  { key: 'dpFit2', label: '治具反算：测点 2 压降', symbol: 'Δp2', unit: 'Pa', unitGroup: 'pressure', default: 480, min: 0, required: true, showIf: { key: 'fMode', min: 5, max: 5 }, description: '式(13B4)(13B5)：测点 2 的实测压降（Pa）；两点压力比与流速比差异越大，拟合越可靠' },
+  { key: 'Lfit', label: '治具反算：拟合厚度 L_fit', symbol: 'L_fit', unit: 'm', unitGroup: 'lengthMeter', default: 0.04, min: 0, required: true, showIf: { key: 'fMode', min: 5, max: 5 }, description: '式(13B3)(13B6)：拟合时的滤芯厚度（如 0.04 m）；反算得到的 α_v、β 已含褶皱、胶线与边框，回填方式② 时不能再乘 σ 或除 L_m' },
+  { key: 'Lf', label: '方式③：滤纸厚度 L_m', symbol: 'L_m', unit: 'm', unitGroup: 'lengthMeter', default: 0.001, min: 0, required: true, showIf: [{ key: 'fMode', min: 3, max: 3 }], description: '方式③专属：滤纸本身厚度（0.2~0.6 mm，即 0.0002~0.0006 m），不是滤芯厚度 H。压降公式 Δp_filter = (μα_v L_m/σ)·v_f + [(ρ/β)L_m/σ²]·v_f²（式 13C）' },
+  { key: 'sigmaF', label: '方式③：褶皱比 σ（手动）', symbol: 'σ', unit: '-', unitGroup: 'dimensionless', default: 4, min: 1.5, max: 8, required: true, showIf: { key: 'fMode', min: 3, max: 3 }, description: '方式③手动：σ = 滤材有效面积 A_m / 迎风面积 A_f（典型 2~10，本式按资料建议做 1.5~8 范围校验）；σ 加倍时线性项减半、惯性项降为 1/4' },
   { key: 'Lc', label: '方式③自动：滤芯截面长度', symbol: 'L_c', unit: 'm', unitGroup: 'lengthMeter', default: 0.6, min: 0, required: true, showIf: { key: 'fMode', min: 4, max: 4 }, description: '褶排列方向的长度边，A_f = L_c·W_c；褶沿宽度方向排列时 L_c/W_c 互换' },
   { key: 'Wc', label: '方式③自动：滤芯截面宽度', symbol: 'W_c', unit: 'm', unitGroup: 'lengthMeter', default: 0.4, min: 0, required: true, showIf: { key: 'fMode', min: 4, max: 4 }, description: 'A_f = L_c·W_c，A_m = 2N·h·W_c·k_e' },
   { key: 'Nc', label: '方式③自动：褶数 N', symbol: 'N', unit: '-', default: 26, min: 1, required: true, showIf: { key: 'fMode', min: 4, max: 4 }, description: '褶皱数量，典型 20~40 褶/m 长度；褶距 p = L_c/N' },
@@ -246,10 +257,10 @@ export const intakeSystemResistance: FormulaSpec = {
   subsystem: '进气系统',
   title: '进气系统阻力设计',
   summary:
-    '输入区最前为「系统组成」：操作者先选进气管、出气管的分段数（各 1~5 段），再逐段选择该段类别（进气管/波纹管/编织管、出气管/波纹管/多腔穿孔消音器），几何参数与公式随段数与管型自动显隐。按「进气管 → 空滤器（箱体 + 滤芯 + 流场不均匀修正）→ 出气管」逐段计算静压损失并汇总，滤芯阻力可直接输入 ISO 5011 拟合的 a、b，也可按 Darcy-Forchheimer 模型由粘性阻尼系数 α_v、惯性系数、滤材厚度与褶皱比换算；另计入大气入口段（含车速冲压与舱内负压）、出口动压与可压缩性修正，输出系统阻力曲线。',
+    '输入区最前为「系统组成」：操作者先选进气管、出气管的分段数（各 1~5 段），再逐段选择该段类别（进气管/波纹管/编织管、出气管/波纹管/多腔穿孔消音器），几何参数与公式随段数与管型自动显隐。按「进气管 → 空滤器（箱体 + 滤芯 + 流场不均匀修正）→ 出气管」逐段计算静压损失并汇总；滤芯阻力分三个不可混用的层级：①台架拟合 A、B，②滤芯级 α_v、β 配长×宽×高（含治具两点反算），③滤纸级材料 α_v、β、L_m、σ（σ 可手填或由褶皱几何自动算）；另计入大气入口段（含车速冲压与舱内负压）、出口动压与可压缩性修正，输出系统阻力曲线。',
   tags: ['进气系统', '阻力', '压降', '进气管', '波纹管', '编织管', '空气滤清器', '滤芯', '消音器', '穿孔管', '达西摩擦因子', '局部阻力', '入口损失', '马赫数', 'ISO 5011', '流体设计'],
   description:
-    '进气系统总阻力为各段静压损失之和：Δp_sys = Δp_entrance + ΣΔp_in + Δp_airbox + ΣΔp_out。每段均按「沿程摩擦 + 局部阻力」计算 Δp = [f·(L/D) + ΣK]·(ρv²/2)，各段流速按各自内径计算，局部阻力系数按该段局部流速取动压。若某段的进口与出口内径不同，按式(4a)~(4c) 把沿程摩擦分 20 段积分（D_i 取子段平均直径、v_i 按当地截面重算），并按式(4d)~(4f) 分别计入渐扩/渐缩局部损失：θ = 2arctan[(D_out − D_in)/(2L)]，K_exp = k_exp(θ)·(1 − A_in/A_out)²（基准为上游小管流速）、K_con = k_con(θ)·(1 − A_out/A_in)（基准为下游小管流速），k_exp、k_con 按 5°~90° 工程表线性插值；θ ≤ 10° 几乎可忽略，θ > 45° 的渐扩接近突扩必须计入，同面积比下渐扩损失约为渐缩的 1.5~2 倍。弯头不再取固定值，按 K_bend = n·K_90(R/D)·(θ/90°)^0.8~1.2 逐只计算（90°、R/D=1 取 0.3~0.5，R/D=0.5 取 0.8~1.2，直角/拼焊取 1.1~1.5；45° 约为 90° 的一半）。进气管侧每段可选进气管（光滑管 ε_s）、波纹管（f_c = f_s·[1 + k·(h/p)^m]，k = 3~5、m = 1.2~1.5；无几何数据时退回 C_c = 1.5~2.5）或编织管（ε_b = 0.05~0.30 mm，弯曲时按 K·[1 + c_b·D/R_b] 放大、按 A_eff = A·(1 − 0.1·D/R_b) 重算流速）。出气管侧可选普通出气管、波纹管或多腔穿孔消音器：穿孔管摩擦按 f_m = f_s·(1 + a·φ) 放大，φ 为孔总面积与穿孔段管内表面积之比；另计隔板损失、本体突扩/突缩，以及弯曲段整片开孔带来的「冲击 + 腔体交换」附加损失 K_bend,perf = K_bend,0·[1 + c1·(θ/90°)·φ_b] + c2·(θ/90°)²·φ_b/(1 − φ_b)。空滤器阻力 = 箱体局部阻力 + 滤芯多孔介质阻力 (a·v_f + b·v_f²) + 容尘增量 k_d·m_dust；滤芯系数有两种给法：方式 1 直接采用 ISO 5011 台架拟合的 a、b，方式 2 按 Darcy-Forchheimer 多孔介质模型（式 13d~13k）由粘性阻尼系数 α_v（m⁻²）、惯性系数 β（m⁻¹）、滤材厚度 L、褶皱比 σ 与迎风面积 A_f 换算：Δp_filter = [μ·α_v·v_m + (ρ/β)·v_m²]·L，v_m = Q/(σ·A_f)，a = μ·α_v·L/σ、b = (ρ/β)·L/σ²，且 α_v = 1/K、C_i = ρ/β；压降与厚度成正比、与迎风面积和褶皱比成反比（增大 A_f 或 σ 对高速段惯性项收益更大，增加厚度则线性上升）；箱内流场不均匀时按式(13b)(13c) 取有效面速度 v_eff = v_f/η（η = 0.6~1.0：进气口居中、箱体对称取 0.9，进气口偏置、挡板较多取 0.7~0.8，无导流板、进气直冲滤芯取 0.6~0.7），压降按 a·v_eff + b·v_eff² 计算。大气入口段按 Δp = (1 + K_in)·(ρv²/2) − (ρV²/2) 计算，系数是 (1 + K_in) 而不是单独的 K_in，因为把静止空气加速到管内流速所需的动压同样表现为入口静压下降。空气密度可直接输入，也可按温度、海拔与相对湿度由 p(z)、Buck 公式与湿空气状态方程计算（式 20~22）。系统总静压降按式(4g) 另加出口动压 ½ρv_out²（入口为静止大气时），与各段损失之和分开输出，避免把动压项重复计入损失。马赫数 M > 0.3 时按 Δp_comp ≈ Δp_inc·(1 + M²/4) 粗略修正，M > 0.6 应以一维气体动力学（Fanno）或 CFD 复算并做堵塞校核。选定管型后，输入区只显示该元件实际需要的参数，公式区同步切换为该元件的专用公式。',
+    '进气系统总阻力为各段静压损失之和：Δp_sys = Δp_entrance + ΣΔp_in + Δp_airbox + ΣΔp_out。每段均按「沿程摩擦 + 局部阻力」计算 Δp = [f·(L/D) + ΣK]·(ρv²/2)，各段流速按各自内径计算，局部阻力系数按该段局部流速取动压。若某段的进口与出口内径不同，按式(4a)~(4c) 把沿程摩擦分 20 段积分（D_i 取子段平均直径、v_i 按当地截面重算），并按式(4d)~(4f) 分别计入渐扩/渐缩局部损失：θ = 2arctan[(D_out − D_in)/(2L)]，K_exp = k_exp(θ)·(1 − A_in/A_out)²（基准为上游小管流速）、K_con = k_con(θ)·(1 − A_out/A_in)（基准为下游小管流速），k_exp、k_con 按 5°~90° 工程表线性插值；θ ≤ 10° 几乎可忽略，θ > 45° 的渐扩接近突扩必须计入，同面积比下渐扩损失约为渐缩的 1.5~2 倍。弯头不再取固定值，按 K_bend = n·K_90(R/D)·(θ/90°)^0.8~1.2 逐只计算（90°、R/D=1 取 0.3~0.5，R/D=0.5 取 0.8~1.2，直角/拼焊取 1.1~1.5；45° 约为 90° 的一半）。进气管侧每段可选进气管（光滑管 ε_s）、波纹管（f_c = f_s·[1 + k·(h/p)^m]，k = 3~5、m = 1.2~1.5；无几何数据时退回 C_c = 1.5~2.5）或编织管（ε_b = 0.05~0.30 mm，弯曲时按 K·[1 + c_b·D/R_b] 放大、按 A_eff = A·(1 − 0.1·D/R_b) 重算流速）。出气管侧可选普通出气管、波纹管或多腔穿孔消音器：穿孔管摩擦按 f_m = f_s·(1 + a·φ) 放大，φ 为孔总面积与穿孔段管内表面积之比；另计隔板损失、本体突扩/突缩，以及弯曲段整片开孔带来的「冲击 + 腔体交换」附加损失 K_bend,perf = K_bend,0·[1 + c1·(θ/90°)·φ_b] + c2·(θ/90°)²·φ_b/(1 − φ_b)。空滤器阻力 = 箱体局部阻力 + 滤芯多孔介质阻力 (a·v_f + b·v_f²) + 容尘增量 k_d·m_dust；滤芯系数按资料 6.2 节分三个不可混用的层级：①台架拟合直接输入 ISO 5011 实测的 A、B；②滤芯级拟合输入长 L、宽 W、厚 H 与 α_v、β（已按「单位面积、单位高度」归一化），Δp_filter = [μ·α_v·Q/(L·W) + (ρ/β)·(Q/(L·W))²]·H，a = μ·α_v·H、b = (ρ/β)·H，A_f = L·W，改尺寸须重算而不能沿用原压降（式 13B/13B1/13B2）；②亦可由治具两点实测反算（式 13B3~13B6）：a = Δp₁/L_fit、b = Δp₂/L_fit，A = (a·v₂² − b·v₁²)/[v₁v₂(v₂−v₁)]、B = (b·v₁ − a·v₂)/[v₁v₂(v₂−v₁)]，α_v = A/μ、C₂ = 2B/ρ、β = 2/C₂，直接给出 Fluent 粘性阻力 1/α = α_v 与惯性阻力 C₂、STAR-CCM+ P_v = A 与 P_i = B；③滤纸级材料输入 α_v、β、滤纸厚度 L_m、褶皱比 σ，Δp_filter = (μ·α_v·L_m/σ)·v_f + [(ρ/β)·L_m/σ²]·v_f²，σ 可手填（1.5~8）或由褶皱几何自动算（式 13C 与 13d~13q）。三种层级的公式形式、速度定义（v_f / v_m）与厚度定义（H / L_m）不可混用：把 ② 的 α_v、β 再除 σ 或乘 L_m 会把几何算两遍，压降偏差可达一个数量级以上；压降与厚度成正比、与迎风面积成反比（增大 L、W 对高速段惯性项收益更大）；箱内流场不均匀时按式(13b)(13c) 取有效面速度 v_eff = v_f/η（η = 0.6~1.0：进气口居中、箱体对称取 0.9，进气口偏置、挡板较多取 0.7~0.8，无导流板、进气直冲滤芯取 0.6~0.7），压降按 a·v_eff + b·v_eff² 计算。大气入口段按 Δp = (1 + K_in)·(ρv²/2) − (ρV²/2) 计算，系数是 (1 + K_in) 而不是单独的 K_in，因为把静止空气加速到管内流速所需的动压同样表现为入口静压下降。空气密度可直接输入，也可按温度、海拔与相对湿度由 p(z)、Buck 公式与湿空气状态方程计算（式 20~22）。系统总静压降按式(4g) 另加出口动压 ½ρv_out²（入口为静止大气时），与各段损失之和分开输出，避免把动压项重复计入损失。马赫数 M > 0.3 时按 Δp_comp ≈ Δp_inc·(1 + M²/4) 粗略修正，M > 0.6 应以一维气体动力学（Fanno）或 CFD 复算并做堵塞校核。选定管型后，输入区只显示该元件实际需要的参数，公式区同步切换为该元件的专用公式。',
   inputs: [
     ...compInputs,
     ...withGroup(runInputs, SEC_RUN),
@@ -267,15 +278,22 @@ export const intakeSystemResistance: FormulaSpec = {
     ...inSegOutputs,
 
     { key: 'dpBox', label: '空滤器箱体压降', symbol: 'Δp_box', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '空滤器', description: 'ΣK_box·(ρv_box²/2)，v_box = Q/A_box' },
-    { key: 'AfOut', label: '滤芯迎风面积（自动）', symbol: 'A_f', unit: 'm²', unitGroup: 'area', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 4, max: 4 }, description: '式(13l)：A_f = L_c·W_c，由褶皱几何自动算出' },
+    { key: 'AfOut', label: '滤芯迎风面积（自动）', symbol: 'A_f', unit: 'm²', unitGroup: 'area', digits: 3, group: '空滤器', showIf: [{ key: 'fMode', min: 2, max: 2 }, { key: 'fMode', min: 4, max: 4 }], description: '方式②式(13B)：A_f = L·W；方式③自动式(13l)：A_f = L_c·W_c' },
     { key: 'pPleat', label: '褶距', symbol: 'p', unit: 'm', unitGroup: 'lengthMeter', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 4, max: 4 }, description: '式(13m)：p = L_c/N，褶沿长度方向排列时；褶沿宽度方向时 p = W_c/N' },
     { key: 'sigmaGeo', label: '褶皱比（自动）', symbol: 'σ', unit: '-', unitGroup: 'dimensionless', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 4, max: 4 }, description: '式(13n)：σ = 2N·h·k_e/L_c，由褶皱几何自动算出；典型 2~10' },
     { key: 'AmGeo', label: '褶皱有效滤材面积（自动）', symbol: 'A_m', unit: 'm²', unitGroup: 'area', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 4, max: 4 }, description: '式(13o)：A_m = 2N·h·W_c·k_e，由褶皱几何自动算出' },
     { key: 'dpFilter', label: '滤芯压降', symbol: 'Δp_f', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '空滤器', description: 'a·v_eff + b·v_eff²，v_eff = v_f/η（未含容尘）' },
     { key: 'vEff', label: '滤芯有效面速度', symbol: 'v_eff', unit: 'm/s', unitGroup: 'velocity', digits: 3, group: '空滤器', description: '式(13b)：v_eff = v_f/η，η < 1 时表示箱内流场不均匀、局部面速度升高' },
-    { key: 'aUsed', label: '滤芯线性阻力系数 a', symbol: 'a', unit: 'Pa·s/m', digits: 3, group: '空滤器', description: '参与计算的 a：①取输入值；②按式(13B) a = μα_v·L_zone；③按式(13C) a = μα_v L_m/σ' },
-    { key: 'bUsed', label: '滤芯惯性阻力系数 b', symbol: 'b', unit: 'Pa·s²/m²', digits: 3, group: '空滤器', description: '参与计算的 b：①取输入值；②按式(13B) b = (ρ/β)·L_zone；③按式(13C) b = (ρ/β)L_m/σ²' },
+    { key: 'aUsed', label: '滤芯线性阻力系数 a', symbol: 'a', unit: 'Pa·s/m', digits: 3, group: '空滤器', description: 'v_f 的系数：①取输入值；②a = μ·α_v·H（Q 形式则为 A = μ·α_v·H/(L·W)，式 13B1）；③a = μα_v L_m/σ（式 13C）' },
+    { key: 'bUsed', label: '滤芯惯性阻力系数 b', symbol: 'b', unit: 'Pa·s²/m²', digits: 3, group: '空滤器', description: 'v_f² 的系数：①取输入值；②b = (ρ/β)·H（Q 形式则为 B = (ρ/β)·H/(L·W)²，式 13B1）；③b = (ρ/β)L_m/σ²（式 13C）' },
     { key: 'AmF', label: '褶皱有效滤材面积（手动 σ）', symbol: 'A_m', unit: 'm²', unitGroup: 'area', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 3, max: 3 }, description: '方式③手动：A_m = σ·A_f' },
+    { key: 'alphaOut', label: '参与计算的 α_v', symbol: 'α_v', unit: '10¹⁰ m⁻²', unitGroup: 'viscousDrag', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 2 }, description: '②③取输入值；②治具反算按式(13B6) α_v = A/μ 由实测点得出（式中 A = μ/α 为拟合粘性系数）；可直接作为 Fluent 粘性阻力系数 1/α' },
+    { key: 'betaOut', label: '参与计算的 β', symbol: 'β', unit: '10⁻⁷ m⁻¹', unitGroup: 'forchheimerInertia', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 2 }, description: '②③取输入值；②治具反算按式(13B6) β = 2/C₂ 得出；CFD 使用时 Fluent 惯性阻力 C₂ = 2/β、STAR-CCM+ P_i = ρ/β' },
+    { key: 'c2Out', label: 'Fluent 惯性阻力 C₂', symbol: 'C₂', unit: 'm⁻¹', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 2 }, description: '式(13B6)：C₂ = 2/β，Fluent 多孔介质「惯性阻力」直接填本值；与 β 互为 2 倍倒数关系（表 2）' },
+    { key: 'pvOut', label: 'STAR-CCM+ 粘性阻力 P_v', symbol: 'P_v', unit: 'kg/(m³·s)', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 2 }, description: '式(13B6)：P_v = μ·α_v，即粘性系数；与 Fluent 的 1/α 对应同一物理量，换算按式(13B6)' },
+    { key: 'piOut', label: 'STAR-CCM+ 惯性阻力 P_i', symbol: 'P_i', unit: 'kg/m⁴', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 2 }, description: '式(13B6)：P_i = ρ/β，与 Fluent 的 C₂/2 对应同一物理量' },
+    { key: 'coefAFit', label: '治具反算：拟合粘性系数 A', symbol: 'A', unit: 'Pa·s/m', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 5, max: 5 }, description: '式(13B4)：A = μ/α = (a·v₂² − b·v₁²)/[v₁·v₂·(v₂ − v₁)]，a = Δp₁/L_fit、b = Δp₂/L_fit' },
+    { key: 'coefBFit', label: '治具反算：拟合惯性系数 B', symbol: 'B', unit: 'Pa·s²/m²', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 5, max: 5 }, description: '式(13B5)：B = ρC₂/2 = (b·v₁ − a·v₂)/[v₁·v₂·(v₂ − v₁)]' },
     { key: 'KpermOut', label: '等效滤材渗透率', symbol: 'K', unit: '10⁻¹¹ m²', unitGroup: 'permeability', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 2 }, description: '式(13h)：K = 1/α_v，与粘性阻尼系数互为倒数；典型滤材 1~2×10⁻¹¹ m²（约 10~20 darcy），可直接用于透气性对比或 Fluent 粘性阻力设置' },
     { key: 'dpAirbox', label: '空滤器总压降', symbol: 'Δp_airbox', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '空滤器', primary: true, description: '箱体 + 滤芯 + 容尘（k_d·m_dust）' },
 
@@ -303,7 +321,8 @@ export const intakeSystemResistance: FormulaSpec = {
     { label: '空滤器阻力（箱体 + 滤芯 + 容尘）', tex: '\\Delta p_{airbox} = \\sum K_{box}\\frac{\\rho v_{box}^{2}}{2} + \\left(a\\,v_f + b\\,v_f^{2}\\right) + k_d\\, m_{dust},\\qquad v_f = \\frac{Q}{A_f}' },
     { label: '空滤器流场不均匀修正（式 13b/13c）', tex: 'v_{eff} = \\frac{v_f}{\\eta},\\qquad \\Delta p_{filter} = a\\,v_{eff} + b\\,v_{eff}^{2},\\qquad \\eta = 0.6\\sim 1.0' },
     { label: '方式①台架拟合（式 13A）', tex: '\\Delta p_{filter} = A\\,v_f + B\\,v_f^{2},\\qquad v_f = \\frac{Q}{A_f}', showIf: { key: 'fMode', min: 1, max: 1 } },
-    { label: '方式②滤芯级拟合（式 13B，L_zone 不除以 σ）', tex: '\\Delta p_{filter} = [\\mu\\,\\alpha_v\\,v_f + (\\rho/\\beta)\\,v_f^{2}]\\,L_{zone},\\qquad a = \\mu\\,\\alpha_v\\,L_{zone},\\quad b = \\frac{\\rho L_{zone}}{\\beta},\\qquad \\text{（不需要 }\\sigma\\text{、不需要 }L_m\\text{，错误再除以 }\\sigma\\text{ 会把几何算两遍）}', showIf: { key: 'fMode', min: 2, max: 2 } },
+    { label: '方式②滤芯级拟合（式 13B/13B1/13B2）', tex: '\\Delta p_{filter} = \\left[\\mu\\,\\alpha_v\\,\\frac{Q}{L W} + \\frac{\\rho}{\\beta}\\left(\\frac{Q}{L W}\\right)^{2}\\right] H,\\qquad A = \\frac{\\mu\\,\\alpha_v H}{L W},\\quad B = \\frac{\\rho\\,H}{\\beta (L W)^{2}},\\qquad \\Delta p \\propto \\frac{H Q}{L W} + \\frac{H Q^{2}}{(L W)^{2}}', showIf: { key: 'fMode', min: 2, max: 2 } },
+    { label: '治具两点反算 α_v、β（式 13B3~13B6）', tex: '\\frac{\\Delta p}{L_{fit}} = \\frac{\\mu}{\\alpha}v + \\frac{\\rho C_2}{2}v^{2},\\qquad a = \\frac{\\Delta p_1}{L_{fit}},\\ b = \\frac{\\Delta p_2}{L_{fit}},\\qquad A = \\frac{a\\,v_2^{2} - b\\,v_1^{2}}{v_1 v_2 (v_2 - v_1)},\\quad B = \\frac{b\\,v_1 - a\\,v_2}{v_1 v_2 (v_2 - v_1)},\\qquad \\alpha_v = \\frac{A}{\\mu},\\quad C_2 = \\frac{2B}{\\rho},\\quad \\beta = \\frac{2}{C_2}', showIf: { key: 'fMode', min: 5, max: 5 } },
     { label: '方式③滤纸级材料（式 13C，手动 σ）', tex: '\\Delta p_{filter} = \\left(\\frac{\\mu\\,\\alpha_v\\,L_m}{\\sigma}\\right)v_f + \\left(\\frac{\\rho\\,L_m}{\\beta\\,\\sigma^{2}}\\right)v_f^{2},\\qquad \\sigma = \\frac{A_m}{A_f},\\quad v_f = \\frac{Q}{A_f}', showIf: { key: 'fMode', min: 3, max: 3 } },
     { label: '方式③自动褶皱几何（式 13l~13q）', tex: 'A_f = L_c W_c,\\quad p = \\frac{L_c}{N},\\quad \\sigma = \\frac{2 N h k_e}{L_c},\\quad A_m = 2 N h W_c k_e,\\qquad v_f = \\frac{Q}{A_f},\\quad v_m = \\frac{v_f}{\\sigma},\\qquad a = \\frac{\\mu\\,\\alpha_v L_m}{\\sigma},\\quad b = \\frac{\\rho L_m}{\\beta\\sigma^{2}},\\qquad \\Delta p_{filter} = a\\,v_{eff} + b\\,v_{eff}^{2}', showIf: { key: 'fMode', min: 4, max: 4 } },
     { label: '大气入口段压降（含车速冲压与舱内负压）', tex: '\\Delta p_{entrance} = \\left(1 + K_{in}\\right)\\frac{\\rho v_{in}^{2}}{2} - \\frac{\\rho V^{2}}{2} + p_{bay}' },
@@ -354,7 +373,7 @@ export const intakeSystemResistance: FormulaSpec = {
   solve(v) {
     const empty: Record<string, number> = {};
     const nanKeys = ['vIn', 'dpEntrance', 'dpBox', 'AfOut', 'pPleat', 'sigmaGeo', 'AmGeo', 'dpFilter', 'dpAirbox', 'vEff',
-      'aUsed', 'bUsed', 'AmF', 'KpermOut', 'rhoUsed',
+      'aUsed', 'bUsed', 'AmF', 'KpermOut', 'alphaOut', 'betaOut', 'c2Out', 'pvOut', 'piOut', 'coefAFit', 'coefBFit', 'rhoUsed',
       'dpTotal', 'vOut', 'dpDyn', 'dpTotalStatic', 'thetaMax', 'Mmax', 'dpComp', 'S'];
     for (let i = 1; i <= SEG_MAX; i++) nanKeys.push(`dpIn${i}`, `lk${i}`, `dpOut${i}`, `dpJet${i}`, `phiA${i}`, `dpB${i}`);
     nanKeys.forEach((k) => { empty[k] = NaN; });
@@ -373,8 +392,8 @@ export const intakeSystemResistance: FormulaSpec = {
     const nIn = Number.isFinite(v.nIn) ? Math.round(v.nIn) : 3;
     const nOut = Number.isFinite(v.nOut) ? Math.round(v.nOut) : 3;
     if (!(nIn >= 1 && nIn <= SEG_MAX) || !(nOut >= 1 && nOut <= SEG_MAX)) return empty;
-    /** 滤芯阻力计算层级：1 ①台架拟合；2 ②滤芯级拟合（L_zone，不需要 σ/L_m）；3 ③滤纸级手动；4 ③滤纸级自动（褶皱几何）——**不可混用** */
-    const fMode = v.fMode === 4 ? 4 : (v.fMode === 3 ? 3 : (v.fMode === 2 ? 2 : 1));
+    /** 滤芯阻力计算层级：1 ①台架拟合；2 ②滤芯级拟合（L/W/H，不需要 σ/L_m）；3 ③滤纸级手动；4 ③滤纸级自动；5 ②治具两点反算——**不可混用** */
+    const fMode = v.fMode === 5 ? 5 : v.fMode === 4 ? 4 : (v.fMode === 3 ? 3 : (v.fMode === 2 ? 2 : 1));
 
     if (!(v.Q > 0) || !(v.mu > 0) || !(v.T > 0) || !num(v.V) || !num(v.Kin) || !Number.isFinite(v.pBay) ||
         !(v.rhoMode === 2 ? num(v.z) && phiOk(v.RH) : v.rho > 0) ||
@@ -383,11 +402,15 @@ export const intakeSystemResistance: FormulaSpec = {
         !(v.ABox > 0) || !num(v.KBox) ||
         (fMode === 4
           ? !(v.Lc > 0) || !(v.Wc > 0) || !(v.Nc >= 1) || !(v.hc >= 0) || !(v.Lmc > 0) || !(v.kec >= 0.7 && v.kec <= 1) || !(v.alphaV > 0) || !(v.betaF > 0)
-          : fMode === 3
-            ? !(v.Af > 0) || !(v.alphaV > 0) || !(v.betaF > 0) || !(v.Lf > 0) || !(v.sigmaF >= 1 && v.sigmaF <= 10)
-            : fMode === 2
-              ? !(v.Af > 0) || !(v.alphaV > 0) || !(v.betaF > 0) || !(v.Lzone > 0)
-              : !(v.Af > 0) || !num(v.aF) || !num(v.bF)) ||
+          : fMode === 5
+            ? !(v.Lf2 > 0) || !(v.Wf2 > 0) || !(v.Lfit > 0) ||
+              !num(v.vFit1) || !num(v.dpFit1) || !num(v.vFit2) || !num(v.dpFit2) ||
+              !(Math.abs(v.vFit2 - v.vFit1) > 1e-9) || !(v.vFit2 * v.vFit1 > 0)
+            : fMode === 3
+              ? !(v.Af > 0) || !(v.alphaV > 0) || !(v.betaF > 0) || !(v.Lf > 0) || !(v.sigmaF >= 1.5 && v.sigmaF <= 8)
+              : fMode === 2
+                ? !(v.Lf2 > 0) || !(v.Wf2 > 0) || !(v.Hf2 > 0) || !(v.alphaV > 0) || !(v.betaF > 0)
+                : !(v.Af > 0) || !num(v.aF) || !num(v.bF)) ||
         !num(v.mDust) || !num(v.kD) || !etaOk(v.eta))
       return empty;
 
@@ -574,7 +597,7 @@ export const intakeSystemResistance: FormulaSpec = {
     const vBox = Q / v.ABox;
     const dpBox = v.KBox * 0.5 * rho * vBox * vBox;
     const eta = Number.isFinite(v.eta) && v.eta > 0 ? v.eta : 1;
-    // 四种层级：①台架 / ②滤芯级（L_zone，不除以 σ）/ ③滤纸级手动 / ③滤纸级自动
+    // 五种层级：①台架 / ②滤芯级（L、W、H）/ ③滤纸级手动 / ③滤纸级自动 / ②治具两点反算
     let AfUse = v.Af;
     let sigmaGeo = NaN;
     let AmGeo = NaN;
@@ -584,6 +607,10 @@ export const intakeSystemResistance: FormulaSpec = {
     let bUsed = v.bF;
     let AmF = NaN;
     let KpermOut = NaN;
+    let alphaUse = NaN;
+    let betaUse = NaN;
+    let coefAFit = NaN;
+    let coefBFit = NaN;
     if (fMode === 4) {
       // 方式③自动（褶皱几何算 A_f、σ）
       AfUse = v.Lc * v.Wc;                         // 式(13l)
@@ -593,6 +620,8 @@ export const intakeSystemResistance: FormulaSpec = {
       L_m = v.Lmc;                                 // 滤纸厚度
       aUsed = (v.mu * v.alphaV * L_m) / sigmaGeo;                     // 式(13C)
       bUsed = (rho * L_m) / (v.betaF * sigmaGeo * sigmaGeo);          // 式(13C)
+      alphaUse = v.alphaV;
+      betaUse = v.betaF;
       KpermOut = 1 / v.alphaV;
     } else if (fMode === 3) {
       // 方式③手动（α_v、β、L_m、σ）
@@ -600,20 +629,42 @@ export const intakeSystemResistance: FormulaSpec = {
       AmF = v.sigmaF * v.Af;
       aUsed = (v.mu * v.alphaV * v.Lf) / v.sigmaF;                    // 式(13C)
       bUsed = (rho * v.Lf) / (v.betaF * v.sigmaF * v.sigmaF);         // 式(13C)
+      alphaUse = v.alphaV;
+      betaUse = v.betaF;
       KpermOut = 1 / v.alphaV;
+    } else if (fMode === 5) {
+      // 方式② 治具两点反算（式 13B3~13B6）：由实测 Δp–v 反推 α_v、C₂、β
+      const v1 = v.vFit1;
+      const v2f = v.vFit2;
+      const aFit = v.dpFit1 / v.Lfit;   // 式(13B5) 的 a = Δp₁/L_fit
+      const bFit = v.dpFit2 / v.Lfit;   // 式(13B5) 的 b = Δp₂/L_fit
+      const den = v1 * v2f * (v2f - v1);
+      coefAFit = (aFit * v2f * v2f - bFit * v1 * v1) / den;           // 式(13B4)：A = μ/α
+      coefBFit = (bFit * v1 - aFit * v2f) / den;                      // 式(13B5)：B = ρC₂/2
+      alphaUse = coefAFit / v.mu;                                     // 式(13B6)：α_v = A/μ
+      betaUse = coefBFit > 0 ? rho / coefBFit : NaN;                  // β = 2/C₂ = ρ/B
+      AfUse = v.Lf2 * v.Wf2;
+      aUsed = v.mu * alphaUse * v.Lfit;                               // = A·L_fit
+      bUsed = (rho / betaUse) * v.Lfit;                               // = B·L_fit
+      KpermOut = 1 / alphaUse;
     } else if (fMode === 2) {
-      // 方式② 滤芯级（CFD 多孔区标定，L_zone 不除以 σ）——式(13B)
-      AfUse = v.Af;
-      aUsed = v.mu * v.alphaV * v.Lzone;          // Δp_filter = [μα_v v_f + (ρ/β)v_f²]·L_zone
-      bUsed = (rho * v.Lzone) / v.betaF;           // **不除以 σ**（σ 是滤纸级参数，方式②不需要它）
+      // 方式② 滤芯级（L、W、H；α_v、β 已按“单位面积、单位高度”归一化）——式(13B)(13B1)
+      AfUse = v.Lf2 * v.Wf2;                                          // A_f = L·W
+      aUsed = v.mu * v.alphaV * v.Hf2;                                // v_f 的系数 = μ·α_v·H
+      bUsed = (rho / v.betaF) * v.Hf2;                                // v_f² 的系数 = (ρ/β)·H
+      alphaUse = v.alphaV;
+      betaUse = v.betaF;
       KpermOut = 1 / v.alphaV;
     }
+    const c2Out = Number.isFinite(betaUse) && betaUse > 0 ? 2 / betaUse : NaN;
+    const pvOut = Number.isFinite(alphaUse) ? v.mu * alphaUse : NaN;
+    const piOut = Number.isFinite(betaUse) && betaUse > 0 ? rho / betaUse : NaN;
     const vf = Q / AfUse;
     const vEff = vf / eta;
     const dpFilter = aUsed * vEff + bUsed * vEff * vEff;
     const dpAirbox = dpBox + dpFilter + v.kD * v.mDust;
 
-    const res: Record<string, number> = { vIn, dpEntrance, dpBox, AfOut: AfUse, pPleat, sigmaGeo, AmGeo, dpFilter, dpAirbox, vEff, aUsed, bUsed, AmF, KpermOut, rhoUsed: rho };
+    const res: Record<string, number> = { vIn, dpEntrance, dpBox, AfOut: AfUse, pPleat, sigmaGeo, AmGeo, dpFilter, dpAirbox, vEff, aUsed, bUsed, AmF, KpermOut, alphaOut: alphaUse, betaOut: betaUse, c2Out, pvOut, piOut, coefAFit, coefBFit, rhoUsed: rho };
     inRes.forEach((s, j) => {
       res[`dpIn${j + 1}`] = s.dp;
       res[`lk${j + 1}`] = v[`t${j + 1}`] === 3 ? leakQ(v[`lkA${j + 1}`], s.dp) : 0;
@@ -959,7 +1010,7 @@ export const intakeSystemResistance: FormulaSpec = {
       source: '《进气系统分部件阻力计算》式(13l)~(13q) 与算例 P96：L=0.6 m、W=0.4 m、N=26、h=40 mm、L_m=0.4 mm、k_e=0.9 → A_f=0.24 m²、σ=3.12、A_m=0.749 m²，取 α_v=1×10¹¹ m⁻²、β=1×10⁻⁴ m⁻¹（惯性项可忽略），Q=600 m³/h → v_f=0.694 m/s、Δp_filter≈161 Pa',
     },
     {
-      name: '方式②滤芯级拟合（资料式 13B，L_zone 不除以 σ）',
+      name: '方式②滤芯级拟合（资料式 13B/13B1，L/W/H）',
       input: {
         Q: 600 / 3600, rho: 1.205, mu: 1.81e-5, T: 293.15, V: 0, Kin: 0.05, pBay: 0,
         rhoMode: 1, z: 0, RH: 0,
@@ -968,7 +1019,7 @@ export const intakeSystemResistance: FormulaSpec = {
         t1: 1, D1: 0.07, L1: 0.3, K1: 0.35, bendN1: 0, nb1: 0, h1: 4e-3, p1: 0.01, lkA1: 0, rbn1: 0,
         t2: 2, D2: 0.06, L2: 0.15, K2: 0.4, bendN2: 0, nb2: 0, h2: 4e-3, p2: 0.01, lkA2: 0, rbn2: 0,
         t3: 3, D3: 0.06, L3: 0.25, K3: 0.3, bendN3: 0, nb3: 0, h3: 4e-3, p3: 0.01, lkA3: 0, rbn3: 0,
-        ABox: 0.00283, KBox: 0.5, Af: 0.25, fMode: 2, alphaV: 1e9, betaF: 1e-4, Lzone: 0.04,
+        ABox: 0.00283, KBox: 0.5, Af: 0.25, fMode: 2, alphaV: 1e9, betaF: 1e-4, Lf2: 0.5, Wf2: 0.5, Hf2: 0.04,
         mDust: 0, kD: 0,
         o1: 1, Do1: 0.06, Lo1: 0.4, Ko1: 0.8, bendO1: 0, nbo1: 0, hO1: 4e-3, pO1: 0.01,
         o2: 3, Do2: 0.06, Lo2: 0.2, Ko2: 0.4, bendO2: 0, nbo2: 0, hO2: 4e-3, pO2: 0.01,
@@ -980,11 +1031,46 @@ export const intakeSystemResistance: FormulaSpec = {
       expect: {
         aUsed: 724,
         bUsed: 482,
+        AfOut: 0.25,
         KpermOut: 1e-9,
         dpFilter: 696.8888888888889,
       },
       tolerance: 1e-9,
-      source: '资料 6.2 节式(13B)：α_v = 1×10⁹ m⁻²（多孔区等效粘性阻尼）、β = 1×10⁻⁴ m⁻¹、L_zone = 40 mm → a = μα_v·L_zone = 724、b = (ρ/β)·L_zone = 482、Δp_filter = 696.9 Pa（**注意：此层参数不可再除以 σ，否则几何被算两遍**）',
+      source: '资料 6.2 节式(13B)(13B1)：L=0.5 m、W=0.5 m（A_f=0.25 m²）、H=0.04 m、α_v=1×10⁹ m⁻²、β=1×10⁻⁴ m⁻¹ → a=μ·α_v·H=724、b=(ρ/β)·H=482、Δp_filter=696.9 Pa（**此层参数不可再除 σ 或乘 L_m，否则几何被算两遍**）',
+    },
+    {
+      name: '方式②治具两点反算（资料式 13B3~13B6）',
+      input: {
+        Q: 600 / 3600, rho: 1.205, mu: 1.81e-5, T: 293.15, V: 0, Kin: 0.05, pBay: 0,
+        rhoMode: 1, z: 0, RH: 0,
+        epsS: 3e-5, Cc: 2, kBell: 4, mBell: 1.35, epsB: 1e-4, cb: 0.5,
+        epsM: 2e-4, aPerf: 1, c1: 1.5, c2: 1, CdLeak: 0.7, eta: 1,
+        t1: 1, D1: 0.07, L1: 0.3, K1: 0.35, bendN1: 0, nb1: 0, h1: 4e-3, p1: 0.01, lkA1: 0, rbn1: 0,
+        t2: 2, D2: 0.06, L2: 0.15, K2: 0.4, bendN2: 0, nb2: 0, h2: 4e-3, p2: 0.01, lkA2: 0, rbn2: 0,
+        t3: 3, D3: 0.06, L3: 0.25, K3: 0.3, bendN3: 0, nb3: 0, h3: 4e-3, p3: 0.01, lkA3: 0, rbn3: 0,
+        ABox: 0.00283, KBox: 0.5, fMode: 5,
+        Lf2: 0.5, Wf2: 0.5,
+        vFit1: 0.3, dpFit1: 90, vFit2: 0.9, dpFit2: 480, Lfit: 0.04,
+        mDust: 0, kD: 0,
+        o1: 1, Do1: 0.06, Lo1: 0.4, Ko1: 0.8, bendO1: 0, nbo1: 0, hO1: 4e-3, pO1: 0.01,
+        o2: 3, Do2: 0.06, Lo2: 0.2, Ko2: 0.4, bendO2: 0, nbo2: 0, hO2: 4e-3, pO2: 0.01,
+        o3: 1, Do3: 0.06, Lo3: 0, Ko3: 0, bendO3: 0, nbo3: 0, hO3: 4e-3, pO3: 0.01,
+        Db1: 0.06, Ah1: 0, Cd1: 0.7, Qh1: 0, phi1: 0, kb1: 0,
+        Db2: 0.06, Ah2: 0, Cd2: 0.7, Qh2: 0, phi2: 0, kb2: 0,
+        Db3: 0.06, Ah3: 0, Cd3: 0.7, Qh3: 0, phi3: 0, kb3: 0,
+      },
+      expect: {
+        coefAFit: 4583.333333333333,
+        coefBFit: 9722.222222222223,
+        alphaOut: 253222836.00461006,
+        betaOut: 0.00012394285714285716,
+        c2Out: 16136.468418626091,
+        aUsed: 183.33333333333331,
+        bUsed: 388.8888888888889,
+        dpFilter: 295.06172839506172,
+      },
+      tolerance: 1e-9,
+      source: '资料 6.2.1 式(13B3)~(13B6)：治具 L_fit=40 mm，测点 (v₁=0.3 m/s, Δp₁=90 Pa)、(v₂=0.9 m/s, Δp₂=480 Pa) → A=4583.333 Pa·s/m、B=9722.222 Pa·s²/m²、α_v=A/μ≈2.532×10⁸ m⁻²、β=ρ/B≈1.239×10⁻⁴ m⁻¹、C₂=2B/ρ≈16136.467 m⁻¹；代回 Δp₁=90 Pa、Δp₂=480 Pa 校核一致',
     },
   ],
 };
