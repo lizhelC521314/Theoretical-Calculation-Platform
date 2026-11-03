@@ -126,9 +126,29 @@ export const UNIT_GROUPS: Record<string, UnitGroup> = {
       { label: '10⁻⁶ m⁻¹', factor: 1e-6 },
     ],
   },
+  /** 惯性阻尼系数 β 的滤芯级分组：默认 10⁻⁴ m⁻¹ */
+  forchheimerInertia4: {
+    si: 'm⁻¹',
+    preferred: '10⁻⁴ m⁻¹',
+    units: [
+      { label: 'm⁻¹', factor: 1 },
+      { label: '10⁻⁴ m⁻¹', factor: 1e-4 },
+      { label: '10⁻⁷ m⁻¹', factor: 1e-7 },
+    ],
+  },
   viscousDrag: {
     si: 'm⁻²',
     preferred: '10¹⁰ m⁻²',
+    units: [
+      { label: 'm⁻²', factor: 1 },
+      { label: '10⁹ m⁻²', factor: 1e9 },
+      { label: '10¹⁰ m⁻²', factor: 1e10 },
+    ],
+  },
+  /** 粘性阻尼系数 α_v 的滤芯级分组：默认 10⁹ m⁻² */
+  viscousDrag9: {
+    si: 'm⁻²',
+    preferred: '10⁹ m⁻²',
     units: [
       { label: 'm⁻²', factor: 1 },
       { label: '10⁹ m⁻²', factor: 1e9 },
