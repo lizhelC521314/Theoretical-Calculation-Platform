@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { listFormulas } from '../src/formula/registry';
+import { UNIT_GROUPS } from '../src/formula/units';
 import { helmholtzMuffler } from '../src/domains/acoustics/helmholtzMuffler';
 import { expansionMuffler } from '../src/domains/acoustics/expansionMuffler';
 import { quarterWaveTube } from '../src/domains/acoustics/quarterWaveTube';
@@ -26,6 +27,20 @@ describe('公式基准算例', () => {
         expect(f.latex.length).toBeGreaterThan(0);
         expect(f.assumptions.length).toBeGreaterThan(0);
         expect(f.benchmarks.length).toBeGreaterThan(0);
+      });
+
+      // 输入声明的默认单位标签必须在其 unitGroup 中存在，否则界面初始化会回退到分组首项，
+      // 静默改变换算倍率（曾因此导致 μ 按 Pa·s 读入而放大 1000 倍）
+      it('输入单位标签与单位分组匹配', () => {
+        for (const p of f.inputs) {
+          if (!p.unitGroup) continue;
+          const g = UNIT_GROUPS[p.unitGroup];
+          expect(g, `${p.key}: unitGroup '${p.unitGroup}' 未定义`).toBeDefined();
+          expect(
+            g.units.some((u) => u.label === p.unit),
+            `${p.key}: unit '${p.unit}' 不在分组 ${p.unitGroup} [${g.units.map((u) => u.label).join('|')}]`,
+          ).toBe(true);
+        }
       });
 
       for (const b of f.benchmarks) {

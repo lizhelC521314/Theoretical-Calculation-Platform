@@ -108,7 +108,7 @@ const runInputs: ParamSpec[] = [
   { key: 'T', label: '空气温度', symbol: 'T', unit: '℃', unitGroup: 'temperature', default: 20, required: true, description: '用于计算声速 c = (γRT)^(1/2) 与马赫数；增压机型出气管 60~80℃' },
   { key: 'V', label: '车速', symbol: 'V', unit: 'm/s', unitGroup: 'velocity', default: 0, min: 0, required: true, description: '进气口迎风时的车速（冲压修正）；台架静止取 0，120 km/h 约 33.3 m/s' },
   { key: 'Kin', label: '入口损失系数', symbol: 'K_in', unit: '-', unitGroup: 'dimensionless', default: 0.05, min: 0, required: true, description: '喇叭口 0.03~0.05，直角锐边 0.5，带防尘网 0.5~1.5，格栅 0.3~1.0，防雨帽 1.0~2.0，snorkel 1.5~3.0' },
-  { key: 'pBay', label: '舱内负压（低于大气取正）', symbol: 'p_bay', unit: 'Pa', unitGroup: 'pressure', default: 0, required: true, description: '进气口在发动机舱内且舱内低于大气压时填写正值（如 200），会叠加到入口段损失；迎风正压取 0 或负值' },
+  { key: 'pBay', label: '舱内负压（低于大气取正）', symbol: 'p_bay', unit: 'Pa', unitGroup: 'pressurePa', default: 0, required: true, description: '进气口在发动机舱内且舱内低于大气压时填写正值（如 200），会叠加到入口段损失；迎风正压取 0 或负值' },
 ];
 
 /** 材料/摩阻参数 */
@@ -191,14 +191,14 @@ const inSegOutputs: OutputSpec[] = [];
 const outSegOutputs: OutputSpec[] = [];
 for (let i = 1; i <= SEG_MAX; i++) {
   inSegOutputs.push(
-    { key: `dpIn${i}`, label: `进气管段 ${i} 压降`, symbol: `Δp_in${i}`, unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '进气管段', showIf: { key: 'nIn', min: i }, description: '[f·(L/D) + ΣK]·(ρv²/2)，按本段内径、管型与渐变管修正计算' },
+    { key: `dpIn${i}`, label: `进气管段 ${i} 压降`, symbol: `Δp_in${i}`, unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '进气管段', showIf: { key: 'nIn', min: i }, description: '[f·(L/D) + ΣK]·(ρv²/2)，按本段内径、管型与渐变管修正计算' },
     { key: `lk${i}`, label: `进气管段 ${i} 编织壁泄漏量`, symbol: `q_leak${i}`, unit: 'm³/s', unitGroup: 'volumeFlow', digits: 3, group: '进气管段', showIf: [{ key: `t${i}`, min: 3, max: 3 }, { key: 'nIn', min: i }], description: 'q = C_d·A_h·(2Δp/ρ)^(1/2)，不计入压降，仅用于评估过滤旁通' },
   );
   outSegOutputs.push(
-    { key: `dpOut${i}`, label: `出气管段 ${i} 压降`, symbol: `Δp_out${i}`, unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '出气管段', showIf: { key: 'nOut', min: i }, description: '按本段所选管型计算（穿孔消音器含穿孔率放大、进出口 K、隔板 K、突扩/突缩）' },
-    { key: `dpJet${i}`, label: `出气管段 ${i} 孔口射流损失`, symbol: `Δp_jet${i}`, unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '出气管段', showIf: [{ key: `o${i}`, min: 3, max: 3 }, { key: 'nOut', min: i }], description: '(1/C_d² − 1)·(ρv_h²/2)，v_h = Q_th/A_h；封闭环腔无穿流时为 0' },
+    { key: `dpOut${i}`, label: `出气管段 ${i} 压降`, symbol: `Δp_out${i}`, unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '出气管段', showIf: { key: 'nOut', min: i }, description: '按本段所选管型计算（穿孔消音器含穿孔率放大、进出口 K、隔板 K、突扩/突缩）' },
+    { key: `dpJet${i}`, label: `出气管段 ${i} 孔口射流损失`, symbol: `Δp_jet${i}`, unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '出气管段', showIf: [{ key: `o${i}`, min: 3, max: 3 }, { key: 'nOut', min: i }], description: '(1/C_d² − 1)·(ρv_h²/2)，v_h = Q_th/A_h；封闭环腔无穿流时为 0' },
     { key: `phiA${i}`, label: `出气管段 ${i} 穿孔率`, symbol: `φ_${i}`, unit: '-', unitGroup: 'dimensionless', digits: 3, group: '出气管段', showIf: [{ key: `o${i}`, min: 3, max: 3 }, { key: 'nOut', min: i }], description: 'φ = A_h/(π·D·L)，用于 f_m = f_s·(1 + a·φ)；L 为 0 时为 0' },
-    { key: `dpB${i}`, label: `出气管段 ${i} 弯曲开孔附加损失`, symbol: `Δp_bend${i}`, unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '出气管段', showIf: [{ key: `o${i}`, min: 3, max: 3 }, { key: 'nOut', min: i }], description: '式 15b/15c：K_bend,perf 相对光滑弯头 K_bend,0 的增量乘以动压；无弯曲或 φ_b = 0 时为 0' },
+    { key: `dpB${i}`, label: `出气管段 ${i} 弯曲开孔附加损失`, symbol: `Δp_bend${i}`, unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '出气管段', showIf: [{ key: `o${i}`, min: 3, max: 3 }, { key: 'nOut', min: i }], description: '式 15b/15c：K_bend,perf 相对光滑弯头 K_bend,0 的增量乘以动压；无弯曲或 φ_b = 0 时为 0' },
   );
 }
 
@@ -248,30 +248,30 @@ export const intakeSystemResistance: FormulaSpec = {
   ],
   outputs: [
     { key: 'vIn', label: '入口截面流速', symbol: 'v_in', unit: 'm/s', unitGroup: 'velocity', digits: 3, group: '大气入口段', description: 'v_in = Q/(πD_in1²/4)，动压按此流速计算' },
-    { key: 'dpEntrance', label: '大气入口段压降', symbol: 'Δp_entrance', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '大气入口段', primary: true, description: 'Δp = (1 + K_in)·(ρv_in²/2) − (ρV²/2) + p_bay' },
+    { key: 'dpEntrance', label: '大气入口段压降', symbol: 'Δp_entrance', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '大气入口段', primary: true, description: 'Δp = (1 + K_in)·(ρv_in²/2) − (ρV²/2) + p_bay' },
     { key: 'rhoUsed', label: '计算用空气密度', symbol: 'ρ', unit: 'kg/m³', unitGroup: 'density', digits: 3, group: '大气入口段', description: '方式 1 为输入值；方式 2 按 p(z)、T 与相对湿度计算（式 20~22）' },
 
     ...inSegOutputs,
 
-    { key: 'dpBox', label: '空滤器箱体压降', symbol: 'Δp_box', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '空滤器', description: 'ΣK_box·(ρv_box²/2)，v_box = Q/A_box' },
+    { key: 'dpBox', label: '空滤器箱体压降', symbol: 'Δp_box', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '空滤器', description: 'ΣK_box·(ρv_box²/2)，v_box = Q/A_box' },
     { key: 'AfOut', label: '滤芯迎风面积', symbol: 'A_f', unit: 'm²', unitGroup: 'area', digits: 3, group: '空滤器', description: '式(11)：A_f = L·W' },
     { key: 'pPleat', label: '褶距', symbol: 'p', unit: 'm', unitGroup: 'lengthMeter', digits: 3, group: '空滤器', description: '式(11a)：p = L/N' },
     { key: 'AmOut', label: '有效滤材面积（参考）', symbol: 'A_m', unit: 'm²', unitGroup: 'area', digits: 3, group: '空滤器', description: '式(11b)：A_m = 2N·h·W·k_e，仅作参考，不直接参与压降计算' },
-    { key: 'dpClean', label: '滤芯清洁状态压降', symbol: 'Δp_clean', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '空滤器', description: '式(13)：[μ·α_v·v_eff + (ρ/β)·v_eff²]·h' },
-    { key: 'dpDust', label: '容尘附加压降', symbol: 'Δp_dust', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '空滤器', description: '式(13a)：k_d·m_dust' },
-    { key: 'dpFilter', label: '滤芯压降', symbol: 'Δp_filter', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '空滤器', description: '式(13b)：Δp_filter = Δp_clean + Δp_dust' },
+    { key: 'dpClean', label: '滤芯清洁状态压降', symbol: 'Δp_clean', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '空滤器', description: '式(13)：[μ·α_v·v_eff + (ρ/β)·v_eff²]·h' },
+    { key: 'dpDust', label: '容尘附加压降', symbol: 'Δp_dust', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '空滤器', description: '式(13a)：k_d·m_dust' },
+    { key: 'dpFilter', label: '滤芯压降', symbol: 'Δp_filter', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '空滤器', description: '式(13b)：Δp_filter = Δp_clean + Δp_dust' },
     { key: 'vEff', label: '滤芯有效面速度', symbol: 'v_eff', unit: 'm/s', unitGroup: 'velocity', digits: 3, group: '空滤器', description: '式(12)：v_f = Q/A_f，v_eff = v_f/(η·k_e)；η<1 表示箱内流场不均匀，k_e 为胶线/边缘效率' },
-    { key: 'dpAirbox', label: '空滤器总压降', symbol: 'Δp_airbox', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '空滤器', primary: true, description: '箱体 + 滤芯 + 容尘（k_d·m_dust）' },
+    { key: 'dpAirbox', label: '空滤器总压降', symbol: 'Δp_airbox', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '空滤器', primary: true, description: '箱体 + 滤芯 + 容尘（k_d·m_dust）' },
 
     ...outSegOutputs,
 
-    { key: 'dpTotal', label: '系统总阻力', symbol: 'Δp_sys', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '汇总', primary: true, description: '入口段 + 进气管 N_in 段 + 空滤器 + 出气管 N_out 段各段静压损失之和（不含出口动压）' },
+    { key: 'dpTotal', label: '系统总阻力', symbol: 'Δp_sys', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '汇总', primary: true, description: '入口段 + 进气管 N_in 段 + 空滤器 + 出气管 N_out 段各段静压损失之和（不含出口动压）' },
     { key: 'vOut', label: '系统出口流速', symbol: 'v_out', unit: 'm/s', unitGroup: 'velocity', digits: 3, group: '汇总', description: '按出气管末段（第 N_out 段）的出口内径计算，v_out = Q/(πD_out,out,N_out²/4)' },
-    { key: 'dpDyn', label: '出口动压', symbol: 'Δp_dyn,out', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '汇总', description: '式(4g)：Δp_dyn = ½ρv_out²，入口为静止大气时这部分动压同样由系统提供' },
-    { key: 'dpTotalStatic', label: '系统总静压降', symbol: 'Δp_sys,static', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '汇总', description: '式(4g)：Δp_sys,static = Δp_sys + ½ρv_out²，与各段损失之和分开输出' },
+    { key: 'dpDyn', label: '出口动压', symbol: 'Δp_dyn,out', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '汇总', description: '式(4g)：Δp_dyn = ½ρv_out²，入口为静止大气时这部分动压同样由系统提供' },
+    { key: 'dpTotalStatic', label: '系统总静压降', symbol: 'Δp_sys,static', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '汇总', description: '式(4g)：Δp_sys,static = Δp_sys + ½ρv_out²，与各段损失之和分开输出' },
     { key: 'thetaMax', label: '最大全锥角', symbol: 'θ_max', unit: '°', digits: 3, group: '汇总', description: '式(4d)：θ = 2arctan[(D_out − D_in)/(2L)]，各段中绝对值最大者；θ ≤ 10° 渐变损失可忽略，θ > 45° 渐扩接近突扩' },
     { key: 'Mmax', label: '最大马赫数', symbol: 'M_max', unit: '-', unitGroup: 'dimensionless', digits: 3, group: '汇总', description: '各段 M = v/c 的最大值；M > 0.3 需做可压缩修正，M > 0.6 需 Fanno/CFD 并校核堵塞' },
-    { key: 'dpComp', label: '可压缩修正后总阻力', symbol: 'Δp_comp', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '汇总', description: 'Δp_comp ≈ Δp_sys·(1 + M_max²/4)，M > 0.5 时误差变大，应逐段迭代 p、ρ、v' },
+    { key: 'dpComp', label: '可压缩修正后总阻力', symbol: 'Δp_comp', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '汇总', description: 'Δp_comp ≈ Δp_sys·(1 + M_max²/4)，M > 0.5 时误差变大，应逐段迭代 p、ρ、v' },
     { key: 'S', label: '系统阻力系数', symbol: 'S', unit: 'Pa·s²/m³', digits: 3, group: '汇总', description: 'S = Δp_sys/Q²，用于绘制 Δp = S·Q² 曲线并与发动机需求曲线匹配' },
   ],
   latex: [

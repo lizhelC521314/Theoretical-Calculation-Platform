@@ -92,6 +92,18 @@ export const UNIT_GROUPS: Record<string, UnitGroup> = {
       { label: 'mmH₂O', factor: 9.80665 },
     ],
   },
+  /** 与 pressure 同一套 factor，但默认显示 Pa，供以 Pa 为基准的公式（如进气阻力）使用 */
+  pressurePa: {
+    si: 'Pa',
+    preferred: 'Pa',
+    units: [
+      { label: 'Pa', factor: 1 },
+      { label: 'kPa', factor: 1000 },
+      { label: 'MPa', factor: 1e6 },
+      { label: 'mbar', factor: 100 },
+      { label: 'mmH₂O', factor: 9.80665 },
+    ],
+  },
   velocity: {
     si: 'm/s',
     preferred: 'm/s',
@@ -113,7 +125,7 @@ export const UNIT_GROUPS: Record<string, UnitGroup> = {
     preferred: 'mPa·s',
     units: [
       { label: 'Pa·s', factor: 1 },
-      { label: ' mPa·s', factor: 1e-3 },
+      { label: 'mPa·s', factor: 1e-3 },
       { label: 'cP', factor: 1e-3 },
     ],
   },
