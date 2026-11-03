@@ -24,6 +24,9 @@ import type { FormulaSpec, OutputSpec, ParamSpec, ShowIf } from '../../formula/t
  *                已包含褶皱、胶线与边框；换滤芯尺寸时只需改 L、W、N、h，不再使用 a、b、L_m、σ 等旧参数
  *   大气入口段   Δp_entrance = (1 + K_in)·(ρv²/2) − (ρV²/2) + p_bay
  *   空气密度     ρ = p/(R·T)·(1 − 0.378·p_v/p)，p = p0·(1 − 2.2557×10⁻⁵·z)^5.2559（式 20~22，可选）
+ *   流量口径     Q_in = Q_std·ρ_std/ρ_in = ṁ/ρ_in（式 17a/17b，入口状态/标准状态/质量流量三种口径可选）
+ *   密度修正     ρ_m = ρ_in·(1 − Δp₁/2p_atm)、Δp₂ = Δp₁·(1 − Δp₁/2p_atm)（式 17c/17d 一次迭代）；
+ *                沿程静压 p(x) = p_atm − ΣΔp_i（式 17e），出口静压作为滤芯抗吸扁与壳体真空载荷
  *   可压缩修正   Δp_comp ≈ Δp_inc·(1 + M²/4)，M = v/c，c = (γRT)^(1/2)
  */
 /** 输入分区标题 */
@@ -99,7 +102,9 @@ for (let i = 1; i <= SEG_MAX; i++) {
 
 /** 运行参数 */
 const runInputs: ParamSpec[] = [
-  { key: 'Q', label: '系统体积流量', symbol: 'Q', unit: 'm³/h', unitGroup: 'volumeFlow', default: 600, min: 0, required: true, description: '发动机额定功率点或最大扭矩点的进气体积流量，示例 600 m³/h = 0.1667 m³/s' },
+  { key: 'qMode', label: '流量口径', symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '入口状态体积流量' }, { value: 2, label: '标准状态体积流量（20℃、101.3 kPa）' }, { value: 3, label: '质量流量' }], default: 1, required: true, description: '式(17a/17b)：Δp 计算一律用入口状态体积流量 Q_in 与入口密度 ρ_in；若给的是标准状态流量 Q_std 或质量流量 ṁ，先按 Q_in = Q_std·ρ_std/ρ_in = ṁ/ρ_in 换算' },
+  { key: 'Q', label: '系统体积流量', symbol: 'Q', unit: 'm³/h', unitGroup: 'volumeFlow', default: 600, min: 0, required: true, showIf: { key: 'qMode', min: 1, max: 2 }, description: '发动机额定功率点或最大扭矩点的进气体积流量，示例 600 m³/h = 0.1667 m³/s；口径选「标准状态」时本值为 Q_std（20℃、101.3 kPa），计算前按式(17b) 折算为入口状态流量' },
+  { key: 'mDot', label: '空气质量流量', symbol: 'ṁ', unit: 'kg/h', unitGroup: 'massFlow', default: 723, min: 0, required: true, showIf: { key: 'qMode', min: 3, max: 3 }, description: '口径为质量流量时填写：Q_in = ṁ/ρ_in（式 17b）；600 m³/h、ρ = 1.205 kg/m³ 对应约 723 kg/h' },
   { key: 'rhoMode', label: '密度计算方式', symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '直接输入密度' }, { value: 2, label: '按温度/海拔/湿度计算' }], default: 1, required: true, description: '方式 1 直接用下面的 ρ；方式 2 由本地大气压 p(z)、温度 T 与相对湿度按式 20~22 计算（高原、高温工况推荐）' },
   { key: 'rho', label: '空气密度', symbol: 'ρ', unit: 'kg/m³', unitGroup: 'density', default: 1.205, min: 0, required: true, showIf: { key: 'rhoMode', min: 1, max: 1 }, description: '20℃、1 atm 约 1.205 kg/m³；方式 2 时本输入不参与计算' },
   { key: 'z', label: '海拔高度', symbol: 'z', unit: 'm', unitGroup: 'lengthMeter', default: 0, min: 0, showIf: { key: 'rhoMode', min: 2, max: 2 }, description: '仅方式 2 使用：p = p0·(1 − 2.2557×10⁻⁵·z)^5.2559；海拔每升高 1000 m 密度约降 9%~10%' },
@@ -269,6 +274,10 @@ export const intakeSystemResistance: FormulaSpec = {
     { key: 'vOut', label: '系统出口流速', symbol: 'v_out', unit: 'm/s', unitGroup: 'velocity', digits: 3, group: '汇总', description: '按出气管末段（第 N_out 段）的出口内径计算，v_out = Q/(πD_out,out,N_out²/4)' },
     { key: 'dpDyn', label: '出口动压', symbol: 'Δp_dyn,out', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '汇总', description: '式(4g)：Δp_dyn = ½ρv_out²，入口为静止大气时这部分动压同样由系统提供' },
     { key: 'dpTotalStatic', label: '系统总静压降', symbol: 'Δp_sys,static', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '汇总', description: '式(4g)：Δp_sys,static = Δp_sys + ½ρv_out²，与各段损失之和分开输出' },
+    { key: 'QIn', label: '入口状态体积流量', symbol: 'Q_in', unit: 'm³/h', unitGroup: 'volumeFlow', digits: 3, group: '汇总', description: '式(17b)：Q_in = Q_std·ρ_std/ρ_in = ṁ/ρ_in；口径为入口状态体积流量时 Q_in = Q' },
+    { key: 'rhoM', label: '平均密度（一次迭代）', symbol: 'ρ_m', unit: 'kg/m³', unitGroup: 'density', digits: 3, group: '汇总', description: '式(17c)：ρ_m = ρ_in·(1 − Δp₁/2p_atm)，负压使密度沿程下降的平均修正' },
+    { key: 'dpTotalRho', label: '密度修正后总阻力', symbol: 'Δp₂', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '汇总', description: '式(17d)：Δp₂ = Δp₁·(1 − Δp₁/2p_atm)；示例 Δp₁ = 6 kPa 时修正系数 0.970' },
+    { key: 'pOutAbs', label: '系统出口静压（绝压）', symbol: 'p_out', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '汇总', description: '式(17e)：p_out = p_atm − Δp_sys；负压是计算结果，同时作为滤芯抗吸扁与壳体强度校核的真空载荷' },
     { key: 'thetaMax', label: '最大全锥角', symbol: 'θ_max', unit: '°', digits: 3, group: '汇总', description: '式(4d)：θ = 2arctan[(D_out − D_in)/(2L)]，各段中绝对值最大者；θ ≤ 10° 渐变损失可忽略，θ > 45° 渐扩接近突扩' },
     { key: 'Mmax', label: '最大马赫数', symbol: 'M_max', unit: '-', unitGroup: 'dimensionless', digits: 3, group: '汇总', description: '各段 M = v/c 的最大值；M > 0.3 需做可压缩修正，M > 0.6 需 Fanno/CFD 并校核堵塞' },
     { key: 'dpComp', label: '可压缩修正后总阻力', symbol: 'Δp_comp', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '汇总', description: 'Δp_comp ≈ Δp_sys·(1 + M_max²/4)，M > 0.5 时误差变大，应逐段迭代 p、ρ、v' },
@@ -290,6 +299,9 @@ export const intakeSystemResistance: FormulaSpec = {
     { label: '大气入口段压降（含车速冲压与舱内负压）', tex: '\\Delta p_{entrance} = \\left(1 + K_{in}\\right)\\frac{\\rho v_{in}^{2}}{2} - \\frac{\\rho V^{2}}{2} + p_{bay}' },
     { label: '出口动压与系统总静压降（式 4g）', tex: '\\Delta p_{dyn,out} = \\frac{1}{2}\\rho v_{out}^{2},\\qquad \\Delta p_{sys,static} = \\Delta p_{sys} + \\frac{1}{2}\\rho v_{out}^{2}' },
     { label: '湿空气密度与海拔修正（式 20~22）', tex: '\\rho = \\frac{p}{R_d T}\\left[1 - 0.378\\frac{p_v}{p}\\right],\\qquad p = p_0\\left(1 - 2.2557\\times 10^{-5}z\\right)^{5.2559},\\qquad p_v = RH\\cdot 611.2\\exp\\left(\\frac{17.62T_c}{243.12 + T_c}\\right)', showIf: { key: 'rhoMode', min: 2, max: 2 } },
+    { label: '流量口径换算（式 17a/17b）', tex: '\\rho_{in} = \\frac{p_{atm}}{R\\,T_{in}},\\qquad Q_{in} = Q_{std}\\,\\frac{\\rho_{std}}{\\rho_{in}} = \\frac{\\dot{m}}{\\rho_{in}},\\qquad \\rho_{std} = \\frac{101325}{R\\times 293.15}', showIf: { key: 'qMode', min: 2, max: 3 } },
+    { label: '密度一次迭代修正（式 17c/17d）', tex: '\\rho_m = \\rho_{in}\\left(1 - \\frac{\\Delta p_1}{2\\,p_{atm}}\\right),\\qquad \\Delta p_2 = \\Delta p_1\\left(1 - \\frac{\\Delta p_1}{2\\,p_{atm}}\\right)' },
+    { label: '沿程静压分布（式 17e）', tex: 'p(x) = p_{atm} - \\sum_{上游}\\Delta p_i' },
     { label: '马赫数与声速', tex: 'M = \\frac{v}{c},\\qquad c = \\sqrt{\\gamma R T}' },
     { label: '可压缩性工程修正', tex: '\\Delta p_{comp} \\approx \\Delta p_{sys}\\left(1 + \\frac{M^{2}}{4}\\right)' },
     { label: '系统阻力系数', tex: 'S = \\frac{\\Delta p_{sys}}{Q^{2}}' },
@@ -299,19 +311,27 @@ export const intakeSystemResistance: FormulaSpec = {
     xLabel: 'Q (m³/h)',
     yLabel: 'Δp_sys (Pa)',
     compute(v) {
-      const base = v.Q;
-      if (!(base > 0)) return [];
-      // 按输入流量 Q 的 0、25%、50%、75%、100%、125% 取点
+      // 先按口径换算得到有效入口流量 Q_in（式 17b），再按其 0~125% 取点
+      const s0 = intakeSystemResistance.solve(v);
+      const q0 = s0.QIn;
+      const rho = s0.rhoUsed;
+      if (!(q0 > 0) || !(rho > 0)) return [];
+      const qm = Number.isFinite(v.qMode) ? v.qMode : 1;
+      const rhoStd = 101325 / (287 * 293.15);
       return [0, 0.25, 0.5, 0.75, 1, 1.25].map((r) => {
-        const q = base * r;
-        const dp = q > 0 ? intakeSystemResistance.solve({ ...v, Q: q }).dpTotal : 0;
+        const q = q0 * r;
+        const inputs = { ...v };
+        if (qm === 3) inputs.mDot = q * rho;
+        else if (qm === 2) inputs.Q = (q * rho) / rhoStd;
+        else inputs.Q = q;
+        const dp = q > 0 ? intakeSystemResistance.solve(inputs).dpTotal : 0;
         return { x: q * 3600, y: Number.isFinite(dp) ? dp : 0 };
       });
     },
   },
   sensitivity: true,
   assumptions: [
-    '公式与新版《进气系统分部件阻力计算（进气管-波纹管-编织管-空滤器-出气管-消音器）》一致；算例（Q = 600 m³/h、20 ℃、ρ = 1.205 kg/m³）各段与本公式的对比为：进气管 478 vs 485 Pa、波纹管 1082 vs 1049 Pa（本文按 h/p = 0.4、k = 4、m = 1.35 得 f_c ≈ 0.040，文档表取 f_c = 0.047）、编织管 819 vs 832 Pa、空滤器 1601 vs 1600 Pa、出气管 1923 vs 1935 Pa、消音器 986 vs 1030 Pa（文档表取 f = 0.022，本公式按 ε_m = 0.2 mm 得 f ≈ 0.028）；文档六段合计 6889 Pa 不含大气入口段，本公式再加入口段后台架静止约 8118 Pa',
+    '公式与新版《进气系统分部件阻力计算（进气管-波纹管-编织管-空滤器-出气管-消音器）》一致；算例（Q = 600 m³/h、20 ℃、ρ = 1.205 kg/m³）各段与本公式的对比为：进气管 478 vs 485 Pa、波纹管 1082 vs 1049 Pa（本文按 h/p = 0.4、k = 4、m = 1.35 得 f_c ≈ 0.040，文档表取 f_c = 0.047）、编织管 819 vs 832 Pa、空滤器 1601 vs 1846 Pa（文档表滤芯仍按旧系数 a = 300、b = 800 取 556 Pa，本公式按第 6 节新模型以 α_v = 1×10⁹ m⁻²、β = 1×10⁻⁴ m⁻¹ 计算滤芯为 801 Pa）、出气管 1923 vs 1935 Pa、消音器 986 vs 1030 Pa（文档表取 f = 0.022，本公式按 ε_m = 0.2 mm 得 f ≈ 0.028）；文档六段合计 6889 Pa 不含大气入口段，本公式再加入口段后台架静止约 8363 Pa',
     '弯头按式 6a/6b 逐只计算：K_bend = n·K_90(R/D)·(θ/90°)^0.8~1.2，规格下拉已内置 45°/R/D=1 0.18、45°/R/D=0.5 0.35、90°/R/D=2 0.25、90°/R/D=1 0.40、90°/R/D=0.5 1.00、90° 直角/拼焊 1.30；本公式取指数 1.0。Re < 10⁵ 或相邻弯头间距 < 5D 时应再乘 1.1~1.3，该放大需用户自行并入弯头规格系数或 ΣK',
     '波纹管摩擦按式 7：f_c = f_s·[1 + k·(h/p)^m]，k = 3~5、m = 1.2~1.5；h 或 p 未填写（为 0）时退回 C_c·f_s（C_c = 1.5~2.5）。轴向拉伸后波距变大、f_c 下降 5%~15%，设计按自由状态波距取值',
     '编织管按式 9a/9d/9e 计算：摩擦用 ε_b = 0.05~0.30 mm 的粗糙管；弯曲时弯头系数 K 增 c_b·D/R_b（c_b = 0.4~0.6），有效面积 A_eff = A·(1 − 0.1·D/R_b)，流速与动压按 A_eff 重算；R_b/D ≥ 3 时附加可忽略',
@@ -320,6 +340,8 @@ export const intakeSystemResistance: FormulaSpec = {
     '多腔穿孔消音器按式 15/15a：穿孔率 φ = A_h/(π·D·L)（A_h 为穿孔段孔口总面积，L 为穿孔段长度），摩擦按 f_m = f_s·(1 + a·φ) 放大，a = 0.5~1.5、无试验数据取 1.0；另计进出口 K、隔板 ΣK_baf 与本体突扩/突缩',
     '穿孔弯头按式 15b/15c 计算附加损失：K_bend,perf = K_bend,0·[1 + c1·(θ/90°)·φ_b] + c2·(θ/90°)²·φ_b/(1 − φ_b)，c1 = 1~2、c2 = 0.5~1.5；θ < 30° 且 φ_b < 0.1 时可直接把 φ_b 取 0 按光滑弯头计算，θ ≥ 60° 且 φ_b > 0.2 必须计入',
     '空气密度可选直接输入或按式 20~22 计算：ρ = p/(R_d·T)·(1 − 0.378·p_v/p)，p = p0·(1 − 2.2557×10⁻⁵·z)^5.2559，p_v = RH·p_sat，p_sat 按 Buck 公式；系统内仍用同一密度，各段温度不同时应逐段按当地密度修正',
+    '流量口径按式 17a/17b 统一换算为入口状态：Q_in = Q_std·ρ_std/ρ_in = ṁ/ρ_in，ρ_std 取 20 ℃、101.325 kPa 干空气密度（≈ 1.204 kg/m³）；Δp 计算一律使用 Q_in 与 ρ_in，不混用标准状态与质量流量口径',
+    '负压引起的密度沿程下降按式 17c/17d 做一次平均密度修正：ρ_m = ρ_in·(1 − Δp₁/2p_atm)、Δp₂ = Δp₁·(1 − Δp₁/2p_atm)；沿程静压 p(x) = p_atm − Σ上游Δp_i（式 17e），出口静压（绝压）同时作为滤芯抗吸扁与壳体强度校核的真空载荷',
     '按不可压缩流处理，各段流速与动压按该段内径计算；增压机型出气管（60~80 ℃）须按 Δp₂ = Δp₁·(ρ₂/ρ₁) 修正',
     '摩擦因子用 Swamee-Jain 显式解代替 Colebrook 迭代，Re > 1000 时误差 < 1%；波纹管用式 7 放大、编织管与穿孔管用等效粗糙度近似',
     '空滤器滤芯按式(11)~(13) 统一计算：A_f = L·W、p = L/N、A_m = 2N·h·W·k_e；v_f = Q/A_f、v_eff = v_f/(η·k_e)；Δp_clean = [μ·α_v·v_eff + (ρ/β)·v_eff²]·h，Δp_filter = Δp_clean + k_d·m_dust。α_v（m⁻²）、β（m⁻¹）由操作者按本滤芯拟合（含褶皱、胶线与边框），换滤芯尺寸时只需改 L、W、N、h，不再使用 a、b、L_m、σ 等旧参数；压降与褶高 h 成正比、与迎风面积 A_f 成反比，增大 L、W 对高速段惯性项收益更大',
@@ -335,7 +357,7 @@ export const intakeSystemResistance: FormulaSpec = {
   solve(v) {
     const empty: Record<string, number> = {};
     const nanKeys = ['vIn', 'dpEntrance', 'dpBox', 'AfOut', 'pPleat', 'AmOut', 'dpClean', 'dpDust', 'dpFilter', 'dpAirbox', 'vEff', 'rhoUsed',
-      'dpTotal', 'vOut', 'dpDyn', 'dpTotalStatic', 'thetaMax', 'Mmax', 'dpComp', 'S'];
+      'dpTotal', 'vOut', 'dpDyn', 'dpTotalStatic', 'QIn', 'rhoM', 'dpTotalRho', 'pOutAbs', 'thetaMax', 'Mmax', 'dpComp', 'S'];
     for (let i = 1; i <= SEG_MAX; i++) nanKeys.push(`dpIn${i}`, `lk${i}`, `dpOut${i}`, `dpJet${i}`, `phiA${i}`, `dpB${i}`);
     nanKeys.forEach((k) => { empty[k] = NaN; });
 
@@ -354,7 +376,8 @@ export const intakeSystemResistance: FormulaSpec = {
     const nOut = Number.isFinite(v.nOut) ? Math.round(v.nOut) : 3;
     if (!(nIn >= 1 && nIn <= SEG_MAX) || !(nOut >= 1 && nOut <= SEG_MAX)) return empty;
 
-    if (!(v.Q > 0) || !(v.mu > 0) || !(v.T > 0) || !num(v.V) || !num(v.Kin) || !Number.isFinite(v.pBay) ||
+    const qMode = Number.isFinite(v.qMode) ? v.qMode : 1;
+    if (!(qMode >= 1 && qMode <= 3) || !(qMode === 3 ? v.mDot > 0 : v.Q > 0) || !(v.mu > 0) || !(v.T > 0) || !num(v.V) || !num(v.Kin) || !Number.isFinite(v.pBay) ||
         !(v.rhoMode === 2 ? num(v.z) && phiOk(v.RH) : v.rho > 0) ||
         !num(v.epsS) || !num(v.Cc, 1) || !num(v.kBell) || !num(v.mBell) || !num(v.epsB) || !num(v.cb) ||
         !num(v.epsM) || !num(v.aPerf) || !num(v.c1) || !num(v.c2) || !num(v.CdLeak) ||
@@ -377,16 +400,19 @@ export const intakeSystemResistance: FormulaSpec = {
           !phiOk(v[`phi${i}`]) || !num(v[`kb${i}`])) return empty;
     }
 
-    const Q = v.Q;
+    // 入口大气压：方式 2 按海拔（式 22）；方式 1 取海平面标准大气压（用于式 17c~17e）
+    const pAtm = v.rhoMode === 2 ? 101325 * Math.pow(1 - 2.2557e-5 * v.z, 5.2559) : 101325;
     // 空气密度：方式 1 直接输入 ρ；方式 2 按海拔 p(z)、温度与相对湿度计算（式 20~22）
     let rho = v.rho;
     if (v.rhoMode === 2) {
       const Tc = v.T - 273.15;
-      const p = 101325 * Math.pow(1 - 2.2557e-5 * v.z, 5.2559);
       const psat = 611.2 * Math.exp((17.62 * Tc) / (243.12 + Tc));
       const pv = v.RH * psat;
-      rho = (p / (287 * v.T)) * (1 - (0.378 * pv) / p);
+      rho = (pAtm / (287 * v.T)) * (1 - (0.378 * pv) / pAtm);
     }
+    // 流量口径换算（式 17a/17b）：一律转为入口状态体积流量 Q_in 再参与后续计算
+    const rhoStd = 101325 / (287 * 293.15); // 标准状态（20℃、101.325 kPa）密度 ≈ 1.204 kg/m³
+    const Q = qMode === 3 ? v.mDot / rho : qMode === 2 ? (v.Q * rhoStd) / rho : v.Q;
     const mu = v.mu;
     const gamma = 1.4;
     const R = 287;
@@ -602,6 +628,12 @@ export const intakeSystemResistance: FormulaSpec = {
     res.Mmax = Mmax;
     res.dpComp = dpTotal * (1 + (Mmax * Mmax) / 4);
     res.S = dpTotal / (Q * Q);
+    // 式 17a~17e：流量口径回显、密度一次迭代修正与沿程静压（出口静压 = p_atm − Δp_sys）
+    res.QIn = Q;
+    const rhoCorr = 1 - dpTotal / (2 * pAtm);
+    res.rhoM = rho * rhoCorr;
+    res.dpTotalRho = dpTotal * rhoCorr;
+    res.pOutAbs = pAtm - dpTotal;
 
     return res;
   },
@@ -870,6 +902,61 @@ export const intakeSystemResistance: FormulaSpec = {
       },
       tolerance: 1e-9,
       source: '《进气系统分部件阻力计算》式(11)(11a)(11b)(12)(13) 与算例：L=0.6 m、W=0.4 m、N=26、h=40 mm、k_e=0.9 → A_f=0.24 m²、p=23.1 mm、A_m=0.749 m²；取 α_v=1×10⁹ m⁻²、β=1×10⁻⁴ m⁻¹，Q=600 m³/h → v_f=0.694 m/s、v_eff=0.772 m/s、Δp_clean≈846 Pa',
+    },
+    {
+      name: '标准状态流量口径：Q_std = 600 m³/h 按式(17b) 折算为 Q_in',
+      input: {
+        Q: 600 / 3600, qMode: 2, rho: 1.205, mu: 1.81e-5, T: 293.15, V: 0, Kin: 0.05, pBay: 0,
+        rhoMode: 1, z: 0, RH: 0,
+        epsS: 3e-5, Cc: 2, kBell: 4, mBell: 1.35, epsB: 1e-4, cb: 0.5,
+        epsM: 2e-4, aPerf: 1, c1: 1.5, c2: 1, CdLeak: 0.7,
+        t1: 1, D1: 0.07, L1: 0.3, K1: 0.35, bendN1: 0, nb1: 0, h1: 4e-3, p1: 0.01, lkA1: 0, rbn1: 0,
+        t2: 2, D2: 0.06, L2: 0.15, K2: 0.4, bendN2: 0, nb2: 0, h2: 4e-3, p2: 0.01, lkA2: 0, rbn2: 0,
+        t3: 3, D3: 0.06, L3: 0.25, K3: 0.3, bendN3: 0, nb3: 0, h3: 4e-3, p3: 0.01, lkA3: 0, rbn3: 0,
+        ABox: 0.00283, KBox: 0.5, Lc: 0.5, Wc: 0.5, Nc: 26, hc: 0.04, kec: 0.9, alphaV: 1e9, betaF: 1e-4, mDust: 0, kD: 0,
+        o1: 1, Do1: 0.06, Lo1: 0.4, Ko1: 0.8, bendO1: 0, nbo1: 0, hO1: 4e-3, pO1: 0.01,
+        o2: 3, Do2: 0.06, Lo2: 0.2, Ko2: 0.4, bendO2: 0, nbo2: 0, hO2: 4e-3, pO2: 0.01,
+        o3: 1, Do3: 0.06, Lo3: 0, Ko3: 0, bendO3: 0, nbo3: 0, hO3: 4e-3, pO3: 0.01,
+        Db1: 0.06, Ah1: 0, Cd1: 0.7, Qh1: 0, phi1: 0, kb1: 0,
+        Db2: 0.06, Ah2: 0, Cd2: 0.7, Qh2: 0, phi2: 0, kb2: 0,
+        Db3: 0.06, Ah3: 0, Cd3: 0.7, Qh3: 0, phi3: 0, kb3: 0,
+      },
+      expect: {
+        QIn: 0.16657373348337284,
+        dpTotal: 8354.389326066696,
+        dpTotalRho: 8009.973727687731,
+        pOutAbs: 92970.6106739333,
+      },
+      tolerance: 1e-9,
+      source: '《进气系统分部件阻力计算》式(17a/17b)：Q_std = 600 m³/h、ρ_std = 1.2043 kg/m³、ρ_in = 1.205 kg/m³ → Q_in = Q_std·ρ_std/ρ_in ≈ 599.26 m³/h',
+    },
+    {
+      name: '质量流量口径：ṁ = 723 kg/h 等价于 Q_in = 600 m³/h（式 17b），密度一次迭代与出口静压（式 17c/17d/17e）',
+      input: {
+        Q: 600 / 3600, mDot: 723 / 3600, qMode: 3, rho: 1.205, mu: 1.81e-5, T: 293.15, V: 0, Kin: 0.05, pBay: 0,
+        rhoMode: 1, z: 0, RH: 0,
+        epsS: 3e-5, Cc: 2, kBell: 4, mBell: 1.35, epsB: 1e-4, cb: 0.5,
+        epsM: 2e-4, aPerf: 1, c1: 1.5, c2: 1, CdLeak: 0.7,
+        t1: 1, D1: 0.07, L1: 0.3, K1: 0.35, bendN1: 0, nb1: 0, h1: 4e-3, p1: 0.01, lkA1: 0, rbn1: 0,
+        t2: 2, D2: 0.06, L2: 0.15, K2: 0.4, bendN2: 0, nb2: 0, h2: 4e-3, p2: 0.01, lkA2: 0, rbn2: 0,
+        t3: 3, D3: 0.06, L3: 0.25, K3: 0.3, bendN3: 0, nb3: 0, h3: 4e-3, p3: 0.01, lkA3: 0, rbn3: 0,
+        ABox: 0.00283, KBox: 0.5, Lc: 0.5, Wc: 0.5, Nc: 26, hc: 0.04, kec: 0.9, alphaV: 1e9, betaF: 1e-4, mDust: 0, kD: 0,
+        o1: 1, Do1: 0.06, Lo1: 0.4, Ko1: 0.8, bendO1: 0, nbo1: 0, hO1: 4e-3, pO1: 0.01,
+        o2: 3, Do2: 0.06, Lo2: 0.2, Ko2: 0.4, bendO2: 0, nbo2: 0, hO2: 4e-3, pO2: 0.01,
+        o3: 1, Do3: 0.06, Lo3: 0, Ko3: 0, bendO3: 0, nbo3: 0, hO3: 4e-3, pO3: 0.01,
+        Db1: 0.06, Ah1: 0, Cd1: 0.7, Qh1: 0, phi1: 0, kb1: 0,
+        Db2: 0.06, Ah2: 0, Cd2: 0.7, Qh2: 0, phi2: 0, kb2: 0,
+        Db3: 0.06, Ah3: 0, Cd3: 0.7, Qh3: 0, phi3: 0, kb3: 0,
+      },
+      expect: {
+        QIn: (723 / 3600) / 1.205,
+        dpTotal: 8363.381677690502,
+        rhoM: 1.205 * (1 - 8363.381677690502 / 202650),
+        dpTotalRho: 8363.381677690502 * (1 - 8363.381677690502 / 202650),
+        pOutAbs: 101325 - 8363.381677690502,
+      },
+      tolerance: 1e-9,
+      source: '《进气系统分部件阻力计算》式(17b~17e)：ṁ = 723 kg/h、ρ_in = 1.205 kg/m³ → Q_in = 600 m³/h，与文档算例同工况；Δp₁ = 8363 Pa → ρ_m = 1.205×(1 − 8363/202650)、Δp₂ = Δp₁×0.9587、p_out = 101325 − 8363',
     },
   ],
 };
