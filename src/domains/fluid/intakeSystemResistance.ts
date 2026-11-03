@@ -42,20 +42,20 @@ const SEG_N_OPTIONS = [1, 2, 3, 4, 5].map((n) => ({ value: n, label: `${n} 段` 
 
 /** 分段几何默认值：进气管示例前 3 段为进气管/波纹管/编织管，段 4/5 默认未启用（长度 0） */
 const IN_SEG_DEFAULT = [
-  { type: 1, D: 70, L: 300, K: 0.35 },
-  { type: 2, D: 60, L: 150, K: 0.4 },
-  { type: 3, D: 60, L: 250, K: 0.3 },
-  { type: 1, D: 60, L: 0, K: 0 },
-  { type: 1, D: 60, L: 0, K: 0 },
+  { type: 1, D: 0.07, L: 0.3, K: 0.35 },
+  { type: 2, D: 0.06, L: 0.15, K: 0.4 },
+  { type: 3, D: 0.06, L: 0.25, K: 0.3 },
+  { type: 1, D: 0.06, L: 0, K: 0 },
+  { type: 1, D: 0.06, L: 0, K: 0 },
 ];
 
 /** 出气管示例前 3 段为出气管/多腔穿孔消音器/未启用，段 4/5 默认未启用 */
 const OUT_SEG_DEFAULT = [
-  { type: 1, D: 60, L: 400, K: 0.8 },
-  { type: 3, D: 60, L: 200, K: 0.4 },
-  { type: 1, D: 60, L: 0, K: 0 },
-  { type: 1, D: 60, L: 0, K: 0 },
-  { type: 1, D: 60, L: 0, K: 0 },
+  { type: 1, D: 0.06, L: 0.4, K: 0.8 },
+  { type: 3, D: 0.06, L: 0.2, K: 0.4 },
+  { type: 1, D: 0.06, L: 0, K: 0 },
+  { type: 1, D: 0.06, L: 0, K: 0 },
+  { type: 1, D: 0.06, L: 0, K: 0 },
 ];
 
 const BEND_OPTIONS = [
@@ -101,7 +101,7 @@ const runInputs: ParamSpec[] = [
   { key: 'Q', label: '系统体积流量', symbol: 'Q', unit: 'm³/h', unitGroup: 'volumeFlow', default: 600, min: 0, required: true, description: '发动机额定功率点或最大扭矩点的进气体积流量，示例 600 m³/h = 0.1667 m³/s' },
   { key: 'rhoMode', label: '密度计算方式', symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '直接输入密度' }, { value: 2, label: '按温度/海拔/湿度计算' }], default: 1, required: true, description: '方式 1 直接用下面的 ρ；方式 2 由本地大气压 p(z)、温度 T 与相对湿度按式 20~22 计算（高原、高温工况推荐）' },
   { key: 'rho', label: '空气密度', symbol: 'ρ', unit: 'kg/m³', unitGroup: 'density', default: 1.205, min: 0, required: true, showIf: { key: 'rhoMode', min: 1, max: 1 }, description: '20℃、1 atm 约 1.205 kg/m³；方式 2 时本输入不参与计算' },
-  { key: 'z', label: '海拔高度', symbol: 'z', unit: 'm', unitGroup: 'length', default: 0, min: 0, showIf: { key: 'rhoMode', min: 2, max: 2 }, description: '仅方式 2 使用：p = p0·(1 − 2.2557×10⁻⁵·z)^5.2559；海拔每升高 1000 m 密度约降 9%~10%' },
+  { key: 'z', label: '海拔高度', symbol: 'z', unit: 'm', unitGroup: 'lengthMeter', default: 0, min: 0, showIf: { key: 'rhoMode', min: 2, max: 2 }, description: '仅方式 2 使用：p = p0·(1 − 2.2557×10⁻⁵·z)^5.2559；海拔每升高 1000 m 密度约降 9%~10%' },
   { key: 'RH', label: '相对湿度', symbol: 'RH', unit: '-', unitGroup: 'dimensionless', default: 0, min: 0, max: 1, showIf: { key: 'rhoMode', min: 2, max: 2 }, description: '仅方式 2 使用：0~1，p_v = RH·p_sat(T)，p_sat 按 Buck 公式；湿度 100% 时密度约低 1%~2%' },
   { key: 'mu', label: '空气动力粘度', symbol: 'μ', unit: 'mPa·s', unitGroup: 'dynamicViscosity', default: 0.0181, min: 0, required: true, description: '20℃ 空气约 1.81×10⁻⁵ Pa·s（输入 0.0181 即 18.1 μPa·s）' },
   { key: 'T', label: '空气温度', symbol: 'T', unit: '℃', unitGroup: 'temperature', default: 20, required: true, description: '用于计算声速 c = (γRT)^(1/2) 与马赫数；增压机型出气管 60~80℃' },
@@ -112,13 +112,13 @@ const runInputs: ParamSpec[] = [
 
 /** 材料/摩阻参数 */
 const matInputs: ParamSpec[] = [
-  { key: 'epsS', label: '光滑管绝对粗糙度', symbol: 'ε_s', unit: 'mm', unitGroup: 'length', default: 0.03, min: 0, required: true, description: '塑料/橡胶直管 0.01~0.05 mm，金属管 0.05~0.1 mm' },
+  { key: 'epsS', label: '光滑管绝对粗糙度', symbol: 'ε_s', unit: 'm', unitGroup: 'lengthMeter', default: 3e-5, min: 0, required: true, description: '塑料/橡胶直管 0.01~0.05 mm（即 1×10⁻⁵~5×10⁻⁵ m），金属管 0.05~0.1 mm' },
   { key: 'Cc', label: '波纹管摩擦放大系数（无波深/波距时使用）', symbol: 'C_c', unit: '-', unitGroup: 'dimensionless', default: 2.0, min: 1, required: true, description: '式 7 的退化取值：浅波纹 1.5，深波纹 2.0~2.5。填写了波深 h 与波距 p 时改按 f_c = f_s·[1 + k·(h/p)^m] 计算' },
   { key: 'kBell', label: '波纹管拟合系数 k', symbol: 'k', unit: '-', unitGroup: 'dimensionless', default: 4, min: 0, required: true, description: '式 7：k = 3~5，由样件试验拟合；无数据取 4' },
   { key: 'mBell', label: '波纹管拟合指数 m', symbol: 'm', unit: '-', unitGroup: 'dimensionless', default: 1.35, min: 0, required: true, description: '式 7：m = 1.2~1.5，由样件试验拟合；无数据取 1.35' },
-  { key: 'epsB', label: '编织管绝对粗糙度', symbol: 'ε_b', unit: 'mm', unitGroup: 'length', default: 0.1, min: 0, required: true, description: '细密编织 0.05~0.10 mm，粗编织/有横向凸起 0.15~0.30 mm，最好用一段直管做 Δp–Q 试验反算' },
+  { key: 'epsB', label: '编织管绝对粗糙度', symbol: 'ε_b', unit: 'm', unitGroup: 'lengthMeter', default: 1e-4, min: 0, required: true, description: '细密编织 0.05~0.10 mm（5×10⁻⁵~1×10⁻⁴ m），粗编织/有横向凸起 0.15~0.30 mm' },
   { key: 'cb', label: '编织管弯曲附加系数', symbol: 'c_b', unit: '-', unitGroup: 'dimensionless', default: 0.5, min: 0, required: true, description: '式 9d：c_b = 0.4~0.6。R_b/D ≥ 3 时基本无附加，R_b/D = 2 时 K 增 20%~30%，R_b/D = 1 时增 40%~60%' },
-  { key: 'epsM', label: '穿孔管绝对粗糙度', symbol: 'ε_m', unit: 'mm', unitGroup: 'length', default: 0.2, min: 0, required: true, description: '穿孔管内壁 0.1~0.3 mm；孔口本身的增量另按穿孔率 φ 计入（式 15）' },
+  { key: 'epsM', label: '穿孔管绝对粗糙度', symbol: 'ε_m', unit: 'm', unitGroup: 'lengthMeter', default: 2e-4, min: 0, required: true, description: '穿孔管内壁 0.1~0.3 mm（1×10⁻⁴~3×10⁻⁴ m）；孔口本身的增量另按穿孔率 φ 计入（式 15）' },
   { key: 'aPerf', label: '穿孔率摩擦放大系数 a', symbol: 'a', unit: '-', unitGroup: 'dimensionless', default: 1.0, min: 0, required: true, description: '式 15：f_m = f_s·(1 + a·φ)，a = 0.5~1.5，无试验数据取 1.0' },
   { key: 'c1', label: '消音器弯头开孔系数 c1', symbol: 'c_1', unit: '-', unitGroup: 'dimensionless', default: 1.5, min: 0, required: true, description: '式 15c：建议取值 1.5（范围 1~2；直管/弯管、开孔/不开孔的差异可按对比数据修正）' },
   { key: 'c2', label: '消音器弯头开孔系数 c2', symbol: 'c_2', unit: '-', unitGroup: 'dimensionless', default: 1.0, min: 0, required: true, description: '式 15c：c2 = 0.5~1.5，表征腔体交换损失，弯角越大权重越高' },
@@ -131,16 +131,16 @@ for (let i = 1; i <= SEG_MAX; i++) {
   const d = IN_SEG_DEFAULT[i - 1];
   const seg: ShowIf = { key: 'nIn', min: i };
   inInputs.push(
-    { key: `D${i}`, label: `进气管段 ${i} 进口内径`, symbol: `D_in${i}`, unit: 'mm', unitGroup: 'diameter', default: d.D, min: 0, required: true, showIf: seg, description: '该段进口内径，流速按本段进口截面计算（入口段也以此为基准）' },
-    { key: `Dout${i}`, label: `进气管段 ${i} 出口内径`, symbol: `D_in,out${i}`, unit: 'mm', unitGroup: 'diameter', default: d.D, min: 0, required: true, showIf: seg, description: '该段出口内径；与进口相同时按等截面直管，不同时按式(4a)~(4f) 渐变管离散（渐扩/渐缩局部损失按锥角查表自动计入）' },
-    { key: `L${i}`, label: `进气管段 ${i} 长度`, symbol: `L_in${i}`, unit: 'mm', unitGroup: 'length', default: d.L, min: 0, required: true, showIf: seg, description: '该段沿程长度（不含弯头展开长度）' },
+    { key: `D${i}`, label: `进气管段 ${i} 进口内径`, symbol: `D_in${i}`, unit: 'm', unitGroup: 'diameterMeter', default: d.D, min: 0, required: true, showIf: seg, description: '该段进口内径，流速按本段进口截面计算（入口段也以此为基准）' },
+    { key: `Dout${i}`, label: `进气管段 ${i} 出口内径`, symbol: `D_in,out${i}`, unit: 'm', unitGroup: 'diameterMeter', default: d.D, min: 0, required: true, showIf: seg, description: '该段出口内径；与进口相同时按等截面直管，不同时按式(4a)~(4f) 渐变管离散（渐扩/渐缩局部损失按锥角查表自动计入）' },
+    { key: `L${i}`, label: `进气管段 ${i} 长度`, symbol: `L_in${i}`, unit: 'm', unitGroup: 'lengthMeter', default: d.L, min: 0, required: true, showIf: seg, description: '该段沿程长度（不含弯头展开长度）' },
     { key: `K${i}`, label: `进气管段 ${i} 其它局部阻力系数`, symbol: `ΣK_${i}`, unit: '-', unitGroup: 'dimensionless', default: d.K, min: 0, required: true, showIf: seg, description: '不含弯头的局部损失之和（入口、变径、滤网等）；弯头由「弯头规格 / 只数」自动按式 6a 计入' },
     { key: `bendN${i}`, label: `进气管段 ${i} 弯头规格`, symbol: 'K_90', unit: '-', kind: 'select', options: BEND_OPTIONS, default: 0, required: true, showIf: seg, description: '按式 6a：K_bend = n·K_90(R/D)·(θ/90°)^0.8~1.2，括号内为 90° 基准值；Re < 10⁵ 或相邻弯头间距 <5D 时应再乘 1.1~1.3' },
     { key: `nb${i}`, label: `进气管段 ${i} 弯头只数`, symbol: 'n', unit: '-', unitGroup: 'dimensionless', default: 0, min: 0, required: true, showIf: seg, description: '该段弯头数量，与规格系数相乘后叠加到 ΣK' },
-    { key: `h${i}`, label: `进气管段 ${i} 波纹波深`, symbol: 'h', unit: 'mm', unitGroup: 'length', default: 4, min: 0, showIf: [seg, { key: `t${i}`, min: 2, max: 2 }], description: '仅波纹管需要：波深 h。与波距 p 一起按 f_c = f_s·[1 + k·(h/p)^m] 计算；h 或 p 为 0 时退回 C_c' },
-    { key: `p${i}`, label: `进气管段 ${i} 波纹波距`, symbol: 'p', unit: 'mm', unitGroup: 'length', default: 10, min: 0, showIf: [seg, { key: `t${i}`, min: 2, max: 2 }], description: '仅波纹管需要：波距 p（自由状态）；轴向拉伸后波距变大、f_c 下降 5%~15%，设计按自由状态取值' },
+    { key: `h${i}`, label: `进气管段 ${i} 波纹波深`, symbol: 'h', unit: 'm', unitGroup: 'lengthMeter', default: 0.004, min: 0, showIf: [seg, { key: `t${i}`, min: 2, max: 2 }], description: '仅波纹管需要：波深 h（自由状态下约 0.003~0.006 m）。与波距 p 一起按 f_c = f_s·[1 + k·(h/p)^m] 计算；h 或 p 为 0 时退回 C_c' },
+    { key: `p${i}`, label: `进气管段 ${i} 波纹波距`, symbol: 'p', unit: 'm', unitGroup: 'lengthMeter', default: 0.01, min: 0, showIf: [seg, { key: `t${i}`, min: 2, max: 2 }], description: '仅波纹管需要：波距 p（自由状态约 0.008~0.015 m）；轴向拉伸后波距变大、f_c 下降 5%~15%，设计按自由状态取值' },
     { key: `lkA${i}`, label: `进气管段 ${i} 编织壁有效开孔面积`, symbol: `A_h${i}`, unit: 'mm²', unitGroup: 'area', default: 0, min: 0, showIf: [seg, { key: `t${i}`, min: 3, max: 3 }], description: '仅编织管需要：壁面孔隙的有效开孔面积，用于估算泄漏量（不计入压降）；0 表示忽略泄漏' },
-    { key: `rbn${i}`, label: `进气管段 ${i} 编织管弯曲半径`, symbol: `R_b${i}`, unit: 'mm', unitGroup: 'length', default: 0, min: 0, showIf: [seg, { key: `t${i}`, min: 3, max: 3 }], description: '仅编织管需要：软管弯曲半径 R_b。R_b/D ≥ 3 无附加损失；R_b/D = 2 时 K 增 20%~30% 且有效面积减 5%；R_b/D = 1 时 K 增 40%~60%、有效面积减 10%。0 表示无弯曲' },
+    { key: `rbn${i}`, label: `进气管段 ${i} 编织管弯曲半径`, symbol: `R_b${i}`, unit: 'm', unitGroup: 'lengthMeter', default: 0, min: 0, showIf: [seg, { key: `t${i}`, min: 3, max: 3 }], description: '仅编织管需要：软管弯曲半径 R_b。R_b/D ≥ 3 无附加损失；R_b/D = 2 时 K 增 20%~30% 且有效面积减 5%；R_b/D = 1 时 K 增 40%~60%、有效面积减 10%。0 表示无弯曲' },
   );
 }
 
@@ -154,13 +154,13 @@ const boxInputs: ParamSpec[] = [
   { key: 'bF', label: '滤芯压降二次系数', symbol: 'b', unit: 'Pa·s²/m²', default: 800, min: 0, required: true, showIf: { key: 'fMode', min: 1, max: 1 }, description: 'ISO 5011 台架拟合的惯性项系数（Pa·s²/m²）' },
   { key: 'alphaV', label: '滤材粘性阻尼系数', symbol: 'α_v', unit: '10¹⁰ m⁻²', unitGroup: 'viscousDrag', default: 6.6667, min: 0, required: true, showIf: { key: 'fMode', min: 2 }, description: '式(13d)：粘性项 μ·α_v·v_m·L 的系数（m⁻²），与渗透率互为倒数 α_v = 1/K；典型滤材约 5~10×10⁹ m⁻²，由透气性或台架试验反算；CFD 对应 Fluent 粘性阻力系数 1/α = α_v、STAR-CCM+ P_v = μ·α_v' },
   { key: 'betaF', label: '滤材惯性系数', symbol: 'β', unit: '10⁻⁷ m⁻¹', unitGroup: 'forchheimerInertia', default: 1.0, min: 0, required: true, showIf: { key: 'fMode', min: 2 }, description: '式(13d)：惯性项 (ρ/β)·v_m²·L 的惯性系数（m⁻¹），由台架 Δp–Q 曲线拟合；CFD 对应 Fluent 惯性阻力 C2 = 2/β、STAR-CCM+ P_i = ρ/β' },
-  { key: 'Lf', label: '滤材厚度', symbol: 'L_f', unit: 'mm', unitGroup: 'length', default: 1.0, min: 0, required: true, showIf: { key: 'fMode', min: 2, max: 2 }, description: '式(13d)(13f)：滤材厚度 L，压降与厚度成正比；加厚可提高容尘量，但压降同比例上升，需与终了压降权衡' },
+  { key: 'Lf', label: '滤材厚度', symbol: 'L_f', unit: 'm', unitGroup: 'lengthMeter', default: 0.001, min: 0, required: true, showIf: { key: 'fMode', min: 2, max: 2 }, description: '式(13d)(13f)：滤材厚度 L，压降与厚度成正比；加厚可提高容尘量，但压降同比例上升，需与终了压降权衡' },
   { key: 'sigmaF', label: '褶皱比', symbol: 'σ', unit: '-', unitGroup: 'dimensionless', default: 4, min: 1, max: 10, required: true, showIf: { key: 'fMode', min: 2, max: 2 }, description: '式(13e)：σ = 滤材有效面积 A_m / 迎风面积 A_f（通常 2~10）；A_m ≈ 2N·h·W（褶数 N、褶高 h、褶宽 W）；σ 加倍时线性项减半、惯性项降为 1/4' },
-  { key: 'Lc', label: '滤芯截面长度（褶沿长度方向排列时）', symbol: 'L_c', unit: 'mm', unitGroup: 'length', default: 600, min: 0, required: true, showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13l)(13n)：滤芯截面长度（褶排列方向的长度边）；与 W_c 组成 A_f = L_c·W_c；褶沿宽度方向排列时，把 L_c 与 W_c 互换即可' },
-  { key: 'Wc', label: '滤芯截面宽度', symbol: 'W_c', unit: 'mm', unitGroup: 'length', default: 400, min: 0, required: true, showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13l)(13o)：滤芯截面宽度，用于算 A_f = L_c·W_c 与 A_m = 2N·h·W_c·k_e' },
+  { key: 'Lc', label: '滤芯截面长度（褶沿长度方向排列时）', symbol: 'L_c', unit: 'm', unitGroup: 'lengthMeter', default: 0.6, min: 0, required: true, showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13l)(13n)：滤芯截面长度（褶排列方向的长度边）；与 W_c 组成 A_f = L_c·W_c；褶沿宽度方向排列时，把 L_c 与 W_c 互换即可' },
+  { key: 'Wc', label: '滤芯截面宽度', symbol: 'W_c', unit: 'm', unitGroup: 'lengthMeter', default: 0.4, min: 0, required: true, showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13l)(13o)：滤芯截面宽度，用于算 A_f = L_c·W_c 与 A_m = 2N·h·W_c·k_e' },
   { key: 'Nc', label: '褶数', symbol: 'N', unit: '-', default: 26, min: 1, required: true, showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13m)(13n)(13o)：褶皱数量，典型 20~40 褶/m 长度；褶距 p = L_c/N' },
-  { key: 'hc', label: '褶高', symbol: 'h', unit: 'mm', unitGroup: 'length', default: 40, min: 0, required: true, showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13n)(13o)：褶的高度，用于算 A_m 与 σ；注意是褶高不是滤芯深度——两者都参与几何但含义不同' },
-  { key: 'Lmc', label: '滤纸厚度', symbol: 'L_m', unit: 'mm', unitGroup: 'length', default: 0.4, min: 0, required: true, showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13q)：滤纸本身厚度（0.2~0.6 mm），不是滤芯深度或褶高；压降公式中的 L 取 L_m' },
+  { key: 'hc', label: '褶高', symbol: 'h', unit: 'm', unitGroup: 'lengthMeter', default: 0.04, min: 0, required: true, showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13n)(13o)：褶的高度，用于算 A_m 与 σ；注意是褶高不是滤芯深度——两者都参与几何但含义不同' },
+  { key: 'Lmc', label: '滤纸厚度', symbol: 'L_m', unit: 'm', unitGroup: 'lengthMeter', default: 0.0004, min: 0, required: true, showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13q)：滤纸本身厚度（0.2~0.6 mm，即 0.0002~0.0006 m），不是滤芯深度或褶高；压降公式中的 L 取 L_m' },
   { key: 'kec', label: '胶线/边缘效率系数', symbol: 'k_e', unit: '-', unitGroup: 'dimensionless', default: 0.9, min: 0.7, max: 1.0, required: true, showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13n)(13o)：胶线、边缘等无法过滤的面积修正系数，典型 0.85~0.95' },
   { key: 'mDust', label: '容尘量', symbol: 'm_dust', unit: 'g', default: 0, min: 0, required: true, description: '已积尘质量，初始状态取 0，终了状态按容尘试验值校核' },
   { key: 'kD', label: '容尘系数', symbol: 'k_d', unit: 'Pa/g', default: 0, min: 0, required: true, description: '容尘引起的压降增长率（Pa/g），由容尘试验确定；初始状态取 0' },
@@ -175,15 +175,15 @@ for (let i = 1; i <= SEG_MAX; i++) {
   const muf: ShowIf = [seg, { key: `o${i}`, min: 3, max: 3 }];
   const bel: ShowIf = [seg, { key: `o${i}`, min: 2, max: 2 }];
   outInputs.push(
-    { key: `Do${i}`, label: `出气管段 ${i} 进口内径`, symbol: `D_out${i}`, unit: 'mm', unitGroup: 'diameter', default: d.D, min: 0, required: true, showIf: seg, description: '出气管段进口内径；多腔穿孔消音器时为穿孔主管内径' },
-    { key: `Douto${i}`, label: `出气管段 ${i} 出口内径`, symbol: `D_out,out${i}`, unit: 'mm', unitGroup: 'diameter', default: d.D, min: 0, required: true, showIf: seg, description: '与进口相同时按等截面；不同时按式(4a)~(4f) 渐变管离散；该段为系统末段时出口速度决定出口动压' },
-    { key: `Lo${i}`, label: `出气管段 ${i} 长度`, symbol: `L_out${i}`, unit: 'mm', unitGroup: 'length', default: d.L, min: 0, required: true, showIf: seg, description: '该段沿程长度，未使用取 0' },
+    { key: `Do${i}`, label: `出气管段 ${i} 进口内径`, symbol: `D_out${i}`, unit: 'm', unitGroup: 'diameterMeter', default: d.D, min: 0, required: true, showIf: seg, description: '出气管段进口内径；多腔穿孔消音器时为穿孔主管内径' },
+    { key: `Douto${i}`, label: `出气管段 ${i} 出口内径`, symbol: `D_out,out${i}`, unit: 'm', unitGroup: 'diameterMeter', default: d.D, min: 0, required: true, showIf: seg, description: '与进口相同时按等截面；不同时按式(4a)~(4f) 渐变管离散；该段为系统末段时出口速度决定出口动压' },
+    { key: `Lo${i}`, label: `出气管段 ${i} 长度`, symbol: `L_out${i}`, unit: 'm', unitGroup: 'lengthMeter', default: d.L, min: 0, required: true, showIf: seg, description: '该段沿程长度，未使用取 0' },
     { key: `Ko${i}`, label: `出气管段 ${i} 其它局部阻力系数`, symbol: `ΣK_out${i}`, unit: '-', unitGroup: 'dimensionless', default: d.K, min: 0, required: true, showIf: seg, description: '不含弯头的局部损失（节气门全开 0.1~0.3、变径、消音器进出口等）；弯头由「弯头规格 / 只数」按式 6a 计入' },
     { key: `bendO${i}`, label: `出气管段 ${i} 弯头规格`, symbol: 'K_90', unit: '-', kind: 'select', options: BEND_OPTIONS, default: 0, required: true, showIf: seg, description: '按式 6a 逐只计算弯头损失；穿孔消音器弯曲时再按式 15c 与 φ_b 联合修正' },
     { key: `nbo${i}`, label: `出气管段 ${i} 弯头只数`, symbol: 'n', unit: '-', unitGroup: 'dimensionless', default: 0, min: 0, required: true, showIf: seg, description: '该段弯头数量' },
-    { key: `hO${i}`, label: `出气管段 ${i} 波纹波深`, symbol: 'h', unit: 'mm', unitGroup: 'length', default: 4, min: 0, showIf: bel, description: '仅波纹管需要：波深 h' },
-    { key: `pO${i}`, label: `出气管段 ${i} 波纹波距`, symbol: 'p', unit: 'mm', unitGroup: 'length', default: 10, min: 0, showIf: bel, description: '仅波纹管需要：波距 p（自由状态）' },
-    { key: `Db${i}`, label: `出气管段 ${i} 消音器本体内径`, symbol: `D_b${i}`, unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, showIf: muf, description: '仅多腔穿孔消音器需要：本体内径，大于穿孔管内径时自动按突扩 (1−A₁/A₂)² 与突缩 0.5(1−A₁/A₂) 计入局部损失' },
+    { key: `hO${i}`, label: `出气管段 ${i} 波纹波深`, symbol: 'h', unit: 'm', unitGroup: 'lengthMeter', default: 0.004, min: 0, showIf: bel, description: '仅波纹管需要：波深 h' },
+    { key: `pO${i}`, label: `出气管段 ${i} 波纹波距`, symbol: 'p', unit: 'm', unitGroup: 'lengthMeter', default: 0.01, min: 0, showIf: bel, description: '仅波纹管需要：波距 p（自由状态）' },
+    { key: `Db${i}`, label: `出气管段 ${i} 消音器本体内径`, symbol: `D_b${i}`, unit: 'm', unitGroup: 'diameterMeter', default: 0.06, min: 0, showIf: muf, description: '仅多腔穿孔消音器需要：本体内径，大于穿孔管内径时自动按突扩 (1−A₁/A₂)² 与突缩 0.5(1−A₁/A₂) 计入局部损失' },
     { key: `Ah${i}`, label: `出气管段 ${i} 穿孔开孔总面积`, symbol: `A_h${i}`, unit: 'mm²', unitGroup: 'area', default: 0, min: 0, showIf: muf, description: '仅多腔穿孔消音器需要：孔口总面积，穿孔率 φ = A_h/(π·D·L) 用于摩擦放大 f_m = f_s·(1 + a·φ)；封闭腔无净穿流时孔口本身不计局部阻力' },
     { key: `Cd${i}`, label: `出气管段 ${i} 孔口流量系数`, symbol: `C_d${i}`, unit: '-', unitGroup: 'dimensionless', default: 0.7, min: 0, max: 1, showIf: muf, description: '仅多腔穿孔消音器需要：孔口流量系数 0.6~0.8，用于孔口射流损失 (1/C_d² − 1)·ρv_h²/2' },
     { key: `Qh${i}`, label: `出气管段 ${i} 穿流流量`, symbol: `Q_th${i}`, unit: 'm³/s', unitGroup: 'volumeFlow', default: 0, min: 0, showIf: muf, description: '仅多腔穿孔消音器需要：穿过孔口进入环腔的净流量。封闭环腔无净穿流取 0（孔口不计阻力）' },
@@ -261,7 +261,7 @@ export const intakeSystemResistance: FormulaSpec = {
 
     { key: 'dpBox', label: '空滤器箱体压降', symbol: 'Δp_box', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '空滤器', description: 'ΣK_box·(ρv_box²/2)，v_box = Q/A_box' },
     { key: 'AfOut', label: '滤芯迎风面积（自动）', symbol: 'A_f', unit: 'm²', unitGroup: 'area', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13l)：A_f = L_c·W_c，由褶皱几何自动算出' },
-    { key: 'pPleat', label: '褶距', symbol: 'p', unit: 'mm', unitGroup: 'length', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13m)：p = L_c/N，褶沿长度方向排列时；褶沿宽度方向时 p = W_c/N' },
+    { key: 'pPleat', label: '褶距', symbol: 'p', unit: 'm', unitGroup: 'lengthMeter', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13m)：p = L_c/N，褶沿长度方向排列时；褶沿宽度方向时 p = W_c/N' },
     { key: 'sigmaGeo', label: '褶皱比（自动）', symbol: 'σ', unit: '-', unitGroup: 'dimensionless', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13n)：σ = 2N·h·k_e/L_c，由褶皱几何自动算出；典型 2~10' },
     { key: 'AmGeo', label: '褶皱有效滤材面积（自动）', symbol: 'A_m', unit: 'm²', unitGroup: 'area', digits: 3, group: '空滤器', showIf: { key: 'fMode', min: 3, max: 3 }, description: '式(13o)：A_m = 2N·h·W_c·k_e，由褶皱几何自动算出' },
     { key: 'dpFilter', label: '滤芯压降', symbol: 'Δp_f', unit: 'Pa', unitGroup: 'pressure', digits: 3, group: '空滤器', description: 'a·v_eff + b·v_eff²，v_eff = v_f/η（未含容尘）' },

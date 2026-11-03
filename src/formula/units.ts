@@ -25,9 +25,28 @@ export const UNIT_GROUPS: Record<string, UnitGroup> = {
       { label: 'cm', factor: 0.01 },
     ],
   },
+  /** 与 length 同一套 factor，但默认显示 m，供需统一米制的公式（如进气阻力）使用 */
+  lengthMeter: {
+    si: 'm',
+    preferred: 'm',
+    units: [
+      { label: 'm', factor: 1 },
+      { label: 'mm', factor: 0.001 },
+      { label: 'cm', factor: 0.01 },
+    ],
+  },
   diameter: {
     si: 'm',
     preferred: 'mm',
+    units: [
+      { label: 'm', factor: 1 },
+      { label: 'mm', factor: 0.001 },
+    ],
+  },
+  /** 与 diameter 同一套 factor，但默认显示 m，供需统一米制的公式（如进气阻力）使用 */
+  diameterMeter: {
+    si: 'm',
+    preferred: 'm',
     units: [
       { label: 'm', factor: 1 },
       { label: 'mm', factor: 0.001 },
