@@ -107,6 +107,11 @@ interface CtrApi {
     /** 桌面版：用系统默认程序打开文件（支持 UNC 路径） */
     openPath(filePath: string): Promise<{ ok: boolean; message?: string }>;
   };
+  lab: {
+    /** 读取实验库（LabStore）快照；null 表示尚无数据 */
+    get(): Promise<unknown | null>;
+    set(snapshot: unknown): Promise<{ ok: true } | { ok: false; error: string }>;
+  };
 }
 
 /**
@@ -123,7 +128,7 @@ const demoUser: CtrUser = {
 };
 
 // 浏览器调试用的内存数据（刷新页面即丢失，仅保证交互流程可走通）
-const mem = { history: [] as HistoryEntry[], projects: [] as Project[] };
+const mem = { history: [] as HistoryEntry[], projects: [] as Project[], lab: null as unknown };
 
 const fallback: CtrApi = {
   auth: {
@@ -201,6 +206,13 @@ const fallback: CtrApi = {
   app: {
     info: async () => ({ version: '0.1.0-browser', dataDir: '(浏览器调试)' }),
     openPath: async () => ({ ok: false, message: '浏览器调试模式无法调用本地程序打开文件' }),
+  },
+  lab: {
+    get: async () => mem.lab,
+    set: async (snapshot) => {
+      mem.lab = snapshot ?? null;
+      return { ok: true as const };
+    },
   },
 };
 

@@ -1824,3 +1824,55 @@ select {
     grid-template-columns: 300px 4px minmax(0, 1fr) 4px 340px;
   }
 }
+
+/* ============ 实验数据入库与模型校准 ============ */
+.lab-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.lab-tab {
+  padding: 8px 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+  color: var(--muted);
+  transition: all 0.15s;
+}
+.lab-tab:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.lab-tab.active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+  font-weight: 600;
+}
+.tag-fail {
+  background: #fdecea !important;
+  color: var(--danger) !important;
+  font-weight: 600;
+}
+.lab-form-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.lab-form-row .field {
+  margin-bottom: 8px;
+}
+.lab-form-row .field select,
+.lab-form-row .field input {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  background: #fff;
+}
+.lab-form-row .field select:focus,
+.lab-form-row .field input:focus {
+  border-color: var(--blue);
+}

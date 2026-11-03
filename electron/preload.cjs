@@ -43,6 +43,10 @@ const bridge = {
     info: () => ipcRenderer.invoke('app:info'),
     openPath: (filePath) => ipcRenderer.invoke('app:openPath', filePath),
   },
+  lab: {
+    get: () => ipcRenderer.invoke('lab:get'),
+    set: (snapshot) => ipcRenderer.invoke('lab:set', snapshot),
+  },
 };
 
 contextBridge.exposeInMainWorld('ctr', bridge);

@@ -11,11 +11,12 @@ import { ComparePanel, HistoryPage } from './pages/HistoryPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { TestReportsPage } from './pages/TestReportsPage';
 import { TestsSearchPage } from './pages/TestsSearchPage';
+import { LabPage } from './pages/LabPage';
 import { DatabasePage } from './pages/DatabasePage';
 import { KnowledgeBasePage } from './pages/KnowledgeBasePage';
 import { SettingsPage } from './pages/SettingsPage';
 
-type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'testsImport' | 'testsSearch' | 'db' | 'kbe' | 'compare' | 'settings';
+type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'testsImport' | 'testsSearch' | 'lab' | 'db' | 'kbe' | 'compare' | 'settings';
 type NavGroupKey = 'theory' | 'tests';
 
 interface NavLeaf { key: Page; label: string; icon?: string }
@@ -41,6 +42,7 @@ const NAV: NavItem[] = [
     children: [
       { key: 'testsImport', label: '实验报告导入', icon: '⇪' },
       { key: 'testsSearch', label: '实验报告检索', icon: '🔍' },
+      { key: 'lab', label: '数据入库与校准', icon: '🧪' },
     ],
   },
   { key: 'db', label: '产品数据库', icon: '🗄' },
@@ -51,7 +53,7 @@ const NAV: NavItem[] = [
 /** 某页面是否属于某个父组（决定组级高亮） */
 function groupContains(group: NavGroup, p: Page): boolean {
   if (group.key === 'theory') return ['library', 'calc', 'history', 'compare'].includes(p);
-  if (group.key === 'tests') return ['testsImport', 'testsSearch'].includes(p);
+  if (group.key === 'tests') return ['testsImport', 'testsSearch', 'lab'].includes(p);
   return false;
 }
 
@@ -157,6 +159,7 @@ export function App() {
     history: '计算记录',
     testsImport: '实验报告导入',
     testsSearch: '实验报告检索',
+    lab: '实验数据入库与模型校准',
     db: '产品数据库',
     kbe: '知识经验库',
     compare: '方案对比',
@@ -296,6 +299,7 @@ export function App() {
           )}
           {page === 'testsImport' && <TestReportsPage user={user} currentProject={currentProject} />}
           {page === 'testsSearch' && <TestsSearchPage user={user} />}
+          {page === 'lab' && <LabPage user={user} />}
           {page === 'db' && <DatabasePage user={user} />}
           {page === 'kbe' && <KnowledgeBasePage user={user} />}
           {page === 'compare' && compare && (

@@ -194,6 +194,19 @@ ipcMain.handle('project:remove', (_e, id) => {
   return { ok: true };
 });
 
+// ---------- 实验库（LabStore 快照持久化） ----------
+ipcMain.handle('lab:get', () => store.get().lab ?? null);
+
+ipcMain.handle('lab:set', (_e, snapshot) => {
+  try {
+    store.get().lab = snapshot ?? null;
+    store.persist();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+});
+
 // ---------- 授权 ----------
 ipcMain.handle('license:info', () => {
   const mc = license.machineCode();

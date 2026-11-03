@@ -10,6 +10,8 @@ const emptyData = () => ({
   history: [],
   projects: [],
   settings: { license: null },
+  // 实验库（LabStore）快照：null 表示尚未入库任何实验数据
+  lab: null,
 });
 
 function init(dir) {
