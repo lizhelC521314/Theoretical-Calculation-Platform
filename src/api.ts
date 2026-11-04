@@ -108,12 +108,12 @@ interface CtrApi {
     }): Promise<{ ok: boolean; pageCount?: number; page?: number; width?: number; height?: number; dataUrl?: string; message?: string }>;
   };
   db: {
-    archive(p: { base64: string; fileName: string; libType: 'calc' | 'test' | 'trusted' | 'theory' | 'design' | 'fmea' }): Promise<{ ok: boolean; filePath?: string; targetDir?: string; message?: string }>;
-    list(p: { libType: 'calc' | 'test' | 'trusted' | 'theory' | 'design' | 'fmea' }): Promise<{ ok: boolean; dir?: string; files?: { name: string; size: number; mtime: string; fullPath: string }[]; message?: string }>;
+    archive(p: { base64: string; fileName: string; libType: 'calc' | 'test' | 'trusted' | 'cae' | 'theory' | 'design' | 'fmea' }): Promise<{ ok: boolean; filePath?: string; targetDir?: string; message?: string }>;
+    list(p: { libType: 'calc' | 'test' | 'trusted' | 'cae' | 'theory' | 'design' | 'fmea' }): Promise<{ ok: boolean; dir?: string; files?: { name: string; size: number; mtime: string; fullPath: string }[]; message?: string }>;
     read(p: { fullPath: string }): Promise<{ ok: boolean; rows?: unknown[][]; sheetCount?: number; message?: string }>;
     pdfData(filePath: string): Promise<{ ok: boolean; fileUrl?: string; size?: number; message?: string }>;
     remove(p: { fullPath: string }): Promise<{ ok: boolean; message?: string }>;
-    ping(): Promise<{ reachable: boolean; root: string; calc: string; test: string; trusted: string; kbeRoot: string; kbeTheory: string; kbeDesign: string; kbeFmea: string }>;
+    ping(): Promise<{ reachable: boolean; root: string; calc: string; test: string; trusted: string; cae: string; kbeRoot: string; kbeTheory: string; kbeDesign: string; kbeFmea: string }>;
   };
   app: {
     info(): Promise<{ version: string; dataDir: string }>;
@@ -218,7 +218,7 @@ const fallback: CtrApi = {
     read: async () => ({ ok: false, rows: [] }),
     pdfData: async () => ({ ok: false, message: '浏览器调试模式无法读取 UNC 路径 PDF' }),
     remove: async () => ({ ok: false, message: '浏览器调试模式无法删除服务器文件' }),
-    ping: async () => ({ reachable: false, root: '', calc: '', test: '', trusted: '', kbeRoot: '', kbeTheory: '', kbeDesign: '', kbeFmea: '' }),
+    ping: async () => ({ reachable: false, root: '', calc: '', test: '', trusted: '', cae: '', kbeRoot: '', kbeTheory: '', kbeDesign: '', kbeFmea: '' }),
   },
   app: {
     info: async () => ({ version: '0.1.0-browser', dataDir: '(浏览器调试)' }),

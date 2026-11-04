@@ -13,6 +13,7 @@ const UNC_ROOT = '\\\\10.1.1.245\\Product Database';
 const UNC_CALC_LIB = `${UNC_ROOT}\\Theoretical Calculation Library`;
 const UNC_TEST_LIB = `${UNC_ROOT}\\Experimental Test Database`;
 const UNC_TRUSTED = `${UNC_ROOT}\\Trusted Data Asset Library`;
+const UNC_CAE_LIB = `${UNC_ROOT}\\CAE Simulation Database`;
 
 const KBE_ROOT = '\\\\10.1.1.245\\Knowledge & Experience Base';
 const KBE_THEORY = `${KBE_ROOT}\\Theoretical Knowledge Base`;
@@ -24,6 +25,7 @@ function libDir(libType) {
     case 'calc': return UNC_CALC_LIB;
     case 'test': return UNC_TEST_LIB;
     case 'trusted': return UNC_TRUSTED;
+    case 'cae': return UNC_CAE_LIB;
     case 'theory': return KBE_THEORY;
     case 'design': return KBE_DESIGN;
     case 'fmea': return KBE_FMEA;
@@ -1023,7 +1025,7 @@ ipcMain.handle('db:delete', async (_e, payload) => {
   try {
     const { fullPath } = payload || {};
     if (!fullPath || !fs.existsSync(fullPath)) return { ok: false, message: '文件不存在' };
-    const allowedRoots = [UNC_CALC_LIB, UNC_TEST_LIB, UNC_TRUSTED, KBE_THEORY, KBE_DESIGN, KBE_FMEA];
+    const allowedRoots = [UNC_CALC_LIB, UNC_TEST_LIB, UNC_TRUSTED, UNC_CAE_LIB, KBE_THEORY, KBE_DESIGN, KBE_FMEA];
     const normalized = path.resolve(fullPath).toLowerCase();
     const inLib = allowedRoots.some((root) => {
       const r = path.resolve(root).toLowerCase();
@@ -1045,6 +1047,7 @@ ipcMain.handle('db:ping', async () => {
     calc: UNC_CALC_LIB,
     test: UNC_TEST_LIB,
     trusted: UNC_TRUSTED,
+    cae: UNC_CAE_LIB,
     kbeRoot: KBE_ROOT,
     kbeTheory: KBE_THEORY,
     kbeDesign: KBE_DESIGN,

@@ -16,6 +16,7 @@ export const UNC_ROOT = '\\\\10.1.1.245\\Product Database';
 export const UNC_CALC_LIB = `${UNC_ROOT}\\Theoretical Calculation Library`;
 export const UNC_TEST_LIB = `${UNC_ROOT}\\Experimental Test Database`;
 export const UNC_TRUSTED = `${UNC_ROOT}\\Trusted Data Asset Library`;
+export const UNC_CAE_LIB = `${UNC_ROOT}\\CAE Simulation Database`;
 
 /** 项目-产品-版本键：统一空格，避免因字符差异导致匹配失败 */
 export function productKey(project: string, product: string, version: string): string {
@@ -137,6 +138,42 @@ export function parseArchiveName(name: string): {
 /** 可信资产文件名：项目-产品-版本.xlsx */
 export function trustedFileName(project: string, product: string, version: string): string {
   return `${cleanFileName(project)}-${cleanFileName(product)}-${cleanFileName(version || 'V0')}.xlsx`;
+}
+
+/**
+ * CAE 报告归档文件名：客户+项目+仿真项目+产品+版本+日期.pdf
+ * 与试验报告命名规则一致，便于检索页统一解析展示。
+ */
+export function archiveCaeFileName(
+  customer: string,
+  project: string,
+  caeItem: string,
+  product: string,
+  version: string,
+  date: string,
+): string {
+  const d = (date || new Date().toISOString().slice(0, 10)).replace(/-/g, '');
+  const parts = [customer, project, caeItem, product, version || 'V0', d].map((s) => cleanFileName(s));
+  return `${parts.join('+')}.pdf`;
+}
+
+/** 从 CAE 归档文件名反解元信息：客户+项目+仿真项目+产品+版本+日期 */
+export function parseCaeArchiveName(name: string): {
+  customer: string;
+  project: string;
+  caeItem: string;
+  product: string;
+  version: string;
+  date: string;
+} {
+  const stem = name.replace(/\.(xlsx|pdf)$/i, '');
+  const parts = stem.split('+').map((s) => s.trim()).filter(Boolean);
+  let date = '';
+  if (parts.length > 0 && /^\d{6,8}$/.test(parts[parts.length - 1])) {
+    date = parts.pop()!;
+  }
+  const [customer = '', project = '', caeItem = '', product = '', version = ''] = parts;
+  return { customer, project, caeItem, product, version, date };
 }
 
 /**

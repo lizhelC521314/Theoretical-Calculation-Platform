@@ -218,7 +218,7 @@ const TABLE_HEADER_HINTS =
  /(数量|样件编号|样品编号|试验地点|试验日期|试验人员|判定|备注|试验设备|设备有效日期|试验标准|样品名称|规格型号)/;
 
 /** 单元格内容归一：去掉字间空格（「压 力 损 失」→「压力损失」），保留必要单空格 */
-function squeezeCell(raw: string): string {
+export function squeezeCell(raw: string): string {
   return despaceOcrText(raw).replace(/[ \t]{2,}/g, ' ').trim();
 }
 
@@ -314,7 +314,7 @@ export function parseTestItemFromTable(text: string): string {
 }
 
 /** OCR 版本号清洗：「VI·0」「V1。0」→「V1.0」 */
-function cleanOcrVersion(raw: string): string {
+export function cleanOcrVersion(raw: string): string {
   if (!raw) return '';
   let v = raw
     .replace(/[·•。]/g, '.')
@@ -409,7 +409,7 @@ function findField(text: string, label: RegExp): string {
 }
 
 /** 把 2026-10-29 / 2026年10月29日 / 2026.10.29 统一为 YYYY-MM-DD */
-function normalizeDate(raw: string): string {
+export function normalizeDate(raw: string): string {
   const m = raw.match(/(20\d{2})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})/);
   if (!m) return '';
   return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
@@ -421,7 +421,7 @@ function normalizeDate(raw: string): string {
  * 名称只有中文（无字母/数字/特殊符号）时 onlyChinese=true，项目与产品都取该名称；
  * 找不到字母数字段且含非中文符号时 project 返回空串，product 取原值。
  */
-function splitPartName(value: string): { project: string; product: string; onlyChinese: boolean } {
+export function splitPartName(value: string): { project: string; product: string; onlyChinese: boolean } {
   if (!value) return { project: '', product: '', onlyChinese: false };
   const plain = value.replace(/\s+/g, '');
   if (/^[一-鿿]+$/.test(plain)) {
@@ -471,7 +471,7 @@ export function parseHeaderCode(text: string): { customer: string; date: string 
  * 先把常见误识分隔符归一化为 - 并去掉空白，再按 SYZ[X]-客户-年月日[流水] 匹配。
  * 只在页眉区域（前 10 个非空行）匹配，避免正文误判。
  */
-function parseOcrHeaderCode(text: string): { customer: string; date: string } | null {
+export function parseOcrHeaderCode(text: string): { customer: string; date: string } | null {
   const head = text
     .split(/\r?\n/)
     .filter((l) => l.trim())

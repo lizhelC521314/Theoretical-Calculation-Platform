@@ -11,13 +11,14 @@ import { ComparePanel, HistoryPage } from './pages/HistoryPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { TestReportsPage } from './pages/TestReportsPage';
 import { TestsSearchPage } from './pages/TestsSearchPage';
-import { VirtualValidationPage } from './pages/VirtualValidationPage';
+import { CaeReportsPage } from './pages/CaeReportsPage';
+import { CaeSearchPage } from './pages/CaeSearchPage';
 import { LabPage } from './pages/LabPage';
 import { DatabasePage } from './pages/DatabasePage';
 import { KnowledgeBasePage } from './pages/KnowledgeBasePage';
 import { SettingsPage } from './pages/SettingsPage';
 
-type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'testsImport' | 'testsSearch' | 'lab' | 'virtualValidation' | 'db' | 'kbe' | 'compare' | 'settings';
+type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'db' | 'kbe' | 'compare' | 'settings';
 
 interface NavLeaf { key: Page; label: string; icon?: string }
 /** 分组可嵌套：如「产品验证」下的「试验报告」子分组 */
@@ -51,7 +52,12 @@ const NAV: NavItem[] = [
           { key: 'lab', label: '数据入库与校准', icon: '🧪' },
         ],
       },
-      { key: 'virtualValidation', label: '虚拟验证', icon: '◈' },
+      { key: 'virtualValidation', label: '虚拟验证', icon: '◈',
+        children: [
+          { key: 'caeImport', label: 'CAE报告导入', icon: '⇪' },
+          { key: 'caeSearch', label: 'CAE报告检索', icon: '🔍' },
+        ],
+      },
     ],
   },
   { key: 'db', label: '产品数据库', icon: '🗄' },
@@ -83,7 +89,7 @@ export function App() {
   const [libDomain, setLibDomain] = useState<string | undefined>(undefined);
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(['theory', 'validation']));
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(['theory', 'validation', 'virtualValidation']));
 
   // 侧边栏可拖动宽度
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -173,7 +179,8 @@ export function App() {
     testsImport: '试验报告导入',
     testsSearch: '试验报告检索',
     lab: '实验数据入库与模型校准',
-    virtualValidation: '虚拟验证',
+    caeImport: 'CAE报告导入',
+    caeSearch: 'CAE报告检索',
     db: '产品数据库',
     kbe: '知识经验库',
     compare: '方案对比',
@@ -309,7 +316,8 @@ export function App() {
           {page === 'testsImport' && <TestReportsPage user={user} currentProject={currentProject} />}
           {page === 'testsSearch' && <TestsSearchPage user={user} />}
           {page === 'lab' && <LabPage user={user} />}
-          {page === 'virtualValidation' && <VirtualValidationPage />}
+          {page === 'caeImport' && <CaeReportsPage user={user} currentProject={currentProject} />}
+          {page === 'caeSearch' && <CaeSearchPage user={user} />}
           {page === 'db' && <DatabasePage user={user} />}
           {page === 'kbe' && <KnowledgeBasePage user={user} />}
           {page === 'compare' && compare && (
