@@ -161,4 +161,27 @@ describe('扫描件 OCR 文本解析', () => {
     expect(meta.date).toBe('2026-10-20');
     expect(meta.version).toBe('V1.0');
   });
+
+  // 真实扫描件（B26-A进气阻力.pdf）封面 OCR 按词坐标还原后的行结构：
+  // 页眉编号 X 丢失、- 被误识为 ·/一；封面只有「零件名称」没有「产品名称」，无版本号
+  const REAL_OCR_ROWS = [
+    '编 号 No ：   SYZ GW · 26 一 081901',
+    '试 验 报 口',
+    '零 件 名 称 ：   B26-A 进 气 系 统',
+    '零 部 件 号 ：',
+    '项 目 名 称 ：   压 力 损 失',
+    '试 验 类 型 ：   委 托 检 测',
+    '客 户 名 称 ：   长 城 汽 车 股 份 有 限 公 司',
+    '成 都 万 友 滤 机 有 限 公 司',
+    '机 密   授 权 使 用 ， 禁 止 私 自 拍 照 、 截 屏 、 夕 卜 发',
+  ].join('\n');
+
+  it('真实封面：页眉容错解析（X 丢失、·/一 分隔符）+ 零件名称兜底', () => {
+    const meta = parseOcrMeta(REAL_OCR_ROWS, 'B26-A进气阻力.pdf');
+    expect(meta.customer).toBe('GW');
+    expect(meta.date).toBe(`${expectedYear}-08-19`);
+    expect(meta.project).toBe('压力损失');
+    expect(meta.product).toBe('B26-A进气系统');
+    expect(meta.version).toBe('');
+  });
 });

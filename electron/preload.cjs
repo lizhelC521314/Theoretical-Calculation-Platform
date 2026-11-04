@@ -31,7 +31,7 @@ const bridge = {
   },
   pdf: {
     extractText: (filePath) => ipcRenderer.invoke('test:pdfText', filePath),
-    ocrImage: (payload) => ipcRenderer.invoke('pdf:ocrImage', payload),
+    ocrFirstPage: (filePath) => ipcRenderer.invoke('pdf:ocrFirstPage', filePath),
   },
   db: {
     archive: (p) => ipcRenderer.invoke('db:archive', p),

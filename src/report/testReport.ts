@@ -129,41 +129,25 @@ export async function extractPdfText(file: File): Promise<string> {
 }
 
 /**
- * 扫描件兜底：把 PDF 封面渲染成 PNG，交由主进程系统 OCR 识别文字。
+ * 扫描件兜底：主进程提取 PDF 封面内嵌扫描图并做系统 OCR（按词坐标还原版面行）。
  * 识别失败或无文字时返回空串。
  */
 export async function ocrPdfFirstPage(file: File): Promise<string> {
   const { api } = await import('../api');
-  const data = new Uint8Array(await file.arrayBuffer());
-  const task = getDocument({ data });
-  try {
-    const doc = await task.promise;
-    const page = await doc.getPage(1);
-    const viewport = page.getViewport({ scale: 3 });
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.ceil(viewport.width);
-    canvas.height = Math.ceil(viewport.height);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return '';
-    await page.render({ canvas, viewport }).promise;
-    const base64 = canvas.toDataURL('image/png').split(',')[1] || '';
-    if (!base64) return '';
-    const res = await api.pdf.ocrImage({ base64 });
-    return res.ok && typeof res.text === 'string' ? res.text : '';
-  } catch {
-    return '';
-  } finally {
-    await task.destroy();
-  }
+  const filePath = api.file.getPath(file);
+  if (!filePath) return '';
+  const res = await api.pdf.ocrFirstPage(filePath);
+  return res.ok && typeof res.text === 'string' ? res.text : '';
 }
 
 /**
  * OCR 文本会把字与字之间插入空格（如「客 户 名 称 ： 长 城 汽 车」），
  * 这里去掉中文字符/数字/字母/常见符号之间的空格，便于标签匹配。
+ * 注意只去空格/制表符，保留换行——主进程已按词坐标还原了版面行结构。
  */
 export function despaceOcrText(text: string): string {
   return text
-    .replace(/(?<=[一-鿿0-9A-Za-z：:.．·•/\-+()（）])\s+(?=[一-鿿0-9A-Za-z：:.．·•/\-+()（）])/g, '')
+    .replace(/(?<=[一-鿿0-9A-Za-z：:.．·•/\-+()（）])[ \t]+(?=[一-鿿0-9A-Za-z：:.．·•/\-+()（）])/g, '')
     .trim();
 }
 
@@ -182,12 +166,13 @@ function cleanOcrVersion(raw: string): string {
 
 /** OCR 文本专用元字段解析：全文先 despace，按「下一已知标签」截止抓取 */
 export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
-  // 页眉编号在原始带空格文本上解析（正则本身兼容空格），避免 despace 后日期数字粘连
-  const header = parseHeaderCode(rawText);
+  // 页眉编号在原始带空格文本上解析（正则本身兼容空格），避免 despace 后日期数字粘连；
+  // 精确版失败时走 OCR 容错版（X 丢失、分隔符被误识为 ·/一 等）
+  const header = parseHeaderCode(rawText) || parseOcrHeaderCode(rawText);
   const text = despaceOcrText(rawText);
 
   const KNOWN_LABELS =
-    '(?:客户名称|委托单位|送样单位|项目名称|项目代号|产品名称|产品型号|报告编号|样品编号|样件编号|报告日期|试验日期|实验日期|检测日期|版本号|客户|委托方|甲方|项目|产品|版本|日期|编号)';
+    '(?:客户名称|委托单位|送样单位|项目名称|项目代号|产品名称|产品型号|零件名称|零部件号|试验类型|报告编号|样品编号|样件编号|报告日期|试验日期|实验日期|检测日期|版本号|客户|委托方|甲方|项目|产品|版本|日期|编号)';
   const NEXT_LABEL = `(?=(?:${KNOWN_LABELS}\\s*[：:.．]?|[一-鿿]{2,6}[：:]|\\s|$))`;
 
   const grab = (label: string): string => {
@@ -202,7 +187,8 @@ export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
     normalizeCustomer(grab('客户(?:名称)?') || grab('(?:委托方|委托单位|甲方|送样单位)'));
 
   const project = grab('项目(?:名称|代号)?');
-  const product = grab('产品(?:名称|型号)?');
+  // 封面无「产品名称」时用「零件名称」兜底（如 B26-A 进气系统）
+  const product = grab('产品(?:名称|型号)?') || grab('零件名称');
 
   let version = cleanOcrVersion(grab('版本(?:号)?'));
   if (!version) version = cleanOcrVersion(text.match(/(?:^|[\s（(])(V[0-9Il|][0-9·•.。]*)/)?.[1] ?? '');
@@ -253,6 +239,34 @@ export function parseHeaderCode(text: string): { customer: string; date: string 
   if (year > now) year -= 100;
   return {
     customer: m[1],
+    date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+  };
+}
+
+/**
+ * OCR 容错版页眉编号解析：扫描件 OCR 会把「SYZX-GW-26-081901」误识为
+ * 「SYZ GW · 26 一 081901」（X 丢失、分隔符 - 被识成 ·/一 等）。
+ * 先把常见误识分隔符归一化为 - 并去掉空白，再按 SYZ[X]-客户-年月日[流水] 匹配。
+ * 只在页眉区域（前 10 个非空行）匹配，避免正文误判。
+ */
+function parseOcrHeaderCode(text: string): { customer: string; date: string } | null {
+  const head = text
+    .split(/\r?\n/)
+    .filter((l) => l.trim())
+    .slice(0, 10)
+    .join('\n');
+  if (!/SYZ/i.test(head)) return null;
+  const norm = head.replace(/[·•。一—–~«»]/g, '-').replace(/\s+/g, '');
+  const m = norm.match(/SYZ-*X?-*([A-Za-z]{2,8})-*(\d{2})-*(\d{2})-*(\d{2})(?:-*(\d{2}))?/i);
+  if (!m) return null;
+  const month = Number(m[3]);
+  const day = Number(m[4]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const now = new Date().getFullYear();
+  let year = Math.floor(now / 100) * 100 + Number(m[2]);
+  if (year > now) year -= 100;
+  return {
+    customer: m[1].toUpperCase(),
     date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
   };
 }
