@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, type CtrUser, type HistoryEntry, type Project } from './api';
 import { getFormula } from './formula/registry';
 import type { FormulaSpec } from './formula/types';
@@ -11,16 +11,17 @@ import { ComparePanel, HistoryPage } from './pages/HistoryPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { TestReportsPage } from './pages/TestReportsPage';
 import { TestsSearchPage } from './pages/TestsSearchPage';
+import { VirtualValidationPage } from './pages/VirtualValidationPage';
 import { LabPage } from './pages/LabPage';
 import { DatabasePage } from './pages/DatabasePage';
 import { KnowledgeBasePage } from './pages/KnowledgeBasePage';
 import { SettingsPage } from './pages/SettingsPage';
 
-type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'testsImport' | 'testsSearch' | 'lab' | 'db' | 'kbe' | 'compare' | 'settings';
-type NavGroupKey = 'theory' | 'tests';
+type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'testsImport' | 'testsSearch' | 'lab' | 'virtualValidation' | 'db' | 'kbe' | 'compare' | 'settings';
 
 interface NavLeaf { key: Page; label: string; icon?: string }
-interface NavGroup { key: NavGroupKey; label: string; icon: string; children: NavLeaf[] }
+/** 分组可嵌套：如「产品验证」下的「试验报告」子分组 */
+interface NavGroup { key: string; label: string; icon: string; children: Array<NavLeaf | NavGroup> }
 type NavItem = NavGroup | NavLeaf;
 
 const NAV: NavItem[] = [
@@ -28,7 +29,7 @@ const NAV: NavItem[] = [
   { key: 'projects', label: '项目管理', icon: '▤' },
   {
     key: 'theory',
-    label: '理论设计',
+    label: '产品理论设计',
     icon: '✎',
     children: [
       { key: 'library', label: '公式库', icon: '∑' },
@@ -36,13 +37,21 @@ const NAV: NavItem[] = [
     ],
   },
   {
-    key: 'tests',
-    label: '试验报告',
-    icon: '⚗',
+    key: 'validation',
+    label: '产品验证',
+    icon: '✓',
     children: [
-      { key: 'testsImport', label: '试验报告导入', icon: '⇪' },
-      { key: 'testsSearch', label: '试验报告检索', icon: '🔍' },
-      { key: 'lab', label: '数据入库与校准', icon: '🧪' },
+      {
+        key: 'reports',
+        label: '试验报告',
+        icon: '⚗',
+        children: [
+          { key: 'testsImport', label: '试验报告导入', icon: '⇪' },
+          { key: 'testsSearch', label: '试验报告检索', icon: '🔍' },
+          { key: 'lab', label: '数据入库与校准', icon: '🧪' },
+        ],
+      },
+      { key: 'virtualValidation', label: '虚拟验证', icon: '◈' },
     ],
   },
   { key: 'db', label: '产品数据库', icon: '🗄' },
@@ -50,11 +59,15 @@ const NAV: NavItem[] = [
   { key: 'settings', label: '设置', icon: '⚙' },
 ];
 
-/** 某页面是否属于某个父组（决定组级高亮） */
+/** 某页面是否属于某个父组（决定组级高亮，支持多级嵌套） */
 function groupContains(group: NavGroup, p: Page): boolean {
-  if (group.key === 'theory') return ['library', 'calc', 'history', 'compare'].includes(p);
-  if (group.key === 'tests') return ['testsImport', 'testsSearch', 'lab'].includes(p);
-  return false;
+  return group.children.some((c) => {
+    if ('children' in c) return groupContains(c, p);
+    if (c.key === p) return true;
+    if (c.key === 'library') return p === 'calc';
+    if (c.key === 'history') return p === 'compare';
+    return false;
+  });
 }
 
 /** 记住每个用户上次选中的项目 */
@@ -70,7 +83,7 @@ export function App() {
   const [libDomain, setLibDomain] = useState<string | undefined>(undefined);
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
-  const [expanded, setExpanded] = useState<Set<NavGroupKey>>(new Set(['theory']));
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(['theory', 'validation']));
 
   // 侧边栏可拖动宽度
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -160,11 +173,55 @@ export function App() {
     testsImport: '试验报告导入',
     testsSearch: '试验报告检索',
     lab: '实验数据入库与模型校准',
+    virtualValidation: '虚拟验证',
     db: '产品数据库',
     kbe: '知识经验库',
     compare: '方案对比',
     settings: '设置',
   };
+
+  /** 递归渲染左侧导航（支持「产品验证 → 试验报告」这类二级分组） */
+  const renderNavItems = (items: Array<NavLeaf | NavGroup>, depth: number): ReactNode[] =>
+    items.map((n): ReactNode => {
+      if ('children' in n) {
+        const open = expanded.has(n.key);
+        const active = groupContains(n, page);
+        const base = depth > 0 ? 'nav-item nav-sub' : 'nav-item';
+        return (
+          <div key={n.key} className="nav-group">
+            <button
+              className={active ? `${base} active` : base}
+              onClick={() => {
+                const next = new Set(expanded);
+                if (next.has(n.key)) next.delete(n.key);
+                else next.add(n.key);
+                setExpanded(next);
+              }}
+            >
+              <span className="nav-icon">{n.icon}</span>
+              {n.label}
+              <span className={open ? 'nav-chev open' : 'nav-chev'}>›</span>
+            </button>
+            {open && renderNavItems(n.children, depth + 1)}
+          </div>
+        );
+      }
+      const active = n.key === page || (n.key === 'library' && page === 'calc');
+      const cls = `nav-item${depth > 0 ? ' nav-sub' : ''}${depth > 1 ? ' nav-sub-2' : ''}${active ? ' active' : ''}`;
+      return (
+        <button
+          key={n.key}
+          className={cls}
+          onClick={() => {
+            if (n.key === 'library') setLibDomain(undefined);
+            setPage(n.key);
+          }}
+        >
+          <span className="nav-icon">{n.icon}</span>
+          {n.label}
+        </button>
+      );
+    });
 
   return (
     <div className="app-shell">
@@ -176,55 +233,7 @@ export function App() {
             <div className="sb-product">{BRAND.productShort}</div>
           </div>
         </div>
-        <nav className="sidebar-nav">
-          {NAV.map((n) => {
-            if ('children' in n) {
-              const isActive = groupContains(n, page);
-              const open = expanded.has(n.key);
-              return (
-                <div key={n.key} className="nav-group">
-                  <button
-                    className={isActive ? 'nav-item active' : 'nav-item'}
-                    onClick={() => {
-                      const next = new Set(expanded);
-                      if (next.has(n.key)) next.delete(n.key);
-                      else next.add(n.key);
-                      setExpanded(next);
-                    }}
-                  >
-                    <span className="nav-icon">{n.icon}</span>
-                    {n.label}
-                    <span className={open ? 'nav-chev open' : 'nav-chev'}>›</span>
-                  </button>
-                  {open &&
-                    n.children.map((c) => (
-                      <button
-                        key={c.key}
-                        className={page === c.key || (c.key === 'library' && page === 'calc') ? 'nav-item active nav-sub' : 'nav-item nav-sub'}
-                        onClick={() => {
-                          if (c.key === 'library') setLibDomain(undefined);
-                          setPage(c.key);
-                        }}
-                      >
-                        <span className="nav-icon">{c.icon}</span>
-                        {c.label}
-                      </button>
-                    ))}
-                </div>
-              );
-            }
-            return (
-              <button
-                key={n.key}
-                className={page === n.key ? 'nav-item active' : 'nav-item'}
-                onClick={() => setPage(n.key)}
-              >
-                <span className="nav-icon">{n.icon}</span>
-                {n.label}
-              </button>
-            );
-          })}
-        </nav>
+        <nav className="sidebar-nav">{renderNavItems(NAV, 0)}</nav>
         <div className="sidebar-footer">
           <div className="sf-version">v{BRAND.version}</div>
           <div className="sf-copy">{BRAND.companyName}</div>
@@ -300,6 +309,7 @@ export function App() {
           {page === 'testsImport' && <TestReportsPage user={user} currentProject={currentProject} />}
           {page === 'testsSearch' && <TestsSearchPage user={user} />}
           {page === 'lab' && <LabPage user={user} />}
+          {page === 'virtualValidation' && <VirtualValidationPage />}
           {page === 'db' && <DatabasePage user={user} />}
           {page === 'kbe' && <KnowledgeBasePage user={user} />}
           {page === 'compare' && compare && (
