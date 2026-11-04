@@ -394,6 +394,15 @@ describe('进气阻力：读取流量与单位', () => {
     expect(parseFlow('风量　≤　1200m3／h')).toEqual({ flow: '1200', flowUnit: 'm³/h' });
   });
 
+  it('接受准则句式：在额定空气体积流量下 260kg/h', () => {
+    expect(parseFlow('在额定空气体积流量下 260kg/h，进气系统阻力≤3 kPa')).toEqual({
+      flow: '260',
+      flowUnit: 'kg/h',
+    });
+    // OCR 把数字与单位拆到不同行
+    expect(parseFlow('在额定空气体积流量\n下 260\nkg/h')).toEqual({ flow: '260', flowUnit: 'kg/h' });
+  });
+
   it('非进气阻力的报告不保留流量', () => {
     const meta = parseMetaOnly('项目名称：压力损失\n接受标准：≤3.5kPa@370kg/h', 'x.pdf');
     expect(meta.testItem).toBe('压力损失');

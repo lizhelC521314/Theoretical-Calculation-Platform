@@ -171,15 +171,17 @@ export function despaceOcrText(text: string): string {
 }
 
 /**
- * 从报告中读取流量与单位：进气阻力报告的接受标准形如「进气系统阻力≤3.5kPa@370kg/h」，
- * 取「@」后面的数值与单位（也兼容扫描件 OCR 把 m³ 识别成 m3 的情况）。
+ * 从报告中读取流量与单位：进气阻力报告的接受标准形如「在额定空气体积流量下260kg/h」
+ * 或「3.5kPa@370kg/h」，取数值与单位（兼容扫描件 OCR 的 m3、全角斜杠、换行/空格拆词）。
  * 找不到返回空串。
  */
 export function parseFlow(text: string): { flow: string; flowUnit: string } {
-  const compact = text.replace(/[ \t]+/g, '');
-  const m = compact.match(/(\d+(?:\.\d+)?)(kg[\/／]h|m[³3][\/／]h)/i);
+  // 去掉所有空白（含换行）：OCR 常把「260」「kg/h」拆成多个词甚至两行
+  const compact = text.replace(/\s+/g, '');
+  const m = compact.match(/(\d+(?:\.\d+)?)(?:kg|KG|Kg)[\/／|丨]h|(\d+(?:\.\d+)?)m[³3][\/／|丨]h/i);
   if (!m) return { flow: '', flowUnit: '' };
-  return { flow: m[1], flowUnit: m[2].toLowerCase().startsWith('m') ? 'm³/h' : 'kg/h' };
+  const flow = m[1] ?? m[2];
+  return { flow, flowUnit: m[2] ? 'm³/h' : 'kg/h' };
 }
 
 /** 表格里的「试验项目」标签（OCR 可能在字间插空格） */
