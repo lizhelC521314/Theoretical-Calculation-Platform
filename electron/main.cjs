@@ -707,28 +707,66 @@ function extractTestItemFromWords(words) {
 
     const first = rw[startIdx];
     const last = rw[endIdx];
-    const nextHeader = rw[endIdx + 1];
-    const left = first.x - medH * 0.3;
-    // 右边界取右侧表头词的起点，避免把「数量」「试验地点」列的内容算进来
-    const right = nextHeader ? nextHeader.x - 2 : last.x + last.w + medH * 0.5;
 
-    const cand = ws.filter((w) => {
-      if (w.x >= first.x && w.x <= last.x + last.w && Math.abs((w.y + w.h / 2) - row.cy) <= tol) return false;
+    // 表头按列间距切成单元格，验证它确实是网格表头（除「试验项目」外还有 ≥2 个表头关键字）；
+    // 表单式（标签+值同行，如「试验项目 压力损失」）不在此处理，交给渲染进程文本解析
+    const splitCells = (items) => {
+      const out = [];
+      let cur = null;
+      let prev = null;
+      for (const w of items) {
+        if (!cur) cur = { text: w.text, x0: w.x, x1: w.x + w.w };
+        else if (w.x - prev.x - prev.w > medH * 0.8) {
+          out.push(cur);
+          cur = { text: w.text, x0: w.x, x1: w.x + w.w };
+        } else {
+          cur.text += w.text;
+          cur.x1 = w.x + w.w;
+        }
+        prev = w;
+      }
+      if (cur) out.push(cur);
+      return out;
+    };
+    const headerCells = splitCells(rw);
+    const gridCol = headerCells.findIndex((c) => compact(c.text).includes('试验项目'));
+    const otherHeaderHits = headerCells.filter(
+      (c, idx) => idx !== gridCol && /(数量|样件编号|样品编号|试验地点|判定|备注|试验设备|规格型号|序号)/.test(compact(c.text)),
+    ).length;
+    if (gridCol < 0 || otherHeaderHits < 2) continue;
+
+    // 右边界取右侧表头列的起点，避免把「数量」「试验地点」列的内容算进来
+    const rightCell = headerCells[gridCol + 1];
+    const right = rightCell ? rightCell.x0 - 2 : last.x + last.w + medH * 0.5;
+
+    // 表头下方的词按行聚合，逐行按列切分；跳过纯数字（序号列），取第一个像试验项目的单元格
+    const dataWords = ws.filter((w) => {
       const cx = w.x + w.w / 2;
       const cy = w.y + w.h / 2;
-      return cy >= row.cy - tol && cx >= left && cx <= right;
+      return cy > row.cy + tol * 0.25 && cx < right;
     });
-    if (!cand.length) continue;
+    if (!dataWords.length) continue;
 
-    // 取列内最近的一行（表头/数据被合并时即同一行）
-    const topCy = Math.min(...cand.map((w) => w.y + w.h / 2));
-    const picked = cand
-      .filter((w) => Math.abs((w.y + w.h / 2) - topCy) <= tol)
-      .sort((a, b) => a.x - b.x)
-      .map((w) => w.text)
-      .join('');
-    const value = compact(picked).replace(/^[：:]+/, '');
-    if (isLikelyTestItemCell(value)) return value;
+    const drows = [];
+    for (const w of [...dataWords].sort((a, b) => a.y + a.h / 2 - (b.y + b.h / 2))) {
+      const cy = w.y + w.h / 2;
+      const r = drows.find((d) => Math.abs(d.cy - cy) <= tol);
+      if (r) {
+        r.words.push(w);
+        r.cy = (r.cy * (r.words.length - 1) + cy) / r.words.length;
+      } else {
+        drows.push({ cy, words: [w] });
+      }
+    }
+    drows.sort((a, b) => a.cy - b.cy);
+
+    for (let k = 0; k < drows.length && k < 4; k++) {
+      const cells = splitCells([...drows[k].words].sort((a, b) => a.x - b.x));
+      for (const c of cells) {
+        const value = compact(c.text).replace(/^[：:]+/, '');
+        if (isLikelyTestItemCell(value)) return value;
+      }
+    }
   }
   return '';
 }

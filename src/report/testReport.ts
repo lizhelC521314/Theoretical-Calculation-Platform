@@ -212,9 +212,14 @@ export function parseTestItemFromTable(text: string): string {
     if (headerHits(cells) < 2) continue; // 不是表头行
     for (let j = i + 1; j < Math.min(lines.length, i + 4); j++) {
       const row = splitCells(lines[j]);
-      if (col >= row.length) continue;
-      const v = squeezeCell(row[col]);
-      if (isLikelyTestItem(v)) return v;
+      // 单格行通常是相邻列（如试验地点）换行显示的内容，跳过以免误取
+      if (row.length < 2) continue;
+      // 数据行可能比表头多「序号」列，故同时尝试 col 与 col+1
+      for (const idx of [col, col + 1]) {
+        if (idx >= row.length) continue;
+        const v = squeezeCell(row[idx]);
+        if (isLikelyTestItem(v)) return v;
+      }
     }
   }
 
