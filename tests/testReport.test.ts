@@ -184,12 +184,14 @@ describe('扫描件 OCR 文本解析', () => {
     '机 密   授 权 使 用 ， 禁 止 私 自 拍 照 、 截 屏 、 夕 卜 发',
   ].join('\n');
 
-  it('真实封面：页眉容错解析日期 + 客户取自封面客户名称并规范化 + 零件名称兜底', () => {
+  it('真实封面：页眉容错解析日期 + 客户取自封面客户名称并规范化 + 项目/产品从零件名称拆分', () => {
     const meta = parseOcrMeta(REAL_OCR_ROWS, 'B26-A进气阻力.pdf');
     expect(meta.customer).toBe('长城汽车');
     expect(meta.date).toBe(`${expectedYear}-08-19`);
-    expect(meta.project).toBe('压力损失');
-    expect(meta.product).toBe('B26-A进气系统');
+    // 项目 = 零件名称字母数字段（优先于项目名称标签）
+    expect(meta.project).toBe('B26-A');
+    // 产品 = 零件名称中字母数字段之外的文字
+    expect(meta.product).toBe('进气系统');
     expect(meta.version).toBe('');
   });
 });

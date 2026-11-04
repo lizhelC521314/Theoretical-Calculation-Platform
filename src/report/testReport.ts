@@ -187,9 +187,12 @@ export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
     grab('客户(?:名称)?') || grab('(?:委托方|委托单位|甲方|送样单位)'),
   );
 
-  const project = grab('项目(?:名称|代号)?');
-  // 封面无「产品名称」时用「零件名称」兜底（如 B26-A 进气系统）
-  const product = grab('产品(?:名称|型号)?') || grab('零件名称');
+  // 项目：零件名称中的字母数字段（如 B26-A、CS75-2025）
+  // 产品：优先「产品名称」标签，否则取零件名称中字母数字段之外的文字部分
+  const partName = grab('零件名称');
+  const split = splitPartName(partName);
+  const project = split.project || grab('项目(?:名称|代号)?');
+  const product = grab('产品(?:名称|型号)?') || split.product;
 
   let version = cleanOcrVersion(grab('版本(?:号)?'));
   if (!version) version = cleanOcrVersion(text.match(/(?:^|[\s（(])(V[0-9Il|][0-9·•.。]*)/)?.[1] ?? '');
@@ -216,6 +219,25 @@ function normalizeDate(raw: string): string {
   const m = raw.match(/(20\d{2})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})/);
   if (!m) return '';
   return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+}
+
+/**
+ * 从零件名称（如 "B26-A 进气系统" / "CS75-2025 空气滤清器"）中拆分：
+ * 字母数字段 → 项目（project），其余文字 → 产品（product）。
+ * 找不到字母数字段时 project 返回空串，product 取原值。
+ */
+function splitPartName(value: string): { project: string; product: string } {
+  if (!value) return { project: '', product: '' };
+  const m = value.match(/[A-Za-z0-9]+(?:[-_\.][A-Za-z0-9]+)*/g);
+  if (!m || !m.length) return { project: '', product: value.trim() };
+  const code = m.join('-').trim();
+  // 从原值中去掉所有字母数字段（含连接符前后空格），剩下的就是产品名
+  let rest = value;
+  for (const seg of m) {
+    rest = rest.replace(seg, ' ');
+  }
+  rest = rest.replace(/\s+/g, ' ').trim();
+  return { project: code, product: rest };
 }
 
 /**
@@ -299,8 +321,15 @@ export function parseMetaOnly(text: string, fileName: string): PdfReportMeta {
   );
 
   // ------- 项目 / 产品 -------
-  let project = findField(text, /项目(?:名称|代号)?\s*[：:]\s*([^\n]{1,60})/) || '';
-  let product = findField(text, /产品(?:名称|型号)?\s*[：:]\s*([^\n]{1,60})/) || '';
+  // 项目：零件名称中的字母数字段（如 B26-A、CS75-2025）
+  // 产品：优先「产品名称」标签，否则取零件名称中字母数字段之外的文字部分
+  const partName =
+    findField(text, /零件(?:名称)?\s*[：:]\s*([^\n]{1,80})/) ||
+    findField(text, /样件(?:名称|编号)?\s*[：:]\s*([^\n]{1,80})/) ||
+    '';
+  const split = splitPartName(partName);
+  let project = split.project || findField(text, /项目(?:名称|代号)?\s*[：:]\s*([^\n]{1,60})/) || '';
+  let product = findField(text, /产品(?:名称|型号)?\s*[：:]\s*([^\n]{1,60})/) || split.product;
 
   // ------- 版本（显式标签 优先 → 正文 V 号兜底 → 文件名兜底） -------
   let version =
