@@ -37,6 +37,7 @@ const bridge = {
     list: (p) => ipcRenderer.invoke('db:list', p),
     read: (p) => ipcRenderer.invoke('db:read', p),
     pdfData: (filePath) => ipcRenderer.invoke('db:pdfData', filePath),
+    remove: (p) => ipcRenderer.invoke('db:delete', p),
     ping: () => ipcRenderer.invoke('db:ping'),
   },
   app: {

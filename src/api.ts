@@ -100,6 +100,7 @@ interface CtrApi {
     list(p: { libType: 'calc' | 'test' | 'trusted' | 'theory' | 'design' | 'fmea' }): Promise<{ ok: boolean; dir?: string; files?: { name: string; size: number; mtime: string; fullPath: string }[]; message?: string }>;
     read(p: { fullPath: string }): Promise<{ ok: boolean; rows?: unknown[][]; sheetCount?: number; message?: string }>;
     pdfData(filePath: string): Promise<{ ok: boolean; fileUrl?: string; size?: number; message?: string }>;
+    remove(p: { fullPath: string }): Promise<{ ok: boolean; message?: string }>;
     ping(): Promise<{ reachable: boolean; root: string; calc: string; test: string; trusted: string; kbeRoot: string; kbeTheory: string; kbeDesign: string; kbeFmea: string }>;
   };
   app: {
@@ -201,6 +202,7 @@ const fallback: CtrApi = {
     list: async () => ({ ok: false, files: [] }),
     read: async () => ({ ok: false, rows: [] }),
     pdfData: async () => ({ ok: false, message: '浏览器调试模式无法读取 UNC 路径 PDF' }),
+    remove: async () => ({ ok: false, message: '浏览器调试模式无法删除服务器文件' }),
     ping: async () => ({ reachable: false, root: '', calc: '', test: '', trusted: '', kbeRoot: '', kbeTheory: '', kbeDesign: '', kbeFmea: '' }),
   },
   app: {

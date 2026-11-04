@@ -446,6 +446,25 @@ ipcMain.handle('db:read', async (_e, payload) => {
   }
 });
 
+/** 删除归档文件（仅限已知库目录内的文件，防止越权删除） */
+ipcMain.handle('db:delete', async (_e, payload) => {
+  try {
+    const { fullPath } = payload || {};
+    if (!fullPath || !fs.existsSync(fullPath)) return { ok: false, message: '文件不存在' };
+    const allowedRoots = [UNC_CALC_LIB, UNC_TEST_LIB, UNC_TRUSTED, KBE_THEORY, KBE_DESIGN, KBE_FMEA];
+    const normalized = path.resolve(fullPath).toLowerCase();
+    const inLib = allowedRoots.some((root) => {
+      const r = path.resolve(root).toLowerCase();
+      return normalized.startsWith(r + path.sep);
+    });
+    if (!inLib) return { ok: false, message: '仅允许删除数据库目录内的归档文件' };
+    fs.unlinkSync(fullPath);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
 /** 数据库连通性自检（UNC 根 + 知识库根） */
 ipcMain.handle('db:ping', async () => {
   return {

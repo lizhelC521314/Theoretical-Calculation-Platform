@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type CtrUser } from '../api';
 import { parseArchiveName } from '../report/db';
 
@@ -119,23 +119,30 @@ export function TestsSearchPage({ user: _user }: Props) {
   const xlsxCount = files.filter((f) => !isPdf(f)).length;
   const pdfCount = files.filter((f) => isPdf(f)).length;
 
+  // 预览请求序号：防止快速切换行时，较慢的旧请求覆盖新选中的内容（"选中后不能立即显示"的根因）
+  const reqSeq = useRef(0);
+
   const selectFile = useCallback(async (f: DbFile) => {
+    const seq = ++reqSeq.current;
     setSelected(f);
     setItems([]);
     setPdfText('');
     setPdfFileUrl('');
     setError('');
     setReadBusy(true);
+    const stale = () => seq !== reqSeq.current;
     try {
       if (isPdf(f)) {
         // 1) 优先尝试提取文字层（文字版 PDF）
         const textRes = await api.pdf.extractText(f.fullPath);
+        if (stale()) return;
         const hasText = textRes.ok && typeof textRes.text === 'string' && textRes.text.trim().length > 0;
         if (hasText) {
           setPdfText(textRes.text!);
         } else {
           // 2) 文字层为空 → 扫描版/图片型 PDF → 主进程拷贝到临时目录返回 file:// URL
           const dataRes = await api.db.pdfData(f.fullPath);
+          if (stale()) return;
           if (dataRes.ok && dataRes.fileUrl) {
             setPdfFileUrl(dataRes.fileUrl);
           } else {
@@ -145,6 +152,7 @@ export function TestsSearchPage({ user: _user }: Props) {
       } else {
         // XLSX：db:read 解析 Excel 行 → parseTestRows 还原测试项
         const res = await api.db.read({ fullPath: f.fullPath });
+        if (stale()) return;
         if (res.ok) {
           setItems(parseTestRows(res.rows || []));
         } else {
@@ -152,9 +160,9 @@ export function TestsSearchPage({ user: _user }: Props) {
         }
       }
     } catch (e) {
-      setError(`读取失败：${e instanceof Error ? e.message : String(e)}`);
+      if (!stale()) setError(`读取失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      setReadBusy(false);
+      if (!stale()) setReadBusy(false);
     }
   }, []);
 
@@ -163,6 +171,36 @@ export function TestsSearchPage({ user: _user }: Props) {
     const res = await api.app.openPath(f.fullPath);
     if (!res.ok) setError(`无法用本地程序打开：${res.message || '未知错误'}`);
   }, []);
+
+  /** 删除归档报告：二次确认 → 主进程删除 → 刷新列表并清理选中态 */
+  const removeFile = useCallback(
+    async (f: DbFile) => {
+      if (!window.confirm(`确定删除该实验报告吗？\n\n${f.name}\n\n删除后无法恢复。`)) return;
+      setBusy(true);
+      setError('');
+      try {
+        const res = await api.db.remove({ fullPath: f.fullPath });
+        if (res.ok) {
+          if (selected?.fullPath === f.fullPath) {
+            reqSeq.current += 1; // 使进行中的预览请求失效
+            setSelected(null);
+            setItems([]);
+            setPdfText('');
+            setPdfFileUrl('');
+            setReadBusy(false);
+          }
+          await refresh();
+        } else {
+          setError(`删除失败：${res.message || '未知错误'}`);
+        }
+      } catch (e) {
+        setError(`删除失败：${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refresh, selected],
+  );
 
   // 列表/预览水平拖动
   const handleListResize = useCallback((e: React.MouseEvent) => {
@@ -248,6 +286,7 @@ export function TestsSearchPage({ user: _user }: Props) {
                 <th style={{ width: '9%' }}>日期</th>
                 <th style={{ width: '9%' }}>大小</th>
                 <th>完整文件名</th>
+                <th style={{ width: 56 }}>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -259,10 +298,11 @@ export function TestsSearchPage({ user: _user }: Props) {
                   <tr
                     key={f.fullPath}
                     className={active ? 'active' : ''}
-                    onMouseEnter={() => selectFile(f)}
-                    onClick={() => selectFile(f)}
+                    onClick={() => {
+                      if (selected?.fullPath !== f.fullPath) selectFile(f);
+                    }}
                     onDoubleClick={() => openFile(f)}
-                    title="双击用本地软件打开"
+                    title="单击预览，双击用本地软件打开"
                   >
                     <td>
                       {isP ? (
@@ -278,12 +318,25 @@ export function TestsSearchPage({ user: _user }: Props) {
                     <td>{p.date || '—'}</td>
                     <td>{(f.size / 1024).toFixed(1)} KB</td>
                     <td className="mono">{f.name}</td>
+                    <td className="center">
+                      <button
+                        className="btn-link danger"
+                        title="删除该报告"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeFile(f);
+                        }}
+                        onDoubleClick={(e) => e.stopPropagation()}
+                      >
+                        删除
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="center settings-hint">
+                  <td colSpan={9} className="center settings-hint">
                     {files.length === 0 ? '实验库暂无归档报告，请先在「实验报告导入」模块归档' : '无匹配结果'}
                   </td>
                 </tr>
@@ -300,7 +353,7 @@ export function TestsSearchPage({ user: _user }: Props) {
               <div className="pe-icon">🔍</div>
               <div className="pe-title">从上方列表选中一份实验报告</div>
               <div className="pe-sub">
-                鼠标悬停或点击列表行即可预览。PDF 归档显示原文文字层内容，XLSX 归档解析测试项明细。
+                点击列表行即可预览。文字版 PDF 显示文字层内容，图片版（扫描件）PDF 显示原文页面，XLSX 归档解析测试项明细。
                 {reachable === false && (
                   <span className="pe-warn">浏览器调试模式下无法访问服务器，请在桌面版安装包中使用检索功能。</span>
                 )}
