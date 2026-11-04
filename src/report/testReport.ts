@@ -3,10 +3,10 @@ import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 /**
- * 实验报告模块
+ * 试验报告模块
  *
- * 功能：读取文字版 PDF 实验报告 → 按标题/字段识别项目、产品、版本、日期 →
- * 按关键字识别测试项目与实测结果 → 生成「实验测试表」Excel（格式参考计算书汇总表）。
+ * 功能：读取文字版 PDF 试验报告 → 按标题/字段识别项目、产品、版本、日期 →
+ * 按关键字识别测试项目与实测结果 → 生成「试验测试表」Excel（格式参考计算书汇总表）。
  */
 
 GlobalWorkerOptions.workerSrc = workerSrc;
@@ -50,7 +50,7 @@ export interface TestReportMeta {
 export interface PdfReportMeta {
   customer: string;
   project: string;
-  /** 实验项目：取自封面「项目名称」一栏，如「压力损失」 */
+  /** 试验项目：取自封面「项目名称」一栏，如「压力损失」 */
   testItem: string;
   product: string;
   version: string;
@@ -153,7 +153,7 @@ export function despaceOcrText(text: string): string {
     .trim();
 }
 
-/** 表格里的「试验项目 / 实验项目」标签（OCR 可能在字间插空格） */
+/** 表格里的「试验项目」标签（OCR 可能在字间插空格） */
 const TEST_ITEM_LABEL = /[试实]\s*验\s*项\s*目/;
 
 /** 表格中常见的表头关键字：用于区分「表头行」与「标签+值」行 */
@@ -178,7 +178,7 @@ function isLikelyTestItem(value: string): boolean {
 }
 
 /**
- * 从「试验结果」表格中提取实验项目（优先级高于封面「项目名称」）：
+ * 从「试验结果」表格中提取试验项目（优先级高于封面「项目名称」）：
  *  - 标签+值同行：「试验项目   压力损失   设备有效日期   …」
  *  - 表头列：表头「No. 试验项目 数量 …」→ 下一非空行同列取「进气阻力」
  * 找不到返回空串。
@@ -235,7 +235,7 @@ function cleanOcrVersion(raw: string): string {
 /** OCR 文本专用元字段解析：封面页先 despace，按「下一已知标签」截止抓取 */
 export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
   // 多页 OCR 时页与页之间以空行分隔：元字段只从封面页取，避免试验结果表里的
-  // 日期/委托方等内容污染字段；实验项目则在全文中查找（表格通常在后面几页）
+  // 日期/委托方等内容污染字段；试验项目则在全文中查找（表格通常在后面几页）
   const firstPage = rawText.split(/\n{2,}/)[0] || rawText;
   // 页眉编号在原始带空格文本上解析（正则本身兼容空格），避免 despace 后日期数字粘连；
   // 精确版失败时走 OCR 容错版（X 丢失、分隔符被误识为 ·/一 等）
@@ -243,7 +243,7 @@ export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
   const text = despaceOcrText(firstPage);
 
   const KNOWN_LABELS =
-    '(?:客户名称|委托单位|送样单位|项目名称|项目代号|产品名称|产品型号|零件名称|零部件号|试验类型|报告编号|样品编号|样件编号|报告日期|试验日期|实验日期|检测日期|版本号|客户|委托方|甲方|项目|产品|版本|日期|编号)';
+    '(?:客户名称|委托单位|送样单位|项目名称|项目代号|产品名称|产品型号|零件名称|零部件号|试验类型|报告编号|样品编号|样件编号|报告日期|试验日期|检测日期|版本号|客户|委托方|甲方|项目|产品|版本|日期|编号)';
   const NEXT_LABEL = `(?=(?:${KNOWN_LABELS}\\s*[：:.．]?|[一-鿿]{2,6}[：:]|\\s|$))`;
 
   const grab = (label: string): string => {
@@ -258,7 +258,7 @@ export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
     grab('客户(?:名称)?') || grab('(?:委托方|委托单位|甲方|送样单位)'),
   );
 
-  // 实验项目：优先取「试验结果」表格里的「试验项目」，否则回退封面「项目名称」一栏
+  // 试验项目：优先取「试验结果」表格里的「试验项目」，否则回退封面「项目名称」一栏
   // 项目：零件名称中的字母数字段（如 B26-A、CS75-2025）
   // 产品：优先「产品名称」标签，否则取零件名称中字母数字段之外的文字部分
   const tableItem = parseTestItemFromTable(rawText);
@@ -402,7 +402,7 @@ export function parseMetaOnly(text: string, fileName: string): PdfReportMeta {
     findField(text, /样件(?:名称|编号)?\s*[：:]\s*([^\n]{1,80})/) ||
     '';
   const split = splitPartName(partName);
-  // 实验项目：优先取「试验结果」表格里的「试验项目」，否则回退封面「项目名称」一栏
+  // 试验项目：优先取「试验结果」表格里的「试验项目」，否则回退封面「项目名称」一栏
   const testItem =
     parseTestItemFromTable(text) || findField(text, /项目(?:名称|代号)?\s*[：:]\s*([^\n]{1,60})/) || '';
   let project = split.project || testItem;
@@ -453,7 +453,7 @@ export function missingMetaFields(meta: PdfReportMeta): string[] {
 }
 
 /**
- * 解析实验报告文本：识别项目/产品/版本/日期，并按关键字抓取测试项。
+ * 解析试验报告文本：识别项目/产品/版本/日期，并按关键字抓取测试项。
  * 识别不出时保留空值，交由界面人工校对。
  */
 export function parseTestReport(text: string, fileName: string, keywords: string[]): Omit<TestReport, 'id'> {
@@ -566,7 +566,7 @@ export function testReportFileName(meta: TestReportMeta): string {
 }
 
 /**
- * 生成「实验测试表」Excel（base64）。
+ * 生成「试验测试表」Excel（base64）。
  * 版式与计算书附表一致：信息行 + 双行表头 + 每项测试的纵向合并块，
  * 测试条件与测试结果各跨两列。
  */
@@ -575,7 +575,7 @@ export async function buildTestXlsxBase64(meta: TestReportMeta, items: TestItem[
   wb.creator = '理论计算平台';
   wb.created = new Date();
 
-  const ws = wb.addWorksheet('实验测试表', {
+  const ws = wb.addWorksheet('试验测试表', {
     views: [{ state: 'frozen', ySplit: 3 }],
     pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
   });
@@ -637,7 +637,7 @@ export async function buildTestXlsxBase64(meta: TestReportMeta, items: TestItem[
   });
 
   const note = ws.getRow(rowNo);
-  note.getCell(1).value = '注：本表由实验报告自动识别并经人工校对生成，用于与理论计算结果对比。';
+  note.getCell(1).value = '注：本表由试验报告自动识别并经人工校对生成，用于与理论计算结果对比。';
   note.getCell(1).font = { name: '宋体', size: 9, color: { argb: 'FF556375' } };
   note.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
 

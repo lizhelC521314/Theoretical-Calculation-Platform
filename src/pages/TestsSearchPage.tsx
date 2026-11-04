@@ -20,7 +20,7 @@ interface TestItem {
   resultText: string;
 }
 
-/** 解析实验测试表 xlsx 的行，得到测试项列表 */
+/** 解析试验测试表 xlsx 的行，得到测试项列表 */
 function parseTestRows(rows: unknown[][]): TestItem[] {
   if (!Array.isArray(rows) || rows.length <= 3) return [];
   const rows2 = rows.slice(3);
@@ -88,9 +88,9 @@ export function TestsSearchPage({ user: _user }: Props) {
       setReachable(ping.reachable);
       const res = await api.db.list({ libType: 'test' });
       if (res.ok) setFiles(res.files || []);
-      else setError(res.message || '读取实验库失败');
+      else setError(res.message || '读取试验库失败');
     } catch (e) {
-      setError(`读取实验库失败：${e instanceof Error ? e.message : String(e)}`);
+      setError(`读取试验库失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -140,7 +140,7 @@ export function TestsSearchPage({ user: _user }: Props) {
       if (res.ok) {
         setItems(parseTestRows(res.rows || []));
       } else {
-        setError(`实验测试表读取失败：${res.message || '无法读取'}`);
+        setError(`试验测试表读取失败：${res.message || '无法读取'}`);
       }
     } catch (e) {
       if (!stale()) setError(`读取失败：${e instanceof Error ? e.message : String(e)}`);
@@ -158,7 +158,7 @@ export function TestsSearchPage({ user: _user }: Props) {
   /** 删除归档报告：二次确认 → 主进程删除 → 刷新列表并清理选中态 */
   const removeFile = useCallback(
     async (f: DbFile) => {
-      if (!window.confirm(`确定删除该实验报告吗？\n\n${f.name}\n\n删除后无法恢复。`)) return;
+      if (!window.confirm(`确定删除该试验报告吗？\n\n${f.name}\n\n删除后无法恢复。`)) return;
       setBusy(true);
       setError('');
       try {
@@ -216,7 +216,7 @@ export function TestsSearchPage({ user: _user }: Props) {
     <div className="test-search">
       <div className="settings-card">
         <div className="ts-head">
-          <h3>实验报告检索</h3>
+          <h3>试验报告检索</h3>
           <div className="ts-status">
             <span>
               服务器状态：
@@ -262,7 +262,7 @@ export function TestsSearchPage({ user: _user }: Props) {
                 <th style={{ width: 64 }}>类型</th>
                 <th style={{ width: '12%' }}>客户</th>
                 <th style={{ width: '12%' }}>项目</th>
-                <th style={{ width: '12%' }}>实验项目</th>
+                <th style={{ width: '12%' }}>试验项目</th>
                 <th style={{ width: '11%' }}>产品</th>
                 <th style={{ width: '7%' }}>版本</th>
                 <th style={{ width: '9%' }}>日期</th>
@@ -320,7 +320,7 @@ export function TestsSearchPage({ user: _user }: Props) {
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={9} className="center settings-hint">
-                    {files.length === 0 ? '实验库暂无归档报告，请先在「实验报告导入」模块归档' : '无匹配结果'}
+                    {files.length === 0 ? '试验库暂无归档报告，请先在「试验报告导入」模块归档' : '无匹配结果'}
                   </td>
                 </tr>
               )}
@@ -334,7 +334,7 @@ export function TestsSearchPage({ user: _user }: Props) {
           {!selected && (
             <div className="preview-empty">
               <div className="pe-icon">🔍</div>
-              <div className="pe-title">从上方列表选中一份实验报告</div>
+              <div className="pe-title">从上方列表选中一份试验报告</div>
               <div className="pe-sub">
                 点击列表行即可预览。文字版 PDF 显示文字层内容，图片版（扫描件）PDF 显示原文页面，XLSX 归档解析测试项明细。
                 {reachable === false && (
@@ -351,7 +351,7 @@ export function TestsSearchPage({ user: _user }: Props) {
                 <div className="preview-meta">
                   {selectedMeta.customer && <span className="chip">客户：{selectedMeta.customer}</span>}
                   <span className="chip">项目：{selectedMeta.project || '—'}</span>
-                  {selectedMeta.testItem && <span className="chip">实验项目：{selectedMeta.testItem}</span>}
+                  {selectedMeta.testItem && <span className="chip">试验项目：{selectedMeta.testItem}</span>}
                   <span className="chip">产品：{selectedMeta.product || '—'}</span>
                   <span className="chip">版本：{selectedMeta.version || '—'}</span>
                   <span className="chip">日期：{selectedMeta.date || '—'}</span>
@@ -364,7 +364,7 @@ export function TestsSearchPage({ user: _user }: Props) {
               {selectedIsPdf ? (
                 <PdfViewer filePath={selected.fullPath} />
               ) : readBusy ? (
-                <div className="preview-loading">正在读取实验测试表…</div>
+                <div className="preview-loading">正在读取试验测试表…</div>
               ) : items.length === 0 ? (
                 <div className="preview-empty">
                   <div className="pe-icon">📋</div>

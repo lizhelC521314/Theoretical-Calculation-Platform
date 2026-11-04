@@ -328,7 +328,7 @@ function pdfLinesFromItems(items) {
   return lines.join('\n');
 }
 
-/** 读取实验报告 PDF 文本（主进程读取，规避渲染进程 file:// 下的 worker 限制） */
+/** 读取试验报告 PDF 文本（主进程读取，规避渲染进程 file:// 下的 worker 限制） */
 ipcMain.handle('test:pdfText', async (_e, filePath) => {
   try {
     if (!filePath || !fs.existsSync(filePath)) return { ok: false, message: '文件不存在' };
@@ -650,7 +650,7 @@ async function ocrImageToText(img) {
  * 扫描件 OCR：主进程逐页提取内嵌扫描图（pdfjs operator list，无需 canvas/worker），
  * 编码为 BMP 后调用 Windows 系统 OCR（WinRT Windows.Media.Ocr，离线、支持中文），
  * 按词坐标还原来版面行返回文本。封面必读；之后逐页识别直到找到「试验项目」表格（最多 8 页），
- * 因为实验项目优先取试验结果表里的值，单靠封面「项目名称」不一定准确。
+ * 因为试验项目优先取试验结果表里的值，单靠封面「项目名称」不一定准确。
  * 通过 PowerShell -EncodedCommand 执行，避免编码与转义问题。
  * 注意：WinRT 异步对象在 PowerShell 里是原始 COM 对象（Status/GetResults 不可直接用），
  * 必须经 WindowsRuntimeSystemExtensions.AsTask 反射包装；泛型重载按参数类型名

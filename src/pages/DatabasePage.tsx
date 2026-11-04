@@ -54,7 +54,7 @@ function parseCalcRows(rows: unknown[][]): { title: string; params: string; resu
   return out;
 }
 
-/** 解析实验测试表，得到测试项列表 */
+/** 解析试验测试表，得到测试项列表 */
 function parseTestRows(rows: unknown[][]): { name: string; conditionText: string; resultText: string; keywords: string[] }[] {
   if (!Array.isArray(rows) || rows.length <= 3) return [];
   const rows2 = rows.slice(3);
@@ -138,7 +138,7 @@ export function DatabasePage({ user }: Props) {
     [calcFiles, testFiles],
   );
 
-  /** 选一份计算书 → 自动匹配实验报告 → 生成可信资产 */
+  /** 选一份计算书 → 自动匹配试验报告 → 生成可信资产 */
   const buildTrustedFor = async (calc: DbFile) => {
     const calcParsed = parseArchiveName(calc.name);
     const targetKey = productKey(calcParsed.project, calcParsed.product, calcParsed.version);
@@ -149,7 +149,7 @@ export function DatabasePage({ user }: Props) {
         return productKey(p.project, p.product, p.version) === targetKey;
       });
     if (matchedTests.length === 0) {
-      showToast(`未找到项目-产品-版本匹配的实验测试表（xlsx），请先在实验报告模块归档`);
+      showToast(`未找到项目-产品-版本匹配的试验测试表（xlsx），请先在试验报告模块归档`);
       return;
     }
 
@@ -204,12 +204,12 @@ export function DatabasePage({ user }: Props) {
           <b>{reachable === null ? '检测中…' : reachable ? '可达' : '不可达，请检查网络或 UNC 路径'}</b>
         </div>
         <div className="kv"><span>计算库</span><b style={{ fontSize: 12 }}>{UNC_CALC_LIB}</b></div>
-        <div className="kv"><span>实验库</span><b style={{ fontSize: 12 }}>{UNC_TEST_LIB}</b></div>
+        <div className="kv"><span>试验库</span><b style={{ fontSize: 12 }}>{UNC_TEST_LIB}</b></div>
         <div className="kv"><span>可信资产库</span><b style={{ fontSize: 12 }}>{UNC_TRUSTED}</b></div>
         <div className="kv"><span>当前登录</span><b>{user.displayName || user.username}</b></div>
         <div className="db-stats">
           <span className="chip">计算书 {calcFiles.length}</span>
-          <span className="chip">实验报告 {testFiles.length}</span>
+          <span className="chip">试验报告 {testFiles.length}</span>
           <span className="chip">已自动匹配 {totalMatches}</span>
           <span className="chip">可信资产 {trustedFiles.length}</span>
           <button className="btn-ghost sm" onClick={refresh} disabled={busy === 'refresh'}>刷新</button>
@@ -223,7 +223,7 @@ export function DatabasePage({ user }: Props) {
           理论计算库（{calcFiles.length}）
         </button>
         <button className={tab === 'test' ? 'tab-btn active' : 'tab-btn'} onClick={() => setTab('test')}>
-          实验测试库（{testFiles.length}）
+          试验测试库（{testFiles.length}）
         </button>
         <button className={tab === 'trusted' ? 'tab-btn active' : 'tab-btn'} onClick={() => setTab('trusted')}>
           可信资产库（{trustedFiles.length}）
@@ -249,7 +249,7 @@ function FileList({ files, onBuildTrusted, busy, onOpen }: { files: DbFile[]; on
           <h3>暂无归档文件</h3>
           <p className="settings-hint">
             计算书：在「项目管理」页点击项目卡片的「导出到数据库」；
-            实验报告：在「实验报告」页点击「导出 Excel 测试表」，后续将支持直接归档。
+            试验报告：在「试验报告」页点击「导出 Excel 测试表」，后续将支持直接归档。
           </p>
         </div>
       )}
@@ -273,7 +273,7 @@ function FileList({ files, onBuildTrusted, busy, onOpen }: { files: DbFile[]; on
             <div className="pc-actions">
               {onBuildTrusted && (
                 <button className="btn-primary sm" disabled={busy === 'trusted'} onClick={() => onBuildTrusted(f)}>
-                  生成可信资产（自动匹配实验报告）
+                  生成可信资产（自动匹配试验报告）
                 </button>
               )}
             </div>

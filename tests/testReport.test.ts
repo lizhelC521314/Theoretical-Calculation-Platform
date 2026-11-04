@@ -14,12 +14,12 @@ import {
 } from '../src/report/testReport';
 
 /**
- * 实验报告解析与 Excel 导出测试
+ * 试验报告解析与 Excel 导出测试
  *
  * 用一段模拟的文字版报告正文验证：项目/产品/版本/日期识别、
  * 关键字抓取测试项、文件名规则与工作簿生成。
  */
-const SAMPLE = `长安 CS75-2025 空气滤清器总成 实验报告
+const SAMPLE = `长安 CS75-2025 空气滤清器总成 试验报告
 项目名称：长安 CS75-2025
 产品名称：空气滤清器总成
 版本号：V1.2
@@ -32,7 +32,7 @@ const SAMPLE = `长安 CS75-2025 空气滤清器总成 实验报告
 备注：本报告仅用于内部评审
 `;
 
-describe('实验报告解析', () => {
+describe('试验报告解析', () => {
   const parsed = parseTestReport(SAMPLE, 'report.pdf', DEFAULT_KEYWORDS);
 
   it('识别项目 / 产品 / 版本 / 日期', () => {
@@ -74,7 +74,7 @@ describe('页眉编号识别（SYZX-客户 年月日 流水）', () => {
   })();
 
   it('识别客户与日期，年份补齐前两位', () => {
-    const r = parseHeaderCode('SYZX-BYD 26 07 01 01\n某实验报告正文');
+    const r = parseHeaderCode('SYZX-BYD 26 07 01 01\n某试验报告正文');
     expect(r).not.toBeNull();
     expect(r!.customer).toBe('BYD');
     expect(r!.date).toBe(`${expectedYear}-07-01`);
@@ -126,7 +126,7 @@ describe('客户名称规范化（读到 XX汽车 为止）', () => {
 
   it('从封面「客户名称」标签提取并规范化', () => {
     const meta = parseMetaOnly(
-      '某实验报告封面\n客户名称：长城汽车股份有限公司\n产品名称：空气滤清器',
+      '某试验报告封面\n客户名称：长城汽车股份有限公司\n产品名称：空气滤清器',
       'x.pdf',
     );
     expect(meta.customer).toBe('长城汽车');
@@ -193,14 +193,14 @@ describe('扫描件 OCR 文本解析', () => {
     expect(meta.date).toBe(`${expectedYear}-08-19`);
     // 项目 = 零件名称字母数字段（优先于项目名称标签）
     expect(meta.project).toBe('B26-A');
-    // 实验项目 = 封面「项目名称」一栏
+    // 试验项目 = 封面「项目名称」一栏
     expect(meta.testItem).toBe('压力损失');
     // 产品 = 零件名称中字母数字段之外的文字
     expect(meta.product).toBe('进气系统');
     expect(meta.version).toBe('');
   });
 
-  it('多页 OCR：元字段取封面页，实验项目优先取试验结果表格', () => {
+  it('多页 OCR：元字段取封面页，试验项目优先取试验结果表格', () => {
     // 真实第 3 页 OCR 行（B26-A进气阻力.pdf）：试验结果表里是「标签+值」同行
     const page3 = [
       '试验结果：',
@@ -216,7 +216,7 @@ describe('扫描件 OCR 文本解析', () => {
   });
 });
 
-describe('归档文件名（客户+项目+实验项目+产品+版本+日期）', () => {
+describe('归档文件名（客户+项目+试验项目+产品+版本+日期）', () => {
   it('生成并反解新版文件名', () => {
     const name = archivePdfFileName('长城汽车', 'B26-A', '压力损失', '进气系统', 'V1.0', '2026-08-19');
     expect(name).toBe('长城汽车+B26-A+压力损失+进气系统+V1.0+20260819.pdf');
@@ -250,7 +250,7 @@ describe('归档文件名（客户+项目+实验项目+产品+版本+日期）',
   });
 });
 
-describe('实验项目优先取试验结果表格', () => {
+describe('试验项目优先取试验结果表格', () => {
   // 文字层提取：列间距以 3 个空格体现，行为「标签 + 值 + 设备 + 日期」
   const ROW_STYLE = [
     '试验结果',

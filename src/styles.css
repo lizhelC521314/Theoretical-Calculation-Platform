@@ -1438,7 +1438,7 @@ select {
   border-color: var(--blue);
 }
 
-/* 实验报告导入模块（PDF 元信息提取 + 归档） */
+/* 试验报告导入模块（PDF 元信息提取 + 归档） */
 .test-page .lib-toolbar label.btn-primary {
   display: inline-flex;
   align-items: center;
@@ -1565,7 +1565,7 @@ select {
 }
 .file-card .kv span { min-width: 56px; }
 
-/* ============ 实验报告检索 ============ */
+/* ============ 试验报告检索 ============ */
 .test-search {
   display: flex;
   flex-direction: column;

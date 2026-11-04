@@ -5,7 +5,7 @@ import ExcelJS from 'exceljs';
  *
  * 服务器 UNC 路径：\\10.1.1.245\Product Database
  *   理论计算库 → Theoretical Calculation Library
- *   实验测试库 → Experimental Test Database
+ *   试验测试库 → Experimental Test Database
  *   可信资产库 → Trusted Data Asset Library
  *
  * 所有文件读写由 Electron 主进程执行（IPC：db:*），
@@ -33,7 +33,7 @@ export function archiveFileName(project: string, product: string, version: strin
   return `${cleanFileName(project)}+${cleanFileName(product)}+${cleanFileName(version || 'V0')}+${d}.xlsx`;
 }
 
-/** PDF 归档文件名：客户+项目+实验项目+产品+版本+日期.pdf（单一真源模板） */
+/** PDF 归档文件名：客户+项目+试验项目+产品+版本+日期.pdf（单一真源模板） */
 export function archivePdfFileName(
   customer: string,
   project: string,
@@ -49,7 +49,7 @@ export function archivePdfFileName(
 
 /**
  * 从归档文件名反解元信息。兼容三种格式：
- *   新版 PDF：客户+项目+实验项目+产品+版本+日期（去掉日期后 5 段）
+ *   新版 PDF：客户+项目+试验项目+产品+版本+日期（去掉日期后 5 段）
  *   旧版 PDF：客户+项目+产品+版本+日期（去掉日期后 4 段）
  *   xlsx：项目+产品+版本+日期（去掉日期后 3 段）
  */
@@ -68,7 +68,7 @@ export function parseArchiveName(name: string): {
   if (parts.length > 0 && /^\d{6,8}$/.test(parts[parts.length - 1])) {
     date = parts.pop()!;
   }
-  // 新版 PDF：客户 / 项目 / 实验项目 / 产品 / 版本
+  // 新版 PDF：客户 / 项目 / 试验项目 / 产品 / 版本
   if (parts.length >= 5) {
     const [customer, project, testItem, product, version] = parts;
     return { customer, project, testItem, product, version, date };
@@ -93,11 +93,11 @@ export interface CalcAssetRow {
   title: string;
   params: string; // 输入参数，"name=value；name=value" 格式
   result: string; // 主结果，"name=value" 格式
-  /** 关键字集合，用于与实验结果匹配 */
+  /** 关键字集合，用于与试验结果匹配 */
   keywords: string[];
 }
 
-/** 实验库归档下来的每行：测试项目 + 条件 + 结果 */
+/** 试验库归档下来的每行：测试项目 + 条件 + 结果 */
 export interface TestAssetRow {
   name: string;
   conditionText: string;
@@ -128,11 +128,11 @@ function extractKeywords(name: string, extra: string[] = []): string[] {
 
 /**
  * 生成可信资产 Excel（base64）：
- *  每行一条「计算题目 → 输入参数 → 理论计算结果 → 实验结果」。
+ *  每行一条「计算题目 → 输入参数 → 理论计算结果 → 试验结果」。
  *  匹配规则：
- *    1. 同一项目-产品-版本下，计算书的每条计算题目 与 实验报告的每条测试项 做关键字重叠比；
- *    2. 重叠比 ≥ 50% 认为匹配；若多个实验项都命中，选重叠比最高的一条；
- *    3. 未匹配到实验结果的行，实验结果列留空，仍作为理论数据资产保留。
+ *    1. 同一项目-产品-版本下，计算书的每条计算题目 与 试验报告的每条测试项 做关键字重叠比；
+ *    2. 重叠比 ≥ 50% 认为匹配；若多个试验项都命中，选重叠比最高的一条；
+ *    3. 未匹配到试验结果的行，试验结果列留空，仍作为理论数据资产保留。
  */
 export async function buildTrustedXlsxBase64(
   project: string,
@@ -160,11 +160,11 @@ export async function buildTrustedXlsxBase64(
   ws.addRow(['项目-产品-版本：', infoText, '', '', '']).height = 22;
   ws.mergeCells('B1:E1');
 
-  ws.addRow(['备注：按关键字匹配理论计算结果与实验测试结果。重叠比 ≥ 50% 视为匹配成功。', '', '', '', '']).height = 20;
+  ws.addRow(['备注：按关键字匹配理论计算结果与试验测试结果。重叠比 ≥ 50% 视为匹配成功。', '', '', '', '']).height = 20;
   ws.mergeCells('A2:E2');
   ws.getCell('A2').alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
 
-  const header = ws.addRow(['序号', '计算题目', '输入参数', '理论计算结果', '实验结果']);
+  const header = ws.addRow(['序号', '计算题目', '输入参数', '理论计算结果', '试验结果']);
   header.height = 24;
   header.font = { name: '宋体', size: 10, bold: true };
   for (let c = 1; c <= 5; c++) {
@@ -178,7 +178,7 @@ export async function buildTrustedXlsxBase64(
   let matchedCount = 0;
 
   calcRows.forEach((cRow, i) => {
-    // 找最佳实验匹配
+    // 找最佳试验匹配
     let bestIdx = -1;
     let bestScore = 0;
     for (let j = 0; j < testRows.length; j++) {
@@ -211,7 +211,7 @@ export async function buildTrustedXlsxBase64(
   });
 
   // 统计行
-  const stat = ws.addRow([`共 ${total} 条计算数据，成功匹配实验结果 ${matchedCount} 条，未匹配 ${total - matchedCount} 条。`, '', '', '', '']);
+  const stat = ws.addRow([`共 ${total} 条计算数据，成功匹配试验结果 ${matchedCount} 条，未匹配 ${total - matchedCount} 条。`, '', '', '', '']);
   stat.height = 20;
   ws.mergeCells(`A${stat.number}:E${stat.number}`);
   ws.getCell(`A${stat.number}`).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };

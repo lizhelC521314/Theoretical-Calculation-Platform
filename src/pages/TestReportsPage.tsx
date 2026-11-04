@@ -34,7 +34,7 @@ async function fileToBase64(file: File): Promise<string> {
   return bufToBase64(buf);
 }
 
-/** 实验报告导入：提取元信息 → 人工补全 → 以 PDF 原文件归档到实验库 */
+/** 试验报告导入：提取元信息 → 人工补全 → 以 PDF 原文件归档到试验库 */
 export function TestReportsPage({ user, currentProject }: Props) {
   const [reports, setReports] = useState<PdfReportEntry[]>([]);
   const [busy, setBusy] = useState(false);
@@ -164,7 +164,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
     <div className="test-page">
       <div className="lib-toolbar">
         <label className={busy ? 'btn-primary sm disabled' : 'btn-primary sm'}>
-          {busy ? '解析中…' : '选择 PDF 实验报告'}
+          {busy ? '解析中…' : '选择 PDF 试验报告'}
           <input
             type="file"
             accept="application/pdf,.pdf"
@@ -182,7 +182,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
           disabled={archiving || busy || reports.length === 0 || totalMissing > 0}
           onClick={archiveAll}
         >
-          {archiving ? '归档中…' : `全部归档到实验库 (${reports.length})`}
+          {archiving ? '归档中…' : `全部归档到试验库 (${reports.length})`}
         </button>
         {totalMissing > 0 && (
           <span className="ts-warn">⚠ {reports.filter((r) => missingMetaFields(r.meta).length > 0).length} 份报告有 {totalMissing} 处缺失字段，请补全后再归档</span>
@@ -194,14 +194,14 @@ export function TestReportsPage({ user, currentProject }: Props) {
 
       {reports.length === 0 && (
         <div className="settings-card test-empty">
-          <h3>选择 PDF 实验报告开始归档</h3>
+          <h3>选择 PDF 试验报告开始归档</h3>
           <p className="settings-hint">
-            点击上方「选择 PDF 实验报告」按钮，支持多选。系统会自动从报告封面与正文识别客户、项目、实验项目、产品、版本号、日期等信息，
+            点击上方「选择 PDF 试验报告」按钮，支持多选。系统会自动从报告封面与正文识别客户、项目、试验项目、产品、版本号、日期等信息，
             其中日期优先取报告顶端页眉编号（如 SYZX-BYD 26 07 01 01：年份按当前电脑年份补齐前两位 26 → 2026），
-            客户取封面「客户名称」并截取到「XX汽车」为止，实验项目取封面「项目名称」一栏。
-            所有字段均可在下方列表中校对 / 补全，确认无误后点击「全部归档到实验库」。
+            客户取封面「客户名称」并截取到「XX汽车」为止，试验项目取封面「项目名称」一栏。
+            所有字段均可在下方列表中校对 / 补全，确认无误后点击「全部归档到试验库」。
             扫描件（无文字层的图片型 PDF）会自动对封面做系统 OCR 识别，准确率低于文字版，请重点核对。
-            归档文件名统一格式为「客户+项目+实验项目+产品+版本+日期.pdf」，存放在 UNC 实验库目录。
+            归档文件名统一格式为「客户+项目+试验项目+产品+版本+日期.pdf」，存放在 UNC 试验库目录。
           </p>
         </div>
       )}
@@ -249,7 +249,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
                 />
               </label>
               <label className="field">
-                <span>实验项目</span>
+                <span>试验项目</span>
                 <input
                   value={r.meta.testItem}
                   onChange={(e) => patchMeta(r.id, 'testItem', e.target.value)}
