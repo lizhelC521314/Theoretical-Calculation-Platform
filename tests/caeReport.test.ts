@@ -3,6 +3,7 @@ import { archiveCaeFileName, parseCaeArchiveName } from '../src/report/db';
 import {
   caeItemFromFileName,
   missingCaeMetaFields,
+  parseCaeFileName,
   parseCaeMeta,
   parseCaeOcrMeta,
 } from '../src/report/caeReport';
@@ -55,7 +56,7 @@ describe('CAE 报告：文字版解析', () => {
 
   it('仿真项目缺失时按文件名关键字兜底', () => {
     const meta = parseCaeMeta('客户名称：长城汽车股份有限公司\n版本号：V1.0', 'B26-A进气系统流场分析.pdf');
-    expect(meta.caeItem).toBe('流场');
+    expect(meta.caeItem).toBe('流场分析');
   });
 
   it('零件名称只有中文时项目与产品同名', () => {
@@ -92,6 +93,50 @@ describe('CAE 报告：扫描件 OCR 解析', () => {
     expect(meta.product).toBe('空气滤清器总成');
     expect(meta.version).toBe('V1.0');
     expect(meta.date).toMatch(/\d{4}-08-19/);
+  });
+});
+
+describe('CAE 报告：PPT 转文字版 PDF 的实际版面', () => {
+  // 上汽 AS5PM 报告由 PowerPoint 导出 PDF 后，首页文字层实况：
+  // 标签被拉开成「版   本」「时   间」，没有「客户名称 / 产品名称」字段，
+  // 客户、产品、仿真项目需要从文件名补齐
+  const PPT_TEXT = [
+    '上汽 AS5PM 出气谐振器支架强度分析报告',
+    '项目代号：   AS5PM',
+    '分析人员：   叶云江',
+    '设计人员：   邱劲超',
+    '审   核：   谢崇磊',
+    '时   间：   2026-10-29',
+    '版   本：   AS5PM-V1',
+  ].join('\n');
+
+  it('从 PPT 导出 PDF 的文字识别全部字段', () => {
+    const meta = parseCaeMeta(PPT_TEXT, '上汽 AS5PM 出气谐振器强度分析报告-V1-20261029.pptx');
+    expect(meta.customer).toBe('上汽');
+    expect(meta.project).toBe('AS5PM');
+    expect(meta.product).toBe('出气谐振器');
+    expect(meta.caeItem).toBe('强度分析');
+    expect(meta.version).toBe('V1');
+    expect(meta.date).toBe('2026-10-29');
+  });
+
+  it('parseCaeFileName：客户 + 项目代号 + 产品 + 分析项 + 版本 + 日期', () => {
+    expect(parseCaeFileName('上汽 S61D-PHEV 空滤器安装点动刚度分析报告-V1-20261103.pptx')).toEqual({
+      customer: '上汽',
+      project: 'S61D-PHEV',
+      product: '空滤器安装点',
+      caeItem: '动刚度分析',
+      version: 'V1',
+      date: '2026-11-03',
+    });
+    expect(parseCaeFileName('上汽 S61D-PHEV 空滤器模态分析报告-V4-20261030.pptx')).toEqual({
+      customer: '上汽',
+      project: 'S61D-PHEV',
+      product: '空滤器',
+      caeItem: '模态分析',
+      version: 'V4',
+      date: '2026-10-30',
+    });
   });
 });
 

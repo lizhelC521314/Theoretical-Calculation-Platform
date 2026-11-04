@@ -1067,6 +1067,160 @@ ipcMain.handle('app:openPath', async (_e, filePath) => {
   }
 });
 
+/** CAE 报告：PPT/PPTX 转换用的临时目录 */
+const PPT_TEMP_DIR = path.join(os.tmpdir(), 'ctr-cae-ppt');
+
+function pptTempDir() {
+  ensureDir(PPT_TEMP_DIR);
+  return PPT_TEMP_DIR;
+}
+
+/** 生成并执行临时 PowerShell 脚本（UTF-8 BOM，兼容中文路径） */
+function runPowerShell(script, timeout = 180000) {
+  return new Promise((resolve) => {
+    const file = path.join(os.tmpdir(), `ctr-ppt-${Date.now()}-${Math.random().toString(36).slice(2)}.ps1`);
+    try {
+      fs.writeFileSync(file, '\ufeff' + script, 'utf8');
+    } catch (err) {
+      resolve({ ok: false, message: String((err && err.message) || err) });
+      return;
+    }
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', file],
+      { timeout, windowsHide: true },
+      (err, stdout, stderr) => {
+        try {
+          fs.unlinkSync(file);
+        } catch {}
+        resolve({
+          ok: !err,
+          message: err ? `${String((err && err.message) || err)} ${stderr || ''}`.trim() : '',
+          stdout: String(stdout || ''),
+          stderr: String(stderr || ''),
+        });
+      },
+    );
+  });
+}
+
+/** 查找 LibreOffice（未安装时返回空串，避免直接抛错） */
+function findSoffice() {
+  const candidates = [
+    'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
+    'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return '';
+}
+
+function convertWithLibreOffice(src, outDir) {
+  return new Promise((resolve) => {
+    const soffice = findSoffice();
+    if (!soffice) {
+      resolve({ ok: false, message: '未安装 LibreOffice' });
+      return;
+    }
+    execFile(
+      soffice,
+      ['--headless', '--norestore', '--convert-to', 'pdf', '--outdir', outDir, src],
+      { timeout: 180000, windowsHide: true },
+      (err, stdout, stderr) =>
+        resolve({
+          ok: !err,
+          message: err ? `${String((err && err.message) || err)} ${stderr || ''}`.trim() : '',
+        }),
+    );
+  });
+}
+
+/**
+ * CAE 报告导入：把 PPT / PPTX 转成文字版 PDF。
+ * 优先使用本机 PowerPoint（WPS 演示兜底）的 COM 自动化，其次 LibreOffice 无头模式；
+ * 转换后的 PDF 返回临时路径与 base64，由渲染进程解析元信息、清理临时文件。
+ */
+ipcMain.handle('ppt:toPdf', async (_e, filePath) => {
+  try {
+    const src = String(filePath || '');
+    if (!src || !fs.existsSync(src)) return { ok: false, message: '文件不存在或无法访问' };
+    if (!/\.(pptx?|ppsx?)$/i.test(src)) return { ok: false, message: '仅支持 PPT / PPTX 文件' };
+
+    const dir = pptTempDir();
+    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const dst = path.join(dir, `cae-${stamp}.pdf`);
+
+    // 1) Office / WPS COM 自动化（ppSaveAsPDF = 32）
+    const script = `
+$ErrorActionPreference = 'Stop'
+$src = '${src.replace(/'/g, "''")}'
+$dst = '${dst.replace(/'/g, "''")}'
+$ok = $false
+foreach ($id in @('PowerPoint.Application','KWPP.Application')) {
+  $app = $null
+  $pres = $null
+  try {
+    $app = New-Object -ComObject $id
+    $pres = $app.Presentations.Open($src, -1, 0, 0)
+    $pres.SaveAs($dst, 32)
+    $pres.Close()
+    $app.Quit()
+    $ok = $true
+    break
+  } catch {
+    if ($pres) { try { $pres.Close() } catch {} }
+    if ($app) { try { $app.Quit() } catch {} }
+  }
+}
+if ($ok) { Write-Output 'OK' } else { Write-Output 'ERR'; exit 1 }
+`;
+    await runPowerShell(script);
+
+    // 2) LibreOffice 兜底
+    if (!fs.existsSync(dst) || fs.statSync(dst).size === 0) {
+      const loDir = path.join(dir, `lo-${stamp}`);
+      ensureDir(loDir);
+      await convertWithLibreOffice(src, loDir);
+      const produced = fs.existsSync(loDir)
+        ? fs.readdirSync(loDir).find((f) => /\.pdf$/i.test(f))
+        : null;
+      if (produced) {
+        try {
+          fs.renameSync(path.join(loDir, produced), dst);
+        } catch {}
+      }
+      try {
+        fs.rmSync(loDir, { recursive: true, force: true });
+      } catch {}
+    }
+
+    if (!fs.existsSync(dst) || fs.statSync(dst).size === 0) {
+      return {
+        ok: false,
+        message: 'PPT 转 PDF 失败：未检测到可用的 PowerPoint / WPS / LibreOffice，请安装其中之一后重试',
+      };
+    }
+
+    return { ok: true, pdfPath: dst, pdfBase64: fs.readFileSync(dst).toString('base64') };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 清理 PPT 转换产生的临时 PDF（仅允许临时目录内的文件） */
+ipcMain.handle('ppt:cleanup', (_e, pdfPath) => {
+  try {
+    const p = path.normalize(String(pdfPath || ''));
+    const root = path.normalize(PPT_TEMP_DIR + path.sep);
+    if (!p.startsWith(root)) return { ok: false, message: '仅允许清理临时目录内的文件' };
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
 ipcMain.handle('app:info', () => ({
   version: app.getVersion(),
   dataDir: store.dataPath(),

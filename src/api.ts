@@ -115,6 +115,12 @@ interface CtrApi {
     remove(p: { fullPath: string }): Promise<{ ok: boolean; message?: string }>;
     ping(): Promise<{ reachable: boolean; root: string; calc: string; test: string; trusted: string; cae: string; kbeRoot: string; kbeTheory: string; kbeDesign: string; kbeFmea: string }>;
   };
+  ppt: {
+    /** 桌面版：PPT / PPTX 转文字版 PDF（PowerPoint / WPS / LibreOffice），返回临时路径与 base64 */
+    toPdf(filePath: string): Promise<{ ok: boolean; pdfPath?: string; pdfBase64?: string; message?: string }>;
+    /** 桌面版：清理转换产生的临时 PDF */
+    cleanup(pdfPath: string): Promise<{ ok: boolean; message?: string }>;
+  };
   app: {
     info(): Promise<{ version: string; dataDir: string }>;
     /** 桌面版：用系统默认程序打开文件（支持 UNC 路径） */
@@ -219,6 +225,10 @@ const fallback: CtrApi = {
     pdfData: async () => ({ ok: false, message: '浏览器调试模式无法读取 UNC 路径 PDF' }),
     remove: async () => ({ ok: false, message: '浏览器调试模式无法删除服务器文件' }),
     ping: async () => ({ reachable: false, root: '', calc: '', test: '', trusted: '', cae: '', kbeRoot: '', kbeTheory: '', kbeDesign: '', kbeFmea: '' }),
+  },
+  ppt: {
+    toPdf: async () => ({ ok: false, message: '浏览器调试模式不支持 PPT 转 PDF' }),
+    cleanup: async () => ({ ok: false, message: '浏览器调试模式不支持清理临时文件' }),
   },
   app: {
     info: async () => ({ version: '0.1.0-browser', dataDir: '(浏览器调试)' }),

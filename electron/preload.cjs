@@ -45,6 +45,12 @@ const bridge = {
     remove: (p) => ipcRenderer.invoke('db:delete', p),
     ping: () => ipcRenderer.invoke('db:ping'),
   },
+  ppt: {
+    /** CAE 报告：PPT / PPTX 转文字版 PDF，返回临时路径与 base64 */
+    toPdf: (filePath) => ipcRenderer.invoke('ppt:toPdf', filePath),
+    /** 清理转换产生的临时 PDF */
+    cleanup: (pdfPath) => ipcRenderer.invoke('ppt:cleanup', pdfPath),
+  },
   app: {
     info: () => ipcRenderer.invoke('app:info'),
     openPath: (filePath) => ipcRenderer.invoke('app:openPath', filePath),
