@@ -286,16 +286,34 @@ export function parseTestItemFromTable(text: string): string {
   //    （这样即使 OCR 把标签/值拆成多个词、同行还有别的字段也能取准）
   const NEXT_LABEL =
     /(样品名称|样件名称|样品编号|样品件号|样品批号|样品数量|试验时间|试验日期|试验人员|试验员|试验方法|试验区域|试验部位|试验温度|实验室温度|湿度|大气压|试验设备|设备号|设备有效日期|接受标准|接受准则|试验要求|试验结论|判定|备注|技术要求|序号|数量|试验地点|规格型号)/;
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const compact = line.replace(/[ \t]+/g, '');
     const m = TEST_ITEM_LABEL.exec(compact);
     if (!m) continue;
+
+    // 2.1) 按「列」直接取：试验项目所在行的第二列（标签右侧那一格）
+    const cells = splitCells(line);
+    const cellCol = cells.findIndex((c) => TEST_ITEM_LABEL.test(c.replace(/[ \t]+/g, '')));
+    if (cellCol >= 0) {
+      const right = cells[cellCol + 1] ? squeezeCell(cells[cellCol + 1]) : '';
+      if (isLikelyTestItem(right)) return right;
+    }
+
+    // 2.2) 按整行紧凑文本取：标签右侧到下一个字段标签之前
     let rest = compact.slice(m.index + m[0].length);
     rest = rest.replace(/^(名称|代号|编号)?[：:＝=]/, ''); // 去掉「名称：」等前缀
     rest = rest.replace(/^[0-9]{1,2}(?=[一-鿿A-Za-z])/, ''); // 去掉行首序号
     const stop = rest.search(NEXT_LABEL);
     const value = squeezeCell(stop >= 0 ? rest.slice(0, stop) : rest);
     if (isLikelyTestItem(value)) return value;
+
+    // 2.3) 值单元格换行到下一行时，取下一行的第一格
+    const next = i + 1 < lines.length ? splitCells(lines[i + 1]) : [];
+    if (next.length) {
+      const wrapped = squeezeCell(next[0]);
+      if (isLikelyTestItem(wrapped)) return wrapped;
+    }
   }
   return '';
 }

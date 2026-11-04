@@ -742,7 +742,7 @@ function extractTestItemFromWords(words) {
     ).length;
 
     // 标签行（表单式，如「试验项目 | 进气阻力 | 试验时间 | 2026/2/7」）：
-    // 不是网格表头时，取同一行标签右侧的第一个有效单元格
+    // 不是网格表头时，取同一行标签右侧（第二列）的第一个有效单元格
     if (otherHeaderHits < 2) {
       for (const c of headerCells.slice(gridCol + 1)) {
         const value = compact(c.text).replace(/^[：:＝=]+/, '');
@@ -752,6 +752,12 @@ function extractTestItemFromWords(words) {
       const merged = compact(headerCells[gridCol].text).replace(/[试实]验项目/, '');
       const mergedValue = merged.replace(/^(名称|代号|编号)?[：:＝=]/, '');
       if (isLikelyTestItemCell(mergedValue)) return mergedValue;
+      // 值单元格换行到下一行时，取下一行第一列
+      if (ri + 1 < rows.length) {
+        const nxt = splitCells([...rows[ri + 1].words].sort((a, b) => a.x - b.x));
+        const wrapped = nxt.length ? compact(nxt[0].text).replace(/^[：:＝=]+/, '') : '';
+        if (isLikelyTestItemCell(wrapped)) return wrapped;
+      }
       continue;
     }
 

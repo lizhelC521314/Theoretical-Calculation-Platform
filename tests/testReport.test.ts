@@ -200,6 +200,12 @@ describe('试验项目：按试验结果表的「试验项目」列读取', () =
   it('标签行：试验项目名称：压力损失', () => {
     expect(parseTestItemFromTable('试验项目名称：压力损失')).toBe('压力损失');
   });
+
+  it('标签行：值换行到下一行时取下一行第一格', () => {
+    expect(parseTestItemFromTable(['试验项目', '进气阻力'].join('\n'))).toBe('进气阻力');
+    // 下一行是别的字段时不误取
+    expect(parseTestItemFromTable(['试验项目', '样品名称\tSC6HAU'].join('\n'))).toBe('');
+  });
 });
 
 describe('扫描件 OCR 文本解析', () => {
