@@ -38,8 +38,8 @@ module.exports = {
   files: ['dist/**/*', 'electron/**/*', 'package.json'],
   // 单机离线使用，安装包内不包含源码与开发依赖
   asar: true,
-  /** pdfjs 只有 ESM 构建，需解包到 asar 外才能被主进程动态 import */
-  asarUnpack: ['node_modules/pdfjs-dist/**'],
+  /** pdfjs 只有 ESM 构建，需解包到 asar 外才能被主进程动态 import；@napi-rs/canvas 含原生 .node 也需解包 */
+  asarUnpack: ['node_modules/pdfjs-dist/**', 'node_modules/@napi-rs/**'],
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }],
     icon: 'build/icon.ico',

@@ -96,6 +96,14 @@ interface CtrApi {
     extractText(filePath: string): Promise<{ ok: boolean; text?: string; message?: string }>;
     /** 桌面版：主进程提取 PDF 封面扫描图并做系统 OCR，按词坐标还原行返回文本（扫描件兜底） */
     ocrFirstPage(filePath: string): Promise<{ ok: boolean; text?: string; message?: string }>;
+    /** 桌面版：内置阅读器——页数与首页尺寸（scale=1） */
+    pageInfo(filePath: string): Promise<{ ok: boolean; pageCount?: number; width?: number; height?: number; message?: string }>;
+    /** 桌面版：内置阅读器——渲染指定页为 PNG data URL */
+    renderPage(p: {
+      filePath: string;
+      page: number;
+      scale: number;
+    }): Promise<{ ok: boolean; pageCount?: number; page?: number; width?: number; height?: number; dataUrl?: string; message?: string }>;
   };
   db: {
     archive(p: { base64: string; fileName: string; libType: 'calc' | 'test' | 'trusted' | 'theory' | 'design' | 'fmea' }): Promise<{ ok: boolean; filePath?: string; targetDir?: string; message?: string }>;
@@ -199,6 +207,8 @@ const fallback: CtrApi = {
   pdf: {
     extractText: async () => ({ ok: false, message: '浏览器调试模式不支持主进程解析' }),
     ocrFirstPage: async () => ({ ok: false, message: '浏览器调试模式不支持系统 OCR' }),
+    pageInfo: async () => ({ ok: false, message: '浏览器调试模式不支持内置 PDF 阅读器' }),
+    renderPage: async () => ({ ok: false, message: '浏览器调试模式不支持内置 PDF 阅读器' }),
   },
   db: {
     archive: async () => ({ ok: false, message: '浏览器调试模式下无法写入 UNC 路径' }),

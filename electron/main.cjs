@@ -360,6 +360,131 @@ ipcMain.handle('test:pdfText', async (_e, filePath) => {
 });
 
 /**
+ * PDF 阅读器：主进程用 pdfjs + @napi-rs/canvas 把页面渲染成 PNG（data URL）。
+ * 放在主进程做，避免渲染进程在打包后的 file:// 环境下创建 Worker 受限。
+ * 同一文件的文档实例与已渲染页面做缓存，翻页/缩放时不必重新解析整份 PDF。
+ */
+let napiCanvas = null;
+let pdfRenderState = { filePath: '', task: null, doc: null, canvasFactory: null };
+const pdfPageCache = new Map();
+const PDF_PAGE_CACHE_MAX = 24;
+
+/** pdfjs 与 canvas 的路径与实例（按需加载） */
+async function loadPdfRenderDeps() {
+  const pdfjsFile = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.mjs')
+    : require.resolve('pdfjs-dist/legacy/build/pdf.mjs');
+  const { getDocument } = await import(pathToFileURL(pdfjsFile).href);
+  if (!napiCanvas) {
+    const { createCanvas } = require('@napi-rs/canvas');
+    napiCanvas = createCanvas;
+  }
+  // 标准字体与 CMap 目录：pdfjs 在 Node 环境下按文件路径读取（须为正斜杠结尾）
+  const pdfjsRoot = path.join(path.dirname(pdfjsFile), '..', '..').replace(/\\/g, '/');
+  const canvasFactory = {
+    create(width, height) {
+      const canvas = napiCanvas(Math.max(1, Math.ceil(width)), Math.max(1, Math.ceil(height)));
+      return { canvas, context: canvas.getContext('2d') };
+    },
+    reset(target, width, height) {
+      if (!target) return;
+      target.canvas.width = Math.max(1, Math.ceil(width));
+      target.canvas.height = Math.max(1, Math.ceil(height));
+    },
+    destroy(target) {
+      if (!target) return;
+      target.canvas.width = 0;
+      target.canvas.height = 0;
+    },
+  };
+  return { getDocument, canvasFactory, pdfjsRoot };
+}
+
+/** 取得（或打开）指定 PDF 的文档实例；切换文件时释放旧实例 */
+async function getPdfRenderDoc(filePath) {
+  if (pdfRenderState.doc && pdfRenderState.filePath === filePath) return pdfRenderState.doc;
+  if (pdfRenderState.doc) {
+    try { await pdfRenderState.task.destroy(); } catch { /* 忽略释放异常 */ }
+    pdfRenderState = { filePath: '', task: null, doc: null, canvasFactory: null };
+    pdfPageCache.clear();
+  }
+  const { getDocument, canvasFactory, pdfjsRoot } = await loadPdfRenderDeps();
+  const task = getDocument({
+    data: new Uint8Array(fs.readFileSync(filePath)),
+    canvasFactory,
+    useSystemFonts: true,
+    isEvalSupported: false,
+    useWorkerFetch: false,
+    standardFontDataUrl: `${pdfjsRoot}/standard_fonts/`,
+    cMapUrl: `${pdfjsRoot}/cmaps/`,
+    cMapPacked: true,
+  });
+  const doc = await task.promise;
+  pdfRenderState = { filePath, task, doc, canvasFactory };
+  return doc;
+}
+
+/** 页数与首屏尺寸（scale=1），供渲染进程做「适应宽度」计算 */
+ipcMain.handle('pdf:pageInfo', async (_e, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return { ok: false, message: '文件不存在' };
+    const doc = await getPdfRenderDoc(filePath);
+    const page = await doc.getPage(1);
+    const viewport = page.getViewport({ scale: 1 });
+    return {
+      ok: true,
+      pageCount: doc.numPages,
+      width: Math.ceil(viewport.width),
+      height: Math.ceil(viewport.height),
+    };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 渲染指定页为 PNG data URL（scale 为缩放倍率，0.4~3） */
+ipcMain.handle('pdf:renderPage', async (_e, payload) => {
+  try {
+    const { filePath } = payload || {};
+    if (!filePath || !fs.existsSync(filePath)) return { ok: false, message: '文件不存在' };
+    const wanted = Math.max(1, Math.floor(Number(payload && payload.page) || 1));
+    const scale = Math.min(3, Math.max(0.4, Number(payload && payload.scale) || 1.2));
+    const cacheKey = `${filePath}|${wanted}|${scale}`;
+    const hit = pdfPageCache.get(cacheKey);
+    if (hit) return { ok: true, pageCount: hit.pageCount, page: hit.page, dataUrl: hit.dataUrl };
+
+    const doc = await getPdfRenderDoc(filePath);
+    const pageCount = doc.numPages;
+    const pageNumber = Math.min(wanted, pageCount);
+    const page = await doc.getPage(pageNumber);
+    const viewport = page.getViewport({ scale });
+    const width = Math.max(1, Math.ceil(viewport.width));
+    const height = Math.max(1, Math.ceil(viewport.height));
+    const canvas = napiCanvas(width, height);
+    const canvasContext = canvas.getContext('2d');
+    canvasContext.fillStyle = '#ffffff';
+    canvasContext.fillRect(0, 0, width, height);
+    await page.render({
+      canvas,
+      canvasContext,
+      viewport,
+      canvasFactory: pdfRenderState.canvasFactory,
+    }).promise;
+    const dataUrl = canvas.toDataURL('image/png');
+
+    pdfPageCache.set(cacheKey, { pageCount, page: pageNumber, dataUrl });
+    if (pdfPageCache.size > PDF_PAGE_CACHE_MAX) {
+      const oldest = pdfPageCache.keys().next().value;
+      pdfPageCache.delete(oldest);
+    }
+    page.cleanup();
+    return { ok: true, pageCount, page: pageNumber, width, height, dataUrl };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/**
  * 把 pdfjs 解码出的内嵌图像（kind: 1=GRAYSCALE_1BPP 2=RGB_24BPP 3=RGBA_32BPP）
  * 编码为 24 位 BMP（自底向上行序、行 4 字节对齐、RGB→BGR），供系统 OCR 解码。
  */

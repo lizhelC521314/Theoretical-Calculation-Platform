@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type CtrUser } from '../api';
+import { PdfViewer } from '../components/PdfViewer';
 import { parseArchiveName } from '../report/db';
 
 interface Props {
@@ -64,8 +65,6 @@ export function TestsSearchPage({ user: _user }: Props) {
   const [keyword, setKeyword] = useState('');
   const [selected, setSelected] = useState<DbFile | null>(null);
   const [items, setItems] = useState<TestItem[]>([]);
-  const [pdfText, setPdfText] = useState('');
-  const [pdfFileUrl, setPdfFileUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [readBusy, setReadBusy] = useState(false);
   const [error, setError] = useState('');
@@ -127,38 +126,21 @@ export function TestsSearchPage({ user: _user }: Props) {
     const seq = ++reqSeq.current;
     setSelected(f);
     setItems([]);
-    setPdfText('');
-    setPdfFileUrl('');
     setError('');
-    setReadBusy(true);
+    setReadBusy(!isPdf(f));
     const stale = () => seq !== reqSeq.current;
     try {
       if (isPdf(f)) {
-        // 1) 优先尝试提取文字层（文字版 PDF）
-        const textRes = await api.pdf.extractText(f.fullPath);
-        if (stale()) return;
-        const hasText = textRes.ok && typeof textRes.text === 'string' && textRes.text.trim().length > 0;
-        if (hasText) {
-          setPdfText(textRes.text!);
-        } else {
-          // 2) 文字层为空 → 扫描版/图片型 PDF → 主进程拷贝到临时目录返回 file:// URL
-          const dataRes = await api.db.pdfData(f.fullPath);
-          if (stale()) return;
-          if (dataRes.ok && dataRes.fileUrl) {
-            setPdfFileUrl(dataRes.fileUrl);
-          } else {
-            setError(`PDF 无法预览：${dataRes.message || textRes.message || '文件读取失败'}`);
-          }
-        }
+        // PDF 由内置阅读器（PdfViewer）自行渲染，这里不预读内容
+        return;
+      }
+      // XLSX：db:read 解析 Excel 行 → parseTestRows 还原测试项
+      const res = await api.db.read({ fullPath: f.fullPath });
+      if (stale()) return;
+      if (res.ok) {
+        setItems(parseTestRows(res.rows || []));
       } else {
-        // XLSX：db:read 解析 Excel 行 → parseTestRows 还原测试项
-        const res = await api.db.read({ fullPath: f.fullPath });
-        if (stale()) return;
-        if (res.ok) {
-          setItems(parseTestRows(res.rows || []));
-        } else {
-          setError(`实验测试表读取失败：${res.message || '无法读取'}`);
-        }
+        setError(`实验测试表读取失败：${res.message || '无法读取'}`);
       }
     } catch (e) {
       if (!stale()) setError(`读取失败：${e instanceof Error ? e.message : String(e)}`);
@@ -186,8 +168,6 @@ export function TestsSearchPage({ user: _user }: Props) {
             reqSeq.current += 1; // 使进行中的预览请求失效
             setSelected(null);
             setItems([]);
-            setPdfText('');
-            setPdfFileUrl('');
             setReadBusy(false);
           }
           await refresh();
@@ -381,28 +361,10 @@ export function TestsSearchPage({ user: _user }: Props) {
                 </div>
               </div>
 
-              {readBusy ? (
-                <div className="preview-loading">
-                  {selectedIsPdf ? '正在从 PDF 提取文字内容…' : '正在读取实验测试表…'}
-                </div>
-              ) : selectedIsPdf ? (
-                pdfText ? (
-                  <pre className="pdf-preview">{pdfText}</pre>
-                ) : pdfFileUrl ? (
-                  <iframe
-                    className="pdf-frame"
-                    src={pdfFileUrl}
-                    title={selected.name}
-                  />
-                ) : (
-                  <div className="preview-empty">
-                    <div className="pe-icon">📄</div>
-                    <div className="pe-title">该 PDF 无法预览</div>
-                    <div className="pe-sub">
-                      {error || '文件读取失败，请检查服务器连通性或文件权限。'}
-                    </div>
-                  </div>
-                )
+              {selectedIsPdf ? (
+                <PdfViewer filePath={selected.fullPath} />
+              ) : readBusy ? (
+                <div className="preview-loading">正在读取实验测试表…</div>
               ) : items.length === 0 ? (
                 <div className="preview-empty">
                   <div className="pe-icon">📋</div>

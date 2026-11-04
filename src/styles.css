@@ -1794,28 +1794,70 @@ select {
   white-space: pre-wrap;
   word-break: break-all;
 }
-.pdf-preview {
-  margin: 0;
-  padding: 16px 20px;
-  background: #fcfcfe;
-  border: 1px solid #ebeef3;
-  border-radius: 6px;
-  font-family: 'Microsoft YaHei', 'PingFang SC', 'SimSun', serif;
-  font-size: 13px;
-  line-height: 1.85;
-  color: #2a3748;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 70vh;
-  overflow: auto;
-  column-fill: balance;
-}
-.pdf-frame {
-  width: 100%;
+/* 内置 PDF 阅读器：工具栏 + 可滚动画布 */
+.pdf-viewer {
+  display: flex;
+  flex-direction: column;
   height: 75vh;
   border: 1px solid #ebeef3;
   border-radius: 6px;
+  background: #eef1f5;
+  overflow: hidden;
+}
+.pdf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
   background: #fff;
+  border-bottom: 1px solid #ebeef3;
+  font-size: 13px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+.pdf-page-no {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pdf-page-no input {
+  width: 52px;
+  height: 28px;
+  text-align: center;
+  border: 1px solid #dfe4ea;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text);
+  background: #fff;
+}
+.pdf-sep {
+  width: 1px;
+  height: 18px;
+  background: #e3e7ee;
+  margin: 0 4px;
+}
+.pdf-zoom {
+  min-width: 46px;
+  text-align: center;
+  color: var(--text);
+}
+.pdf-hint {
+  color: var(--muted);
+}
+.pdf-canvas-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+.pdf-page-img {
+  display: block;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(20, 30, 45, 0.18);
+  max-width: none;
 }
 
 /* 窄屏适配 */

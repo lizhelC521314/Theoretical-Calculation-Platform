@@ -32,6 +32,10 @@ const bridge = {
   pdf: {
     extractText: (filePath) => ipcRenderer.invoke('test:pdfText', filePath),
     ocrFirstPage: (filePath) => ipcRenderer.invoke('pdf:ocrFirstPage', filePath),
+    /** 内置阅读器：页数与尺寸 */
+    pageInfo: (filePath) => ipcRenderer.invoke('pdf:pageInfo', filePath),
+    /** 内置阅读器：渲染指定页为 PNG data URL */
+    renderPage: (p) => ipcRenderer.invoke('pdf:renderPage', p),
   },
   db: {
     archive: (p) => ipcRenderer.invoke('db:archive', p),
