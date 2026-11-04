@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_KEYWORDS,
   buildTestXlsxBase64,
+  parseHeaderCode,
+  parseMetaOnly,
   parseTestReport,
   testReportFileName,
 } from '../src/report/testReport';
@@ -54,5 +56,47 @@ describe('实验报告解析', () => {
     const b64 = await buildTestXlsxBase64(parsed.meta, parsed.items);
     expect(b64.startsWith('UEsDB')).toBe(true); // PK\x03\x04
     expect(b64.length).toBeGreaterThan(4000);
+  });
+});
+
+describe('页眉编号识别（SYZX-客户 年月日 流水）', () => {
+  // 年份后两位按电脑当前年份的世纪补齐：26 → 20xx（与 parseHeaderCode 同规则计算期望值）
+  const expectedYear = (() => {
+    const now = new Date().getFullYear();
+    let y = Math.floor(now / 100) * 100 + 26;
+    if (y > now) y -= 100;
+    return y;
+  })();
+
+  it('识别客户与日期，年份补齐前两位', () => {
+    const r = parseHeaderCode('SYZX-BYD 26 07 01 01\n某实验报告正文');
+    expect(r).not.toBeNull();
+    expect(r!.customer).toBe('BYD');
+    expect(r!.date).toBe(`${expectedYear}-07-01`);
+  });
+
+  it('页眉编号优先于正文标签（客户与日期）', () => {
+    const meta = parseMetaOnly(
+      'SYZX-BYD 26 07 01 01\n客户：其他客户\n报告日期：2020年1月2日',
+      'x.pdf',
+    );
+    expect(meta.customer).toBe('BYD');
+    expect(meta.date).toBe(`${expectedYear}-07-01`);
+  });
+
+  it('无页眉编号时回退到原有标签识别', () => {
+    const meta = parseMetaOnly(SAMPLE, 'x.pdf');
+    expect(meta.customer).toBe('');
+    expect(meta.date).toBe('2026-10-20');
+  });
+
+  it('非法月份/日期不识别', () => {
+    expect(parseHeaderCode('SYZX-BYD 26 13 40 01')).toBeNull();
+    expect(parseHeaderCode('SYZX-BYD 26 00 10 01')).toBeNull();
+  });
+
+  it('编号在正文深处（超过页眉前 10 行）不识别', () => {
+    const body = Array.from({ length: 15 }, (_, i) => `第${i + 1}行内容`).join('\n');
+    expect(parseHeaderCode(`报告标题\n${body}\nSYZX-BYD 26 07 01 01`)).toBeNull();
   });
 });

@@ -143,6 +143,32 @@ function normalizeDate(raw: string): string {
 }
 
 /**
+ * 解析报告顶端页眉编号：SYZX-客户 年月日[流水]，如「SYZX-BYD 26 07 01 01」。
+ * 年份只给后两位，按电脑当前年份的世纪补齐前两位（26 → 2026）；
+ * 若补齐后晚于当前年份则回退一个世纪（如 99 → 1999，报告不可能来自未来）。
+ * 只在页眉区域（前 10 个非空行）匹配，避免正文误判。
+ */
+export function parseHeaderCode(text: string): { customer: string; date: string } | null {
+  const head = text
+    .split(/\r?\n/)
+    .filter((l) => l.trim())
+    .slice(0, 10)
+    .join('\n');
+  const m = head.match(/SYZX[\s-]*([A-Za-z0-9]{2,8})[\s-]+(\d{2})[\s-]+(\d{1,2})[\s-]+(\d{1,2})(?=[\s-]|$)/);
+  if (!m) return null;
+  const month = Number(m[3]);
+  const day = Number(m[4]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const now = new Date().getFullYear();
+  let year = Math.floor(now / 100) * 100 + Number(m[2]);
+  if (year > now) year -= 100;
+  return {
+    customer: m[1],
+    date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+  };
+}
+
+/**
  * 只从文本中提取元字段（客户/项目/产品/版本/日期），不识别测试项。
  * 用于 PDF 导入重命名场景。
  * 返回的字段可能为空，由调用方提示用户补全。
@@ -153,9 +179,12 @@ export function parseMetaOnly(text: string, fileName: string): PdfReportMeta {
     .map((l) => l.replace(/\s+$/, ''))
     .filter((l) => l.trim());
 
-  // ------- 客户（多种候选标签） -------
+  // ------- 客户 / 日期：页眉编号（SYZX-客户 年月日）优先，标签提取兜底 -------
+  const header = parseHeaderCode(text);
   const customer =
-    findField(text, /(?:客户|委托方|委托单位|甲方|送样单位)\s*[：:]\s*([^\n]{1,60})/) || '';
+    header?.customer ||
+    findField(text, /(?:客户|委托方|委托单位|甲方|送样单位)\s*[：:]\s*([^\n]{1,60})/) ||
+    '';
 
   // ------- 项目 / 产品 -------
   let project = findField(text, /项目(?:名称|代号)?\s*[：:]\s*([^\n]{1,60})/) || '';
@@ -170,8 +199,8 @@ export function parseMetaOnly(text: string, fileName: string): PdfReportMeta {
     if (m) version = m[1].toUpperCase();
   }
 
-  // ------- 日期（文本优先 → 文件名兜底） -------
-  let date = normalizeDate(text);
+  // ------- 日期（页眉编号优先 → 文本兜底 → 文件名兜底） -------
+  let date = header?.date || normalizeDate(text);
   if (!date) date = normalizeDate(fileName);
 
   // ------- 标题行兜底：首行若非字段行，按分隔符拆成 客户/项目/产品 -------
