@@ -182,9 +182,10 @@ export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
     return m[1].replace(/^[：:.．\s]+/, '').trim();
   };
 
-  const customer =
-    header?.customer ||
-    normalizeCustomer(grab('客户(?:名称)?') || grab('(?:委托方|委托单位|甲方|送样单位)'));
+  // 客户：从封面「客户名称」标签读取，规范化到「XX汽车」为止；页眉编号不再覆盖客户
+  const customer = normalizeCustomer(
+    grab('客户(?:名称)?') || grab('(?:委托方|委托单位|甲方|送样单位)'),
+  );
 
   const project = grab('项目(?:名称|代号)?');
   // 封面无「产品名称」时用「零件名称」兜底（如 B26-A 进气系统）
@@ -291,14 +292,11 @@ export function parseMetaOnly(text: string, fileName: string): PdfReportMeta {
     .map((l) => l.replace(/\s+$/, ''))
     .filter((l) => l.trim());
 
-  // ------- 客户 / 日期：页眉编号（SYZX-客户 年月日）优先，标签提取兜底 -------
-  // 标签提取到的公司全称按「读到 XX 汽车」规范化（长城汽车股份有限公司 → 长城汽车）
+  // ------- 客户：从封面「客户名称」标签读取，规范化到「XX汽车」为止；页眉编号只用于日期 -------
   const header = parseHeaderCode(text);
-  const customer =
-    header?.customer ||
-    normalizeCustomer(
-      findField(text, /(?:客户|委托方|委托单位|甲方|送样单位)(?:名称)?\s*[：:]\s*([^\n]{1,60})/) || '',
-    );
+  const customer = normalizeCustomer(
+    findField(text, /(?:客户|委托方|委托单位|甲方|送样单位)(?:名称)?\s*[：:]\s*([^\n]{1,60})/) || '',
+  );
 
   // ------- 项目 / 产品 -------
   let project = findField(text, /项目(?:名称|代号)?\s*[：:]\s*([^\n]{1,60})/) || '';

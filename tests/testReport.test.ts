@@ -78,12 +78,12 @@ describe('页眉编号识别（SYZX-客户 年月日 流水）', () => {
     expect(r!.date).toBe(`${expectedYear}-07-01`);
   });
 
-  it('页眉编号优先于正文标签（客户与日期）', () => {
+  it('页眉编号仅覆盖日期，客户始终取正文客户名称标签', () => {
     const meta = parseMetaOnly(
       'SYZX-BYD 26 07 01 01\n客户：其他客户\n报告日期：2020年1月2日',
       'x.pdf',
     );
-    expect(meta.customer).toBe('BYD');
+    expect(meta.customer).toBe('其他客户');
     expect(meta.date).toBe(`${expectedYear}-07-01`);
   });
 
@@ -105,6 +105,13 @@ describe('页眉编号识别（SYZX-客户 年月日 流水）', () => {
 });
 
 describe('客户名称规范化（读到 XX汽车 为止）', () => {
+  const expectedYear = (() => {
+    const now = new Date().getFullYear();
+    let y = Math.floor(now / 100) * 100 + 26;
+    if (y > now) y -= 100;
+    return y;
+  })();
+
   it('去掉「股份有限公司」等公司后缀', () => {
     expect(normalizeCustomer('长城汽车股份有限公司')).toBe('长城汽车');
     expect(normalizeCustomer('重庆长安汽车股份有限公司')).toBe('重庆长安汽车');
@@ -125,7 +132,8 @@ describe('客户名称规范化（读到 XX汽车 为止）', () => {
 
   it('页眉编号客户优先，不受规范化影响', () => {
     const meta = parseMetaOnly('SYZX-BYD 26 07 01 01\n客户名称：长城汽车股份有限公司', 'x.pdf');
-    expect(meta.customer).toBe('BYD');
+    expect(meta.customer).toBe('长城汽车');
+    expect(meta.date).toBe(`${expectedYear}-07-01`);
   });
 });
 
@@ -145,9 +153,9 @@ describe('扫描件 OCR 文本解析', () => {
     expect(despaceOcrText('客 户 名 称 ： 长 城 汽 车')).toBe('客户名称：长城汽车');
   });
 
-  it('有页眉编号：客户/日期取自页眉，其余字段从正文识别', () => {
+  it('有页眉编号：客户取自封面客户名称并规范化，日期取自页眉编号', () => {
     const meta = parseOcrMeta(OCR_SAMPLE, 'B26-A进气阻力.pdf');
-    expect(meta.customer).toBe('BYD');
+    expect(meta.customer).toBe('长城汽车');
     expect(meta.date).toBe(`${expectedYear}-07-01`);
     expect(meta.project).toContain('B26-A');
     expect(meta.product).toBe('空气滤清器总成');
@@ -176,9 +184,9 @@ describe('扫描件 OCR 文本解析', () => {
     '机 密   授 权 使 用 ， 禁 止 私 自 拍 照 、 截 屏 、 夕 卜 发',
   ].join('\n');
 
-  it('真实封面：页眉容错解析（X 丢失、·/一 分隔符）+ 零件名称兜底', () => {
+  it('真实封面：页眉容错解析日期 + 客户取自封面客户名称并规范化 + 零件名称兜底', () => {
     const meta = parseOcrMeta(REAL_OCR_ROWS, 'B26-A进气阻力.pdf');
-    expect(meta.customer).toBe('GW');
+    expect(meta.customer).toBe('长城汽车');
     expect(meta.date).toBe(`${expectedYear}-08-19`);
     expect(meta.project).toBe('压力损失');
     expect(meta.product).toBe('B26-A进气系统');
