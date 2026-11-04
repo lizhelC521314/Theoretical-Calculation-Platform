@@ -257,6 +257,37 @@ describe('扫描件 OCR 文本解析', () => {
   });
 });
 
+describe('零件名称仅中文时：项目与产品同名', () => {
+  it('OCR 封面：零件名称只有中文，项目与产品都取该名称', () => {
+    const rows = [
+      '零 件 名 称 ：   空 气 滤 清 器 总 成',
+      '项 目 名 称 ：   压 力 损 失',
+      '产 品 名 称 ：   滤 清 器',
+      '客 户 名 称 ：   长 城 汽 车 股 份 有 限 公 司',
+    ].join('\n');
+    const meta = parseOcrMeta(rows, 'x.pdf');
+    expect(meta.project).toBe('空气滤清器总成');
+    expect(meta.product).toBe('空气滤清器总成');
+  });
+
+  it('文字层 PDF：零件名称只有中文时同样取同名', () => {
+    const text = [
+      '零件名称：空气滤清器总成',
+      '项目名称：压力损失',
+      '客户名称：长城汽车股份有限公司',
+    ].join('\n');
+    const meta = parseMetaOnly(text, 'x.pdf');
+    expect(meta.project).toBe('空气滤清器总成');
+    expect(meta.product).toBe('空气滤清器总成');
+  });
+
+  it('零件名称含字母数字时仍按原规则拆分', () => {
+    const meta = parseMetaOnly('零件名称：B26-A 进气系统\n客户名称：长城汽车股份有限公司', 'x.pdf');
+    expect(meta.project).toBe('B26-A');
+    expect(meta.product).toBe('进气系统');
+  });
+});
+
 describe('归档文件名（客户+项目+试验项目+产品+版本+日期）', () => {
   it('生成并反解新版文件名', () => {
     const name = archivePdfFileName('长城汽车', 'B26-A', '压力损失', '进气系统', 'V1.0', '2026-08-19');

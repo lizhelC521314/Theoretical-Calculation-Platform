@@ -281,12 +281,15 @@ export function parseOcrMeta(rawText: string, fileName: string, ocrTableItem = '
   // 最后回退封面「项目名称」一栏
   // 项目：零件名称中的字母数字段（如 B26-A、CS75-2025）
   // 产品：优先「产品名称」标签，否则取零件名称中字母数字段之外的文字部分
+  // 零件名称只有中文时（无字母/数字/特殊符号），项目与产品都取零件名称
   const tableItem = ocrTableItem.trim() || parseTestItemFromTable(rawText);
   const testItem = tableItem || grab('项目(?:名称|代号)?');
   const partName = grab('零件名称');
   const split = splitPartName(partName);
-  const project = split.project || testItem;
-  const product = grab('产品(?:名称|型号)?') || split.product;
+  const project = split.onlyChinese ? split.project : split.project || testItem;
+  const product = split.onlyChinese
+    ? split.product
+    : grab('产品(?:名称|型号)?') || split.product;
 
   let version = cleanOcrVersion(grab('版本(?:号)?'));
   if (!version) version = cleanOcrVersion(text.match(/(?:^|[\s（(])(V[0-9Il|][0-9·•.。]*)/)?.[1] ?? '');
@@ -318,12 +321,17 @@ function normalizeDate(raw: string): string {
 /**
  * 从零件名称（如 "B26-A 进气系统" / "CS75-2025 空气滤清器"）中拆分：
  * 字母数字段 → 项目（project），其余文字 → 产品（product）。
- * 找不到字母数字段时 project 返回空串，product 取原值。
+ * 名称只有中文（无字母/数字/特殊符号）时 onlyChinese=true，项目与产品都取该名称；
+ * 找不到字母数字段且含非中文符号时 project 返回空串，product 取原值。
  */
-function splitPartName(value: string): { project: string; product: string } {
-  if (!value) return { project: '', product: '' };
+function splitPartName(value: string): { project: string; product: string; onlyChinese: boolean } {
+  if (!value) return { project: '', product: '', onlyChinese: false };
+  const plain = value.replace(/\s+/g, '');
+  if (/^[一-鿿]+$/.test(plain)) {
+    return { project: plain, product: plain, onlyChinese: true };
+  }
   const m = value.match(/[A-Za-z0-9]+(?:[-_\.][A-Za-z0-9]+)*/g);
-  if (!m || !m.length) return { project: '', product: value.trim() };
+  if (!m || !m.length) return { project: '', product: value.trim(), onlyChinese: false };
   const code = m.join('-').trim();
   // 从原值中去掉所有字母数字段（含连接符前后空格），剩下的就是产品名
   let rest = value;
@@ -331,7 +339,7 @@ function splitPartName(value: string): { project: string; product: string } {
     rest = rest.replace(seg, ' ');
   }
   rest = rest.replace(/\s+/g, ' ').trim();
-  return { project: code, product: rest };
+  return { project: code, product: rest, onlyChinese: false };
 }
 
 /**
@@ -417,6 +425,7 @@ export function parseMetaOnly(text: string, fileName: string): PdfReportMeta {
   // ------- 项目 / 产品 -------
   // 项目：零件名称中的字母数字段（如 B26-A、CS75-2025）
   // 产品：优先「产品名称」标签，否则取零件名称中字母数字段之外的文字部分
+  // 零件名称只有中文时（无字母/数字/特殊符号），项目与产品都取零件名称
   const partName =
     findField(text, /零件(?:名称)?\s*[：:]\s*([^\n]{1,80})/) ||
     findField(text, /样件(?:名称|编号)?\s*[：:]\s*([^\n]{1,80})/) ||
@@ -425,8 +434,10 @@ export function parseMetaOnly(text: string, fileName: string): PdfReportMeta {
   // 试验项目：优先取「试验结果」表格里的「试验项目」，否则回退封面「项目名称」一栏
   const testItem =
     parseTestItemFromTable(text) || findField(text, /项目(?:名称|代号)?\s*[：:]\s*([^\n]{1,60})/) || '';
-  let project = split.project || testItem;
-  let product = findField(text, /产品(?:名称|型号)?\s*[：:]\s*([^\n]{1,60})/) || split.product;
+  let project = split.onlyChinese ? split.project : split.project || testItem;
+  let product = split.onlyChinese
+    ? split.product
+    : findField(text, /产品(?:名称|型号)?\s*[：:]\s*([^\n]{1,60})/) || split.product;
 
   // ------- 版本（显式标签 优先 → 正文 V 号兜底 → 文件名兜底） -------
   let version =
