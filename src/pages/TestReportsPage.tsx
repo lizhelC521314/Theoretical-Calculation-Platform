@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { api, type CtrUser, type Project } from '../api';
 import {
-  FLOW_TEST_ITEM,
   bufToBase64,
   extractPdfText,
+  isFlowReport,
   missingMetaFields,
   ocrPdfFirstPage,
   parseMetaOnly,
@@ -29,8 +29,9 @@ interface PdfReportEntry {
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-/** 该报告是否需要记录流量（如进气阻力） */
-const needsFlow = (meta: PdfReportMeta) => meta.testItem.includes(FLOW_TEST_ITEM);
+/** 该报告是否需要记录流量（试验项目或文件名含「进气阻力」） */
+const needsFlow = (meta: PdfReportMeta, originalName = '') =>
+  isFlowReport(meta.testItem, originalName);
 
 /** 把 File 读成 base64（用于归档到 UNC） */
 async function fileToBase64(file: File): Promise<string> {
@@ -137,7 +138,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
       for (const r of reports) {
         try {
           const b64 = await fileToBase64(r.file);
-          const flow = needsFlow(r.meta) ? r.meta.flow : '';
+          const flow = needsFlow(r.meta, r.originalName) ? r.meta.flow : '';
           const fileName = archivePdfFileName(
             r.meta.customer,
             r.meta.project,
@@ -218,7 +219,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
 
       {reports.map((r) => {
         const missing = missingMetaFields(r.meta);
-        const flow = needsFlow(r.meta) ? r.meta.flow : '';
+        const flow = needsFlow(r.meta, r.originalName) ? r.meta.flow : '';
         const previewName = archivePdfFileName(
           r.meta.customer,
           r.meta.project,
@@ -269,7 +270,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
                   placeholder="如：压力损失"
                 />
               </label>
-              {needsFlow(r.meta) && (
+              {needsFlow(r.meta, r.originalName) && (
                 <>
                   <label className={`field ${!r.meta.flow ? 'field-warn' : ''}`}>
                     <span>流量（进气阻力，可修改）</span>

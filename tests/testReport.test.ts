@@ -5,6 +5,7 @@ import {
   buildTestXlsxBase64,
   despaceOcrText,
   normalizeCustomer,
+  isFlowReport,
   parseFlow,
   parseHeaderCode,
   parseMetaOnly,
@@ -398,6 +399,19 @@ describe('进气阻力：读取流量与单位', () => {
     expect(meta.testItem).toBe('压力损失');
     expect(meta.flow).toBe('');
     expect(meta.flowUnit).toBe('');
+  });
+
+  it('文件名含进气阻力时即使试验项目读成压力损失也读取流量', () => {
+    const text = [
+      '项目名称：压力损失',
+      '零件名称：B26-A 进气系统',
+      '接受标准：进气系统阻力≤3.5kPa@370kg/h',
+    ].join('\n');
+    const meta = parseMetaOnly(text, 'B26-A进气阻力.pdf');
+    expect(meta.testItem).toBe('压力损失');
+    expect(meta.flow).toBe('370');
+    expect(meta.flowUnit).toBe('kg/h');
+    expect(isFlowReport(meta.testItem, 'B26-A进气阻力.pdf')).toBe(true);
   });
 });
 

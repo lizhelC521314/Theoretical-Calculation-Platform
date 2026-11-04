@@ -64,6 +64,11 @@ export interface PdfReportMeta {
 /** 需要记录流量的试验项目（如进气阻力：3.5kPa@370kg/h） */
 export const FLOW_TEST_ITEM = '进气阻力';
 
+/** 该报告是否需要记录流量：试验项目或文件名含「进气阻力」 */
+export function isFlowReport(testItem: string, fileName = ''): boolean {
+  return testItem.includes(FLOW_TEST_ITEM) || fileName.includes(FLOW_TEST_ITEM);
+}
+
 export interface TestItem {
   id: string;
   /** 测试项目（如「传递损失」） */
@@ -320,8 +325,8 @@ export function parseOcrMeta(rawText: string, fileName: string, ocrTableItem = '
   let date = header?.date || normalizeDate(text);
   if (!date) date = normalizeDate(fileName);
 
-  // 流量：只在进气阻力的报告里保留（接受标准中的 3.5kPa@370kg/h）
-  const flowInfo = testItem.includes(FLOW_TEST_ITEM) ? parseFlow(rawText) : { flow: '', flowUnit: '' };
+  // 流量：只在进气阻力的报告里保留（试验项目或文件名含「进气阻力」，接受标准如 3.5kPa@370kg/h）
+  const flowInfo = isFlowReport(testItem, fileName) ? parseFlow(rawText) : { flow: '', flowUnit: '' };
 
   return {
     customer,
@@ -500,8 +505,8 @@ export function parseMetaOnly(text: string, fileName: string): PdfReportMeta {
     if (!product) product = parts[1] ?? '';
   }
 
-  // 流量：只在进气阻力的报告里保留（接受标准中的 3.5kPa@370kg/h）
-  const flowInfo = testItem.includes(FLOW_TEST_ITEM) ? parseFlow(text) : { flow: '', flowUnit: '' };
+  // 流量：只在进气阻力的报告里保留（试验项目或文件名含「进气阻力」，接受标准如 3.5kPa@370kg/h）
+  const flowInfo = isFlowReport(testItem, fileName) ? parseFlow(text) : { flow: '', flowUnit: '' };
 
   return {
     customer,
