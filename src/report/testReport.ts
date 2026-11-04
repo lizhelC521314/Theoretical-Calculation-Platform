@@ -169,6 +169,15 @@ export function parseHeaderCode(text: string): { customer: string; date: string 
 }
 
 /**
+ * 客户名称规范化：读到「XX汽车」即可，去掉「股份有限公司」等公司后缀。
+ * 如「长城汽车股份有限公司」→「长城汽车」；名称中不含「汽车」时保持原样。
+ */
+export function normalizeCustomer(name: string): string {
+  const m = name.match(/^.+?汽车/);
+  return m ? m[0] : name;
+}
+
+/**
  * 只从文本中提取元字段（客户/项目/产品/版本/日期），不识别测试项。
  * 用于 PDF 导入重命名场景。
  * 返回的字段可能为空，由调用方提示用户补全。
@@ -180,11 +189,13 @@ export function parseMetaOnly(text: string, fileName: string): PdfReportMeta {
     .filter((l) => l.trim());
 
   // ------- 客户 / 日期：页眉编号（SYZX-客户 年月日）优先，标签提取兜底 -------
+  // 标签提取到的公司全称按「读到 XX 汽车」规范化（长城汽车股份有限公司 → 长城汽车）
   const header = parseHeaderCode(text);
   const customer =
     header?.customer ||
-    findField(text, /(?:客户|委托方|委托单位|甲方|送样单位)\s*[：:]\s*([^\n]{1,60})/) ||
-    '';
+    normalizeCustomer(
+      findField(text, /(?:客户|委托方|委托单位|甲方|送样单位)(?:名称)?\s*[：:]\s*([^\n]{1,60})/) || '',
+    );
 
   // ------- 项目 / 产品 -------
   let project = findField(text, /项目(?:名称|代号)?\s*[：:]\s*([^\n]{1,60})/) || '';

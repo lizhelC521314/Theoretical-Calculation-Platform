@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_KEYWORDS,
   buildTestXlsxBase64,
+  normalizeCustomer,
   parseHeaderCode,
   parseMetaOnly,
   parseTestReport,
@@ -98,5 +99,30 @@ describe('页眉编号识别（SYZX-客户 年月日 流水）', () => {
   it('编号在正文深处（超过页眉前 10 行）不识别', () => {
     const body = Array.from({ length: 15 }, (_, i) => `第${i + 1}行内容`).join('\n');
     expect(parseHeaderCode(`报告标题\n${body}\nSYZX-BYD 26 07 01 01`)).toBeNull();
+  });
+});
+
+describe('客户名称规范化（读到 XX汽车 为止）', () => {
+  it('去掉「股份有限公司」等公司后缀', () => {
+    expect(normalizeCustomer('长城汽车股份有限公司')).toBe('长城汽车');
+    expect(normalizeCustomer('重庆长安汽车股份有限公司')).toBe('重庆长安汽车');
+  });
+
+  it('名称中不含「汽车」时保持原样', () => {
+    expect(normalizeCustomer('比亚迪股份有限公司')).toBe('比亚迪股份有限公司');
+    expect(normalizeCustomer('')).toBe('');
+  });
+
+  it('从封面「客户名称」标签提取并规范化', () => {
+    const meta = parseMetaOnly(
+      '某实验报告封面\n客户名称：长城汽车股份有限公司\n产品名称：空气滤清器',
+      'x.pdf',
+    );
+    expect(meta.customer).toBe('长城汽车');
+  });
+
+  it('页眉编号客户优先，不受规范化影响', () => {
+    const meta = parseMetaOnly('SYZX-BYD 26 07 01 01\n客户名称：长城汽车股份有限公司', 'x.pdf');
+    expect(meta.customer).toBe('BYD');
   });
 });
