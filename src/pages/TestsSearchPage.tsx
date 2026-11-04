@@ -110,6 +110,7 @@ export function TestsSearchPage({ user: _user }: Props) {
         p.customer.toLowerCase().includes(k) ||
         p.project.toLowerCase().includes(k) ||
         p.testItem.toLowerCase().includes(k) ||
+        `${p.flow}${p.flowUnit}`.toLowerCase().includes(k) ||
         p.product.toLowerCase().includes(k) ||
         p.version.toLowerCase().includes(k)
       );
@@ -262,11 +263,12 @@ export function TestsSearchPage({ user: _user }: Props) {
                 <th style={{ width: 64 }}>类型</th>
                 <th style={{ width: '12%' }}>客户</th>
                 <th style={{ width: '12%' }}>项目</th>
-                <th style={{ width: '12%' }}>试验项目</th>
-                <th style={{ width: '11%' }}>产品</th>
-                <th style={{ width: '7%' }}>版本</th>
-                <th style={{ width: '9%' }}>日期</th>
-                <th style={{ width: '9%' }}>大小</th>
+                <th style={{ width: '11%' }}>试验项目</th>
+                <th style={{ width: '8%' }}>流量</th>
+                <th style={{ width: '10%' }}>产品</th>
+                <th style={{ width: '6%' }}>版本</th>
+                <th style={{ width: '8%' }}>日期</th>
+                <th style={{ width: '8%' }}>大小</th>
                 <th>完整文件名</th>
                 <th style={{ width: 56 }}>操作</th>
               </tr>
@@ -296,6 +298,7 @@ export function TestsSearchPage({ user: _user }: Props) {
                     <td>{p.customer || '—'}</td>
                     <td>{p.project || '—'}</td>
                     <td>{p.testItem || '—'}</td>
+                    <td>{p.flow ? `${p.flow} ${p.flowUnit || ''}`.trim() : '—'}</td>
                     <td>{p.product || '—'}</td>
                     <td>{p.version || '—'}</td>
                     <td>{p.date || '—'}</td>
@@ -319,7 +322,7 @@ export function TestsSearchPage({ user: _user }: Props) {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="center settings-hint">
+                  <td colSpan={10} className="center settings-hint">
                     {files.length === 0 ? '试验库暂无归档报告，请先在「试验报告导入」模块归档' : '无匹配结果'}
                   </td>
                 </tr>
@@ -352,6 +355,11 @@ export function TestsSearchPage({ user: _user }: Props) {
                   {selectedMeta.customer && <span className="chip">客户：{selectedMeta.customer}</span>}
                   <span className="chip">项目：{selectedMeta.project || '—'}</span>
                   {selectedMeta.testItem && <span className="chip">试验项目：{selectedMeta.testItem}</span>}
+                  {selectedMeta.flow && (
+                    <span className="chip">
+                      流量：{selectedMeta.flow} {selectedMeta.flowUnit}
+                    </span>
+                  )}
                   <span className="chip">产品：{selectedMeta.product || '—'}</span>
                   <span className="chip">版本：{selectedMeta.version || '—'}</span>
                   <span className="chip">日期：{selectedMeta.date || '—'}</span>

@@ -5,6 +5,7 @@ import {
   buildTestXlsxBase64,
   despaceOcrText,
   normalizeCustomer,
+  parseFlow,
   parseHeaderCode,
   parseMetaOnly,
   parseOcrMeta,
@@ -296,10 +297,51 @@ describe('归档文件名（客户+项目+试验项目+产品+版本+日期）',
       customer: '长城汽车',
       project: 'B26-A',
       testItem: '压力损失',
+      flow: '',
+      flowUnit: '',
       product: '进气系统',
       version: 'V1.0',
       date: '20260819',
     });
+  });
+
+  it('进气阻力：文件名插入流量段并可反解', () => {
+    const name = archivePdfFileName(
+      '长城汽车',
+      'B26-A',
+      '进气阻力',
+      '进气系统',
+      'V1.0',
+      '2026-08-19',
+      '370',
+      'kg/h',
+    );
+    expect(name).toBe('长城汽车+B26-A+进气阻力+370kg-h+进气系统+V1.0+20260819.pdf');
+    expect(parseArchiveName(name)).toEqual({
+      customer: '长城汽车',
+      project: 'B26-A',
+      testItem: '进气阻力',
+      flow: '370',
+      flowUnit: 'kg/h',
+      product: '进气系统',
+      version: 'V1.0',
+      date: '20260819',
+    });
+  });
+
+  it('流量单位 m³/h 在文件名中记为 m3-h', () => {
+    const name = archivePdfFileName(
+      '长城汽车',
+      'B26-A',
+      '进气阻力',
+      '进气系统',
+      'V1.0',
+      '2026-08-19',
+      '1200',
+      'm³/h',
+    );
+    expect(name).toContain('+1200m3-h+');
+    expect(parseArchiveName(name).flowUnit).toBe('m³/h');
   });
 
   it('兼容旧版 5 段 PDF 与 4 段 xlsx 文件名', () => {
@@ -307,6 +349,8 @@ describe('归档文件名（客户+项目+试验项目+产品+版本+日期）',
       customer: '长城汽车',
       project: 'B26-A',
       testItem: '',
+      flow: '',
+      flowUnit: '',
       product: '进气系统',
       version: 'V1.0',
       date: '20260819',
@@ -315,10 +359,45 @@ describe('归档文件名（客户+项目+试验项目+产品+版本+日期）',
       customer: '',
       project: 'B26-A',
       testItem: '',
+      flow: '',
+      flowUnit: '',
       product: '进气系统',
       version: 'V1.0',
       date: '20260819',
     });
+  });
+});
+
+describe('进气阻力：读取流量与单位', () => {
+  it('文字版：接受标准 3.5kPa@370kg/h → 370 kg/h', () => {
+    const text = [
+      '试验项目：进气阻力',
+      '客户名称：长城汽车股份有限公司',
+      '零件名称：B26-A 进气系统',
+      '接受标准：进气系统阻力≤3.5kPa@370kg/h',
+    ].join('\n');
+    const meta = parseMetaOnly(text, 'x.pdf');
+    expect(meta.testItem).toBe('进气阻力');
+    expect(meta.flow).toBe('370');
+    expect(meta.flowUnit).toBe('kg/h');
+  });
+
+  it('扫描件 OCR：字间空格与 m3 写法兼容', () => {
+    const ocr = [
+      '试 验 项 目 ： 进 气 阻 力',
+      '接 受 标 准 ： 进 气 系 统 阻 力 ≤ 3 . 5kPa@ 370kg/h',
+    ].join('\n');
+    const meta = parseOcrMeta(ocr, 'x.pdf', '进气阻力');
+    expect(meta.flow).toBe('370');
+    expect(meta.flowUnit).toBe('kg/h');
+    expect(parseFlow('风量　≤　1200m3／h')).toEqual({ flow: '1200', flowUnit: 'm³/h' });
+  });
+
+  it('非进气阻力的报告不保留流量', () => {
+    const meta = parseMetaOnly('项目名称：压力损失\n接受标准：≤3.5kPa@370kg/h', 'x.pdf');
+    expect(meta.testItem).toBe('压力损失');
+    expect(meta.flow).toBe('');
+    expect(meta.flowUnit).toBe('');
   });
 });
 

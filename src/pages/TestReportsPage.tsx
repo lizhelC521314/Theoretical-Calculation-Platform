@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, type CtrUser, type Project } from '../api';
 import {
+  FLOW_TEST_ITEM,
   bufToBase64,
   extractPdfText,
   missingMetaFields,
@@ -27,6 +28,9 @@ interface PdfReportEntry {
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+
+/** 该报告是否需要记录流量（如进气阻力） */
+const needsFlow = (meta: PdfReportMeta) => meta.testItem.includes(FLOW_TEST_ITEM);
 
 /** 把 File 读成 base64（用于归档到 UNC） */
 async function fileToBase64(file: File): Promise<string> {
@@ -133,6 +137,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
       for (const r of reports) {
         try {
           const b64 = await fileToBase64(r.file);
+          const flow = needsFlow(r.meta) ? r.meta.flow : '';
           const fileName = archivePdfFileName(
             r.meta.customer,
             r.meta.project,
@@ -140,6 +145,8 @@ export function TestReportsPage({ user, currentProject }: Props) {
             r.meta.product,
             r.meta.version,
             r.meta.date,
+            flow,
+            r.meta.flowUnit,
           );
           const res = await api.db.archive({ base64: b64, fileName, libType: 'test' });
           if (res.ok) {
@@ -202,14 +209,16 @@ export function TestReportsPage({ user, currentProject }: Props) {
             其中日期优先取报告顶端页眉编号（如 SYZX-BYD 26 07 01 01：年份按当前电脑年份补齐前两位 26 → 2026），
             客户取封面「客户名称」并截取到「XX汽车」为止，试验项目取封面「项目名称」一栏。
             所有字段均可在下方列表中校对 / 补全，确认无误后点击「全部归档到试验库」。
+            试验项目为「进气阻力」时，还会从接受标准（如 3.5kPa@370kg/h）读取流量，数值与单位（kg/h、m³/h）均可修改。
             扫描件（无文字层的图片型 PDF）会自动对封面做系统 OCR 识别，准确率低于文字版，请重点核对。
-            归档文件名统一格式为「客户+项目+试验项目+产品+版本+日期.pdf」，存放在 UNC 试验库目录。
+            归档文件名统一格式为「客户+项目+试验项目+流量+产品+版本+日期.pdf」（无流量的报告省略流量段），存放在 UNC 试验库目录。
           </p>
         </div>
       )}
 
       {reports.map((r) => {
         const missing = missingMetaFields(r.meta);
+        const flow = needsFlow(r.meta) ? r.meta.flow : '';
         const previewName = archivePdfFileName(
           r.meta.customer,
           r.meta.project,
@@ -217,6 +226,8 @@ export function TestReportsPage({ user, currentProject }: Props) {
           r.meta.product,
           r.meta.version,
           r.meta.date,
+          flow,
+          r.meta.flowUnit,
         );
         return (
           <div className="settings-card test-report-card" key={r.id}>
@@ -258,6 +269,28 @@ export function TestReportsPage({ user, currentProject }: Props) {
                   placeholder="如：压力损失"
                 />
               </label>
+              {needsFlow(r.meta) && (
+                <>
+                  <label className={`field ${!r.meta.flow ? 'field-warn' : ''}`}>
+                    <span>流量（进气阻力，可修改）</span>
+                    <input
+                      value={r.meta.flow}
+                      onChange={(e) => patchMeta(r.id, 'flow', e.target.value)}
+                      placeholder="如：370"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>流量单位</span>
+                    <select
+                      value={r.meta.flowUnit}
+                      onChange={(e) => patchMeta(r.id, 'flowUnit', e.target.value)}
+                    >
+                      <option value="kg/h">kg/h</option>
+                      <option value="m³/h">m³/h</option>
+                    </select>
+                  </label>
+                </>
+              )}
               <label className={`field ${!r.meta.product ? 'field-warn' : ''}`}>
                 <span>产品（必填）</span>
                 <input

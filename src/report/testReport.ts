@@ -52,10 +52,17 @@ export interface PdfReportMeta {
   project: string;
   /** 试验项目：取自封面「项目名称」一栏，如「压力损失」 */
   testItem: string;
+  /** 流量：仅「进气阻力」报告需要，如 370；其余报告留空 */
+  flow: string;
+  /** 流量单位：kg/h 或 m³/h */
+  flowUnit: string;
   product: string;
   version: string;
   date: string;
 }
+
+/** 需要记录流量的试验项目（如进气阻力：3.5kPa@370kg/h） */
+export const FLOW_TEST_ITEM = '进气阻力';
 
 export interface TestItem {
   id: string;
@@ -156,6 +163,18 @@ export function despaceOcrText(text: string): string {
   return text
     .replace(/(?<=[一-鿿0-9A-Za-z：:.．·•/\-+()（）])[ \t]+(?=[一-鿿0-9A-Za-z：:.．·•/\-+()（）])/g, '')
     .trim();
+}
+
+/**
+ * 从报告中读取流量与单位：进气阻力报告的接受标准形如「进气系统阻力≤3.5kPa@370kg/h」，
+ * 取「@」后面的数值与单位（也兼容扫描件 OCR 把 m³ 识别成 m3 的情况）。
+ * 找不到返回空串。
+ */
+export function parseFlow(text: string): { flow: string; flowUnit: string } {
+  const compact = text.replace(/[ \t]+/g, '');
+  const m = compact.match(/(\d+(?:\.\d+)?)(kg[\/／]h|m[³3][\/／]h)/i);
+  if (!m) return { flow: '', flowUnit: '' };
+  return { flow: m[1], flowUnit: m[2].toLowerCase().startsWith('m') ? 'm³/h' : 'kg/h' };
 }
 
 /** 表格里的「试验项目」标签（OCR 可能在字间插空格） */
@@ -301,7 +320,19 @@ export function parseOcrMeta(rawText: string, fileName: string, ocrTableItem = '
   let date = header?.date || normalizeDate(text);
   if (!date) date = normalizeDate(fileName);
 
-  return { customer, project, testItem, product, version, date };
+  // 流量：只在进气阻力的报告里保留（接受标准中的 3.5kPa@370kg/h）
+  const flowInfo = testItem.includes(FLOW_TEST_ITEM) ? parseFlow(rawText) : { flow: '', flowUnit: '' };
+
+  return {
+    customer,
+    project,
+    testItem,
+    flow: flowInfo.flow,
+    flowUnit: flowInfo.flowUnit,
+    product,
+    version,
+    date,
+  };
 }
 
 /** 从文本中提取「标签：值」字段 */
@@ -469,7 +500,19 @@ export function parseMetaOnly(text: string, fileName: string): PdfReportMeta {
     if (!product) product = parts[1] ?? '';
   }
 
-  return { customer, project, testItem, product, version, date };
+  // 流量：只在进气阻力的报告里保留（接受标准中的 3.5kPa@370kg/h）
+  const flowInfo = testItem.includes(FLOW_TEST_ITEM) ? parseFlow(text) : { flow: '', flowUnit: '' };
+
+  return {
+    customer,
+    project,
+    testItem,
+    flow: flowInfo.flow,
+    flowUnit: flowInfo.flowUnit,
+    product,
+    version,
+    date,
+  };
 }
 
 /** 检查必填元字段是否齐全，返回缺失字段名数组（空数组表示齐全） */

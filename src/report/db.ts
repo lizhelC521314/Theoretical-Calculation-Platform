@@ -33,7 +33,28 @@ export function archiveFileName(project: string, product: string, version: strin
   return `${cleanFileName(project)}+${cleanFileName(product)}+${cleanFileName(version || 'V0')}+${d}.xlsx`;
 }
 
-/** PDF 归档文件名：客户+项目+试验项目+产品+版本+日期.pdf（单一真源模板） */
+/** 流量段：370 + kg/h → 370kg-h（文件名不能含「/」）；m³/h → 370m3-h */
+function flowSegment(flow: string, unit: string): string {
+  const v = cleanFileName(flow.trim());
+  if (!v || v === '未命名') return '';
+  const u = unit.trim().toLowerCase();
+  if (/^m[³3]/.test(u)) return `${v}m3-h`;
+  if (/^kg/.test(u)) return `${v}kg-h`;
+  const cleaned = cleanFileName(u);
+  return cleaned && cleaned !== '未命名' ? `${v}${cleaned}` : v;
+}
+
+/** 反解流量段（370kg-h / 370m3-h） */
+function parseFlowSegment(segment: string): { flow: string; flowUnit: string } {
+  const m = segment.match(/^(\d+(?:\.\d+)?)(m3-h|kg-h)?$/i);
+  if (!m) return { flow: segment, flowUnit: '' };
+  return { flow: m[1], flowUnit: m[2] ? (m[2].toLowerCase().startsWith('m') ? 'm³/h' : 'kg/h') : '' };
+}
+
+/**
+ * PDF 归档文件名：客户+项目+试验项目+[流量]+产品+版本+日期.pdf（单一真源模板）
+ * 流量段只在进气阻力等需要记录流量的报告中出现，其余报告保持原六段格式。
+ */
 export function archivePdfFileName(
   customer: string,
   project: string,
@@ -41,14 +62,20 @@ export function archivePdfFileName(
   product: string,
   version: string,
   date: string,
+  flow = '',
+  flowUnit = '',
 ): string {
   const d = (date || new Date().toISOString().slice(0, 10)).replace(/-/g, '');
-  const parts = [customer, project, testItem, product, version || 'V0', d].map((s) => cleanFileName(s));
+  const flowSeg = flowSegment(flow, flowUnit);
+  const parts = [customer, project, testItem, ...(flowSeg ? [flowSeg] : []), product, version || 'V0', d].map(
+    (s) => cleanFileName(s),
+  );
   return `${parts.join('+')}.pdf`;
 }
 
 /**
- * 从归档文件名反解元信息。兼容三种格式：
+ * 从归档文件名反解元信息。兼容四种格式：
+ *   新版 PDF（含流量）：客户+项目+试验项目+流量+产品+版本+日期（去掉日期后 6 段）
  *   新版 PDF：客户+项目+试验项目+产品+版本+日期（去掉日期后 5 段）
  *   旧版 PDF：客户+项目+产品+版本+日期（去掉日期后 4 段）
  *   xlsx：项目+产品+版本+日期（去掉日期后 3 段）
@@ -57,6 +84,8 @@ export function parseArchiveName(name: string): {
   customer: string;
   project: string;
   testItem: string;
+  flow: string;
+  flowUnit: string;
   product: string;
   version: string;
   date: string;
@@ -68,16 +97,31 @@ export function parseArchiveName(name: string): {
   if (parts.length > 0 && /^\d{6,8}$/.test(parts[parts.length - 1])) {
     date = parts.pop()!;
   }
+  // 含流量的新版 PDF：客户 / 项目 / 试验项目 / 流量 / 产品 / 版本
+  if (parts.length >= 6) {
+    const [customer, project, testItem, flowOnly, product, version] = parts;
+    const flowInfo = parseFlowSegment(flowOnly);
+    return {
+      customer,
+      project,
+      testItem,
+      flow: flowInfo.flow,
+      flowUnit: flowInfo.flowUnit,
+      product,
+      version,
+      date,
+    };
+  }
   // 新版 PDF：客户 / 项目 / 试验项目 / 产品 / 版本
   if (parts.length >= 5) {
     const [customer, project, testItem, product, version] = parts;
-    return { customer, project, testItem, product, version, date };
+    return { customer, project, testItem, flow: '', flowUnit: '', product, version, date };
   }
   const version = parts.pop() || '';
   const product = parts.pop() || '';
   const project = parts.pop() || '';
   const customer = parts.pop() || '';
-  return { customer, project, testItem: '', product, version, date };
+  return { customer, project, testItem: '', flow: '', flowUnit: '', product, version, date };
 }
 
 /** 可信资产文件名：项目-产品-版本.xlsx */
