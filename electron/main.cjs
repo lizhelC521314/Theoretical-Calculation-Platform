@@ -772,6 +772,87 @@ function extractTestItemFromWords(words) {
 }
 
 /**
+ * 按列坐标读取试验项目表格中「接受标准（接受准则）」列的流量：
+ * 定位该字段标签所在的列，取其右侧（值所在单元格）纵向范围内的全部词，
+ * 用正则找「数字 + kg/h 或 m³/h」，多个流量按出现顺序用「/」连接。
+ * 这样不会把图表坐标轴「流量kg/h」或相邻列的日期/温度当成流量。
+ */
+function extractFlowFromWords(words) {
+  const ws = (words || []).filter((w) => w && w.text);
+  if (!ws.length) return { flow: '', flowUnit: '' };
+  const compact = (t) => t.replace(/[ \t]/g, '');
+  const hs = ws.map((w) => w.h || 0).filter((v) => v > 0).sort((a, b) => a - b);
+  const medH = hs[Math.floor(hs.length / 2)] || 20;
+  const tol = Math.max(10, medH * 0.6);
+
+  // 按 y 中心聚成行
+  const rows = [];
+  for (const w of [...ws].sort((a, b) => a.y + a.h / 2 - (b.y + b.h / 2))) {
+    const cy = w.y + w.h / 2;
+    const row = rows.find((r) => Math.abs(r.cy - cy) <= tol);
+    if (row) {
+      row.words.push(w);
+      row.cy = (row.cy * (row.words.length - 1) + cy) / row.words.length;
+    } else {
+      rows.push({ cy, words: [w] });
+    }
+  }
+  rows.sort((a, b) => a.cy - b.cy);
+
+  const FLOW_CELL = /(\d+(?:\.\d+)?)(kg|m[³3])[\/／|丨]h/gi;
+  const values = [];
+  let unit = '';
+
+  for (let ri = 0; ri < rows.length; ri++) {
+    const rw = [...rows[ri].words].sort((a, b) => a.x - b.x);
+    // 行内定位「接受标准 / 接受准则」标签（OCR 可能拆成多个词）
+    let s = -1;
+    let e = -1;
+    for (let i = 0; i < rw.length && s < 0; i++) {
+      let acc = compact(rw[i].text);
+      for (let j = i; j < Math.min(rw.length, i + 4); j++) {
+        if (j > i) acc += compact(rw[j].text);
+        if (/接受(标准|准则)/.test(acc)) {
+          s = i;
+          e = j;
+          break;
+        }
+        if (acc.length > 8) break;
+      }
+    }
+    if (s < 0) continue;
+
+    const labelLeft = rw[s].x;
+    const boundary = rw[e].x + (rw[e].w || 0) + medH * 0.2;
+
+    // 纵向范围：标签行起，直到同一左列又出现新的字段标签（试验结论、备注等）
+    let stopCy = Infinity;
+    for (let k = ri + 1; k < rows.length; k++) {
+      if (rows[k].words.some((w) => Math.abs(w.x - labelLeft) <= medH * 0.8)) {
+        stopCy = rows[k].cy;
+        break;
+      }
+    }
+
+    for (let k = ri; k < rows.length && rows[k].cy < stopCy - tol * 0.5; k++) {
+      const rowText = compact(
+        [...rows[k].words]
+          .sort((a, b) => a.x - b.x)
+          .filter((w) => w.x + w.w / 2 > boundary)
+          .map((w) => w.text)
+          .join(''),
+      );
+      for (const m of rowText.matchAll(FLOW_CELL)) {
+        if (!values.includes(m[1])) values.push(m[1]);
+        unit = m[2].toLowerCase().startsWith('m') ? 'm³/h' : 'kg/h';
+      }
+    }
+  }
+
+  return { flow: values.join('/'), flowUnit: values.length ? unit : '' };
+}
+
+/**
  * 扫描件 OCR：主进程逐页提取内嵌扫描图（pdfjs operator list，无需 canvas/worker），
  * 编码为 BMP 后调用 Windows 系统 OCR（WinRT Windows.Media.Ocr，离线、支持中文），
  * 按词坐标还原来版面行返回文本。封面必读；之后逐页识别直到找到「试验项目」表格（最多 8 页），
@@ -800,6 +881,9 @@ ipcMain.handle('pdf:ocrFirstPage', async (_e, filePath) => {
 
     const pagesText = [];
     let tableItem = '';
+    let flow = '';
+    let flowUnit = '';
+    let tablePages = 0;
     try {
       const doc = await task.promise;
       const maxPages = Math.min(doc.numPages, 8);
@@ -818,15 +902,28 @@ ipcMain.handle('pdf:ocrFirstPage', async (_e, filePath) => {
         if (pageText) pagesText.push(pageText);
         // 试验项目取「试验结果」表格里的值（按列坐标提取，避免误取相邻列）
         if (!tableItem) tableItem = extractTestItemFromWords(ocr.words);
-        // 已识别到表格中的「试验项目」，无需再往后翻
-        if (tableItem || /[试实]\s*验\s*项\s*目/.test(pageText)) break;
+        // 流量取试验项目表格「接受标准」列（数字 + kg/h 或 m³/h，多个用 / 连接）
+        if (!flow) {
+          const pf = extractFlowFromWords(ocr.words);
+          if (pf.flow) {
+            flow = pf.flow;
+            flowUnit = pf.flowUnit;
+          }
+        }
+        const hasItemLabel = /[试实]\s*验\s*项\s*目/.test(pageText);
+        if (hasItemLabel || tableItem) {
+          // 已读到表格页：拿到流量即可停止，否则多给一页（接受标准可能续到下一页）
+          if (flow) break;
+          tablePages += 1;
+          if (tablePages > 1) break;
+        }
       }
     } finally {
       await task.destroy();
     }
 
     if (!pagesText.length) return { ok: false, message: '未识别到文字' };
-    return { ok: true, text: pagesText.join('\n\n'), testItem: tableItem };
+    return { ok: true, text: pagesText.join('\n\n'), testItem: tableItem, flow, flowUnit };
   } catch (err) {
     return { ok: false, message: String((err && err.message) || err) };
   }

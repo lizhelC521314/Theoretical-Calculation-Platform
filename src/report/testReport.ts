@@ -144,18 +144,23 @@ export async function extractPdfText(file: File): Promise<string> {
 
 /**
  * 扫描件兜底：主进程逐页提取内嵌扫描图并做系统 OCR（按词坐标还原版面行）。
- * 返回 { text, testItem }；testItem 由主进程按「试验项目」列坐标从表格中取，
- * 识别失败或无文字时为空串。
+ * 返回 { text, testItem, flow, flowUnit }；testItem / flow 由主进程按列坐标从
+ * 试验项目表格中取（试验项目列、接受标准列），识别失败或无文字时为空串。
  */
-export async function ocrPdfFirstPage(file: File): Promise<{ text: string; testItem: string }> {
+export async function ocrPdfFirstPage(
+  file: File,
+): Promise<{ text: string; testItem: string; flow: string; flowUnit: string }> {
+  const empty = { text: '', testItem: '', flow: '', flowUnit: '' };
   const { api } = await import('../api');
   const filePath = api.file.getPath(file);
-  if (!filePath) return { text: '', testItem: '' };
+  if (!filePath) return empty;
   const res = await api.pdf.ocrFirstPage(filePath);
-  if (!res.ok) return { text: '', testItem: '' };
+  if (!res.ok) return empty;
   return {
     text: typeof res.text === 'string' ? res.text : '',
     testItem: typeof res.testItem === 'string' ? res.testItem : '',
+    flow: typeof res.flow === 'string' ? res.flow : '',
+    flowUnit: typeof res.flowUnit === 'string' ? res.flowUnit : '',
   };
 }
 
@@ -171,22 +176,43 @@ export function despaceOcrText(text: string): string {
 }
 
 /**
- * 从报告中读取流量与单位：进气阻力报告的接受标准形如「进气系统阻力≤3kPa@260kg/h」
- * 「在额定空气体积流量下260kg/h」「SC6HAU进气流量380kg/h」等写法。
- * 一份报告可能有多条流量（多个样件/多行接受标准），全部按出现顺序保留，用「/」分隔。
+ * 读取流量与单位：只在试验项目表格的「接受标准 / 接受准则」字段中取，
+ * 内容形如「进气系统阻力≤3kPa@260kg/h」「在额定空气体积流量下260kg/h」
+ * 「SC6HAU进气流量380kg/h」。多个流量按出现顺序用「/」连接（如 260/240/380）。
  * 兼容扫描件 OCR 的 m3、全角斜杠、误识别的竖线，以及数字与单位被空格/换行拆开的情况。
  * 找不到返回空串。
  */
 export function parseFlow(text: string): { flow: string; flowUnit: string } {
-  // 去掉所有空白（含换行）：OCR 常把「260」「kg/h」拆成多个词甚至两行
-  const compact = text.replace(/\s+/g, '');
-  const re = /(\d+(?:\.\d+)?)(kg|m[³3])[\/／|丨]h/gi;
+  const lines = text.split(/\r?\n/).map((l) => l.replace(/\s+$/, ''));
+  const ACCEPT_LABEL = /接受(标准|准则)/;
+  // 后续行的行首若是另一个字段名，说明已离开「接受标准」单元格
+  const NEXT_FIELD =
+    /^(试验项目|样品名称|样件名称|样品编号|样品件号|试验时间|试验日期|试验人员|试验方法|试验区域|试验部位|试验温度|试验设备|试验标准|试验结论|判定|备注|技术要求|序号)/;
+  const FLOW_CELL = /(\d+(?:\.\d+)?)(kg|m[³3])[\/／|丨]h/gi;
   const values: string[] = [];
   let unit = '';
-  for (const m of compact.matchAll(re)) {
-    if (!values.includes(m[1])) values.push(m[1]);
-    unit = m[2].toLowerCase().startsWith('m') ? 'm³/h' : 'kg/h';
+
+  const collect = (line: string) => {
+    const compact = line.replace(/[ \t]+/g, '');
+    for (const m of compact.matchAll(FLOW_CELL)) {
+      if (!values.includes(m[1])) values.push(m[1]);
+      unit = m[2].toLowerCase().startsWith('m') ? 'm³/h' : 'kg/h';
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const compact = lines[i].replace(/[ \t]+/g, '');
+    if (!ACCEPT_LABEL.test(compact)) continue;
+    // 标签行的值（同行），以及值单元格换行后的后续行（最多 4 行）
+    collect(compact);
+    for (let j = i + 1; j < Math.min(lines.length, i + 5); j++) {
+      const l = lines[j].trim();
+      if (!l) continue;
+      if (NEXT_FIELD.test(l)) break;
+      collect(l);
+    }
   }
+
   return { flow: values.join('/'), flowUnit: values.length ? unit : '' };
 }
 
@@ -284,7 +310,13 @@ function cleanOcrVersion(raw: string): string {
 }
 
 /** OCR 文本专用元字段解析：封面页先 despace，按「下一已知标签」截止抓取。ocrTableItem 为主进程按列坐标取到的试验项目 */
-export function parseOcrMeta(rawText: string, fileName: string, ocrTableItem = ''): PdfReportMeta {
+export function parseOcrMeta(
+  rawText: string,
+  fileName: string,
+  ocrTableItem = '',
+  ocrFlow = '',
+  ocrFlowUnit = '',
+): PdfReportMeta {
   // 多页 OCR 时页与页之间以空行分隔：元字段只从封面页取，避免试验结果表里的
   // 日期/委托方等内容污染字段；试验项目则在全文中查找（表格通常在后面几页）
   const firstPage = rawText.split(/\n{2,}/)[0] || rawText;
@@ -333,8 +365,12 @@ export function parseOcrMeta(rawText: string, fileName: string, ocrTableItem = '
   let date = header?.date || normalizeDate(text);
   if (!date) date = normalizeDate(fileName);
 
-  // 流量：只在进气阻力的报告里保留（试验项目或文件名含「进气阻力」，接受标准如 3.5kPa@370kg/h）
-  const flowInfo = isFlowReport(testItem, fileName) ? parseFlow(rawText) : { flow: '', flowUnit: '' };
+  // 流量：只在进气阻力的报告里保留（试验项目或文件名含「进气阻力」）。
+  // 主进程按「接受标准」列坐标取到的值优先，其次按文本中的接受标准字段解析
+  const flowText = parseFlow(rawText);
+  const flowInfo = isFlowReport(testItem, fileName)
+    ? { flow: ocrFlow.trim() || flowText.flow, flowUnit: ocrFlow.trim() ? ocrFlowUnit.trim() : flowText.flowUnit }
+    : { flow: '', flowUnit: '' };
 
   return {
     customer,

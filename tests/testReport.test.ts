@@ -407,29 +407,46 @@ describe('进气阻力：读取流量与单位', () => {
     const meta = parseOcrMeta(ocr, 'x.pdf', '进气阻力');
     expect(meta.flow).toBe('370');
     expect(meta.flowUnit).toBe('kg/h');
-    expect(parseFlow('风量　≤　1200m3／h')).toEqual({ flow: '1200', flowUnit: 'm³/h' });
+    expect(parseFlow('接受标准\t风量　≤　1200m3／h')).toEqual({ flow: '1200', flowUnit: 'm³/h' });
   });
 
-  it('接受准则句式：在额定空气体积流量下 260kg/h', () => {
-    expect(parseFlow('在额定空气体积流量下 260kg/h，进气系统阻力≤3 kPa')).toEqual({
-      flow: '260',
-      flowUnit: 'kg/h',
-    });
-    // OCR 把数字与单位拆到不同行
-    expect(parseFlow('在额定空气体积流量\n下 260\nkg/h')).toEqual({ flow: '260', flowUnit: 'kg/h' });
+  it('接受标准句式：在额定空气体积流量下 260kg/h', () => {
+    const text = [
+      '试验项目\t进气阻力',
+      '接受标准\t在额定空气体积流量下260kg/h，进气系统阻力≤3 kPa',
+      '试验结论\t合格',
+    ].join('\n');
+    expect(parseFlow(text)).toEqual({ flow: '260', flowUnit: 'kg/h' });
+    // 值单元格换行到下一行
+    expect(
+      parseFlow(['试验项目\t进气阻力', '接受标准\t在额定空气体积流量', '下260kg/h，进气系统阻力≤3kPa'].join('\n')),
+    ).toEqual({ flow: '260', flowUnit: 'kg/h' });
   });
 
-  it('多个流量（多行接受标准）全部读取', () => {
-    const text = ['进气系统阻力≤', '3kPa@260kg/h', '进气系统阻力≤', '2.5kPa@240kg/h'].join('\n');
+  it('多个流量（多个试验项目的接受标准）全部读取，用 / 分隔', () => {
+    const text = [
+      '试验项目\t进气阻力',
+      '接受标准\t进气系统阻力≤3kPa@260kg/h',
+      '试验结论\t合格',
+      '试验项目\t进气阻力',
+      '接受标准\t进气系统阻力≤2.5kPa@240kg/h',
+      '试验结论\t合格',
+    ].join('\n');
     expect(parseFlow(text)).toEqual({ flow: '260/240', flowUnit: 'kg/h' });
   });
 
-  it('多个样品各自的进气流量', () => {
+  it('多个样品各自的进气流量（接受准则列）', () => {
     const text = [
-      'SC6HAU进气流量380kg/h 阻力要求≤3.5±0.5kpa',
-      'SC6HEU进气流量265kg/h 阻力要求≤2.5±0.5kpa',
+      '接受准则\tSC6HAU进气流量380kg/h 阻力要求≤3.5±0.5kpa',
+      '样品名称\tSC6HEU',
+      '接受准则\tSC6HEU进气流量265kg/h 阻力要求≤2.5±0.5kpa',
     ].join('\n');
     expect(parseFlow(text)).toEqual({ flow: '380/265', flowUnit: 'kg/h' });
+  });
+
+  it('接受标准以外的 kg/h（如图表坐标轴）不计入流量', () => {
+    expect(parseFlow('流量kg/h 104 156 208 260 312')).toEqual({ flow: '', flowUnit: '' });
+    expect(parseFlow('进气系统阻力≤3.5kPa@370kg/h')).toEqual({ flow: '', flowUnit: '' });
   });
 
   it('非进气阻力的报告不保留流量', () => {

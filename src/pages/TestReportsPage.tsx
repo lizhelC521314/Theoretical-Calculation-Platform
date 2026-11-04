@@ -77,7 +77,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
             showToast(`「${file.name}」无文字层（扫描件），正在 OCR 识别封面…`);
             const ocr = await ocrPdfFirstPage(file);
             meta = ocr.text.trim()
-              ? parseOcrMeta(ocr.text, file.name, ocr.testItem)
+              ? parseOcrMeta(ocr.text, file.name, ocr.testItem, ocr.flow, ocr.flowUnit)
               : parseMetaOnly('', file.name);
           }
           // 用当前项目兜底一些字段（如果 PDF 里没识别到）
