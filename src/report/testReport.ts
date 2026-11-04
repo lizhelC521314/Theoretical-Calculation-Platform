@@ -50,6 +50,8 @@ export interface TestReportMeta {
 export interface PdfReportMeta {
   customer: string;
   project: string;
+  /** 实验项目：取自封面「项目名称」一栏，如「压力损失」 */
+  testItem: string;
   product: string;
   version: string;
   date: string;
@@ -187,11 +189,13 @@ export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
     grab('客户(?:名称)?') || grab('(?:委托方|委托单位|甲方|送样单位)'),
   );
 
+  // 实验项目：封面「项目名称」一栏（如「压力损失」）
   // 项目：零件名称中的字母数字段（如 B26-A、CS75-2025）
   // 产品：优先「产品名称」标签，否则取零件名称中字母数字段之外的文字部分
+  const testItem = grab('项目(?:名称|代号)?');
   const partName = grab('零件名称');
   const split = splitPartName(partName);
-  const project = split.project || grab('项目(?:名称|代号)?');
+  const project = split.project || testItem;
   const product = grab('产品(?:名称|型号)?') || split.product;
 
   let version = cleanOcrVersion(grab('版本(?:号)?'));
@@ -204,7 +208,7 @@ export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
   let date = header?.date || normalizeDate(text);
   if (!date) date = normalizeDate(fileName);
 
-  return { customer, project, product, version, date };
+  return { customer, project, testItem, product, version, date };
 }
 
 /** 从文本中提取「标签：值」字段 */
@@ -328,7 +332,9 @@ export function parseMetaOnly(text: string, fileName: string): PdfReportMeta {
     findField(text, /样件(?:名称|编号)?\s*[：:]\s*([^\n]{1,80})/) ||
     '';
   const split = splitPartName(partName);
-  let project = split.project || findField(text, /项目(?:名称|代号)?\s*[：:]\s*([^\n]{1,60})/) || '';
+  // 实验项目：封面「项目名称」一栏（如「压力损失」）
+  const testItem = findField(text, /项目(?:名称|代号)?\s*[：:]\s*([^\n]{1,60})/) || '';
+  let project = split.project || testItem;
   let product = findField(text, /产品(?:名称|型号)?\s*[：:]\s*([^\n]{1,60})/) || split.product;
 
   // ------- 版本（显式标签 优先 → 正文 V 号兜底 → 文件名兜底） -------
@@ -361,7 +367,7 @@ export function parseMetaOnly(text: string, fileName: string): PdfReportMeta {
     if (!product) product = parts[1] ?? '';
   }
 
-  return { customer, project, product, version, date };
+  return { customer, project, testItem, product, version, date };
 }
 
 /** 检查必填元字段是否齐全，返回缺失字段名数组（空数组表示齐全） */

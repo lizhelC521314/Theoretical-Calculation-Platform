@@ -110,6 +110,7 @@ export function TestsSearchPage({ user: _user }: Props) {
         f.name.toLowerCase().includes(k) ||
         p.customer.toLowerCase().includes(k) ||
         p.project.toLowerCase().includes(k) ||
+        p.testItem.toLowerCase().includes(k) ||
         p.product.toLowerCase().includes(k) ||
         p.version.toLowerCase().includes(k)
       );
@@ -279,9 +280,10 @@ export function TestsSearchPage({ user: _user }: Props) {
             <thead>
               <tr>
                 <th style={{ width: 64 }}>类型</th>
-                <th style={{ width: '14%' }}>客户</th>
-                <th style={{ width: '14%' }}>项目</th>
-                <th style={{ width: '12%' }}>产品</th>
+                <th style={{ width: '12%' }}>客户</th>
+                <th style={{ width: '12%' }}>项目</th>
+                <th style={{ width: '12%' }}>实验项目</th>
+                <th style={{ width: '11%' }}>产品</th>
                 <th style={{ width: '7%' }}>版本</th>
                 <th style={{ width: '9%' }}>日期</th>
                 <th style={{ width: '9%' }}>大小</th>
@@ -313,6 +315,7 @@ export function TestsSearchPage({ user: _user }: Props) {
                     </td>
                     <td>{p.customer || '—'}</td>
                     <td>{p.project || '—'}</td>
+                    <td>{p.testItem || '—'}</td>
                     <td>{p.product || '—'}</td>
                     <td>{p.version || '—'}</td>
                     <td>{p.date || '—'}</td>
@@ -368,6 +371,7 @@ export function TestsSearchPage({ user: _user }: Props) {
                 <div className="preview-meta">
                   {selectedMeta.customer && <span className="chip">客户：{selectedMeta.customer}</span>}
                   <span className="chip">项目：{selectedMeta.project || '—'}</span>
+                  {selectedMeta.testItem && <span className="chip">实验项目：{selectedMeta.testItem}</span>}
                   <span className="chip">产品：{selectedMeta.product || '—'}</span>
                   <span className="chip">版本：{selectedMeta.version || '—'}</span>
                   <span className="chip">日期：{selectedMeta.date || '—'}</span>

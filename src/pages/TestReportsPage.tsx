@@ -134,6 +134,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
           const fileName = archivePdfFileName(
             r.meta.customer,
             r.meta.project,
+            r.meta.testItem,
             r.meta.product,
             r.meta.version,
             r.meta.date,
@@ -195,11 +196,12 @@ export function TestReportsPage({ user, currentProject }: Props) {
         <div className="settings-card test-empty">
           <h3>选择 PDF 实验报告开始归档</h3>
           <p className="settings-hint">
-            点击上方「选择 PDF 实验报告」按钮，支持多选。系统会自动从报告封面与正文识别客户、项目、产品、版本号、日期等信息，
-            其中客户与日期优先取报告顶端页眉编号（如 SYZX-BYD 26 07 01 01：客户 BYD，年份按当前电脑年份补齐前两位 26 → 2026）。
+            点击上方「选择 PDF 实验报告」按钮，支持多选。系统会自动从报告封面与正文识别客户、项目、实验项目、产品、版本号、日期等信息，
+            其中日期优先取报告顶端页眉编号（如 SYZX-BYD 26 07 01 01：年份按当前电脑年份补齐前两位 26 → 2026），
+            客户取封面「客户名称」并截取到「XX汽车」为止，实验项目取封面「项目名称」一栏。
             所有字段均可在下方列表中校对 / 补全，确认无误后点击「全部归档到实验库」。
             扫描件（无文字层的图片型 PDF）会自动对封面做系统 OCR 识别，准确率低于文字版，请重点核对。
-            归档文件名统一格式为「客户+项目+产品+版本+日期.pdf」，存放在 UNC 实验库目录。
+            归档文件名统一格式为「客户+项目+实验项目+产品+版本+日期.pdf」，存放在 UNC 实验库目录。
           </p>
         </div>
       )}
@@ -209,6 +211,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
         const previewName = archivePdfFileName(
           r.meta.customer,
           r.meta.project,
+          r.meta.testItem,
           r.meta.product,
           r.meta.version,
           r.meta.date,
@@ -243,6 +246,14 @@ export function TestReportsPage({ user, currentProject }: Props) {
                   value={r.meta.project}
                   onChange={(e) => patchMeta(r.id, 'project', e.target.value)}
                   placeholder="如：CS75-2025"
+                />
+              </label>
+              <label className="field">
+                <span>实验项目</span>
+                <input
+                  value={r.meta.testItem}
+                  onChange={(e) => patchMeta(r.id, 'testItem', e.target.value)}
+                  placeholder="如：压力损失"
                 />
               </label>
               <label className={`field ${!r.meta.product ? 'field-warn' : ''}`}>

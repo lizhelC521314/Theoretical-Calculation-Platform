@@ -33,21 +33,34 @@ export function archiveFileName(project: string, product: string, version: strin
   return `${cleanFileName(project)}+${cleanFileName(product)}+${cleanFileName(version || 'V0')}+${d}.xlsx`;
 }
 
-/** PDF 归档文件名：客户+项目+产品+版本+日期.pdf（单一真源模板） */
+/** PDF 归档文件名：客户+项目+实验项目+产品+版本+日期.pdf（单一真源模板） */
 export function archivePdfFileName(
   customer: string,
   project: string,
+  testItem: string,
   product: string,
   version: string,
   date: string,
 ): string {
   const d = (date || new Date().toISOString().slice(0, 10)).replace(/-/g, '');
-  const parts = [customer, project, product, version || 'V0', d].map((s) => cleanFileName(s));
+  const parts = [customer, project, testItem, product, version || 'V0', d].map((s) => cleanFileName(s));
   return `${parts.join('+')}.pdf`;
 }
 
-/** 从归档文件名反解元信息：兼容 .pdf（客户+项目+产品+版本+日期）与 .xlsx（项目+产品+版本+日期）两种格式 */
-export function parseArchiveName(name: string): { customer: string; project: string; product: string; version: string; date: string } {
+/**
+ * 从归档文件名反解元信息。兼容三种格式：
+ *   新版 PDF：客户+项目+实验项目+产品+版本+日期（去掉日期后 5 段）
+ *   旧版 PDF：客户+项目+产品+版本+日期（去掉日期后 4 段）
+ *   xlsx：项目+产品+版本+日期（去掉日期后 3 段）
+ */
+export function parseArchiveName(name: string): {
+  customer: string;
+  project: string;
+  testItem: string;
+  product: string;
+  version: string;
+  date: string;
+} {
   const stem = name.replace(/\.(xlsx|pdf)$/i, '');
   const parts = stem.split('+').map((s) => s.trim()).filter(Boolean);
   // 倒推：最后一段若为 6-8 位数字则是日期
@@ -55,11 +68,16 @@ export function parseArchiveName(name: string): { customer: string; project: str
   if (parts.length > 0 && /^\d{6,8}$/.test(parts[parts.length - 1])) {
     date = parts.pop()!;
   }
+  // 新版 PDF：客户 / 项目 / 实验项目 / 产品 / 版本
+  if (parts.length >= 5) {
+    const [customer, project, testItem, product, version] = parts;
+    return { customer, project, testItem, product, version, date };
+  }
   const version = parts.pop() || '';
   const product = parts.pop() || '';
   const project = parts.pop() || '';
   const customer = parts.pop() || '';
-  return { customer, project, product, version, date };
+  return { customer, project, testItem: '', product, version, date };
 }
 
 /** 可信资产文件名：项目-产品-版本.xlsx */

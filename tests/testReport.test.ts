@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { archivePdfFileName, parseArchiveName } from '../src/report/db';
 import {
   DEFAULT_KEYWORDS,
   buildTestXlsxBase64,
@@ -158,6 +159,7 @@ describe('扫描件 OCR 文本解析', () => {
     expect(meta.customer).toBe('长城汽车');
     expect(meta.date).toBe(`${expectedYear}-07-01`);
     expect(meta.project).toContain('B26-A');
+    expect(meta.testItem).toContain('B26-A');
     expect(meta.product).toBe('空气滤清器总成');
     expect(meta.version).toBe('V1.0');
   });
@@ -190,8 +192,44 @@ describe('扫描件 OCR 文本解析', () => {
     expect(meta.date).toBe(`${expectedYear}-08-19`);
     // 项目 = 零件名称字母数字段（优先于项目名称标签）
     expect(meta.project).toBe('B26-A');
+    // 实验项目 = 封面「项目名称」一栏
+    expect(meta.testItem).toBe('压力损失');
     // 产品 = 零件名称中字母数字段之外的文字
     expect(meta.product).toBe('进气系统');
     expect(meta.version).toBe('');
+  });
+});
+
+describe('归档文件名（客户+项目+实验项目+产品+版本+日期）', () => {
+  it('生成并反解新版文件名', () => {
+    const name = archivePdfFileName('长城汽车', 'B26-A', '压力损失', '进气系统', 'V1.0', '2026-08-19');
+    expect(name).toBe('长城汽车+B26-A+压力损失+进气系统+V1.0+20260819.pdf');
+    expect(parseArchiveName(name)).toEqual({
+      customer: '长城汽车',
+      project: 'B26-A',
+      testItem: '压力损失',
+      product: '进气系统',
+      version: 'V1.0',
+      date: '20260819',
+    });
+  });
+
+  it('兼容旧版 5 段 PDF 与 4 段 xlsx 文件名', () => {
+    expect(parseArchiveName('长城汽车+B26-A+进气系统+V1.0+20260819.pdf')).toEqual({
+      customer: '长城汽车',
+      project: 'B26-A',
+      testItem: '',
+      product: '进气系统',
+      version: 'V1.0',
+      date: '20260819',
+    });
+    expect(parseArchiveName('B26-A+进气系统+V1.0+20260819.xlsx')).toEqual({
+      customer: '',
+      project: 'B26-A',
+      testItem: '',
+      product: '进气系统',
+      version: 'V1.0',
+      date: '20260819',
+    });
   });
 });
