@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const os = require('node:os');
+const { execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const crypto = require('node:crypto');
 const bcrypt = require('bcryptjs');
@@ -354,6 +356,78 @@ ipcMain.handle('test:pdfText', async (_e, filePath) => {
     return { ok: true, text: pages.join('\n') };
   } catch (err) {
     return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/**
+ * 扫描件 OCR：渲染进程把 PDF 封面渲染成 PNG（base64），此处写入临时文件后
+ * 调用 Windows 系统自带 OCR（WinRT Windows.Media.Ocr，离线、支持中文）识别文字。
+ * 通过 PowerShell -EncodedCommand 执行，避免编码与转义问题。
+ */
+ipcMain.handle('pdf:ocrImage', async (_e, payload) => {
+  const base64 = String((payload && payload.base64) || '');
+  if (!base64) return { ok: false, message: '缺少图像数据' };
+
+  const tmpPath = path.join(os.tmpdir(), `ctr-ocr-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.png`);
+  try {
+    fs.writeFileSync(tmpPath, Buffer.from(base64, 'base64'));
+  } catch (err) {
+    return { ok: false, message: '临时文件写入失败：' + String((err && err.message) || err) };
+  }
+
+  // 图片路径内嵌进脚本字面量（PowerShell 单引号串内单引号用两个单引号转义）
+  const psPath = tmpPath.replace(/'/g, "''");
+  const ps = [
+    '$ErrorActionPreference = "Stop"',
+    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+    'Add-Type -AssemblyName System.Runtime.WindowsRuntime',
+    '[void][Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]',
+    '[void][Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics, ContentType=WindowsRuntime]',
+    '[void][Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType=WindowsRuntime]',
+    '$asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods("Public, Static") | Where-Object { $_.Name -eq "AsTask" -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq "IAsyncOperation`1" })[0]',
+    'function Await-Op($op) {',
+    '  $m = $asTask.MakeGenericMethod($op.GetType().GetGenericArguments()[0])',
+    '  $t = $m.Invoke($null, @($op))',
+    '  $t.Wait()',
+    '  return $t.Result',
+    '}',
+    `if (-not (Test-Path '${psPath}')) { [Console]::Error.WriteLine("IMAGE_NOT_FOUND"); exit 2 }`,
+    `$file = Await-Op ([Windows.Storage.StorageFile]::GetFileFromPathAsync('${psPath}'))`,
+    '$stream = Await-Op ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read))',
+    '$decoder = Await-Op ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream))',
+    '$bitmap = Await-Op ($decoder.GetSoftwareBitmapAsync())',
+    '$engine = $null',
+    '$zh = [Windows.Media.Ocr.OcrEngine]::AvailableRecognizerLanguages | Where-Object { $_.LanguageTag -like "zh*" } | Select-Object -First 1',
+    'if ($zh) { $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($zh) }',
+    'if (-not $engine) { $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages() }',
+    'if (-not $engine) { [Console]::Error.WriteLine("NO_OCR_ENGINE"); exit 2 }',
+    '$result = Await-Op ($engine.RecognizeAsync($bitmap))',
+    'if ($result.Text) { [Console]::Out.Write($result.Text) }',
+  ].join('\n');
+
+  const encoded = Buffer.from(ps, 'utf16le').toString('base64');
+  try {
+    const stdout = await new Promise((resolve, reject) => {
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+        { timeout: 90000, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
+        (err, out, stderr) => {
+          if (err) {
+            const detail = String(stderr || '').trim();
+            if (detail.includes('NO_OCR_ENGINE')) reject(new Error('系统 OCR 引擎不可用（请确认系统语言含中文）'));
+            else reject(new Error(detail || String(err.message || err)));
+            return;
+          }
+          resolve(String(out || ''));
+        },
+      );
+    });
+    return { ok: true, text: stdout.trim() };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  } finally {
+    try { fs.unlinkSync(tmpPath); } catch {}
   }
 });
 

@@ -128,6 +128,95 @@ export async function extractPdfText(file: File): Promise<string> {
   return extractInRenderer(file);
 }
 
+/**
+ * 扫描件兜底：把 PDF 封面渲染成 PNG，交由主进程系统 OCR 识别文字。
+ * 识别失败或无文字时返回空串。
+ */
+export async function ocrPdfFirstPage(file: File): Promise<string> {
+  const { api } = await import('../api');
+  const data = new Uint8Array(await file.arrayBuffer());
+  const task = getDocument({ data });
+  try {
+    const doc = await task.promise;
+    const page = await doc.getPage(1);
+    const viewport = page.getViewport({ scale: 3 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+    await page.render({ canvas, viewport }).promise;
+    const base64 = canvas.toDataURL('image/png').split(',')[1] || '';
+    if (!base64) return '';
+    const res = await api.pdf.ocrImage({ base64 });
+    return res.ok && typeof res.text === 'string' ? res.text : '';
+  } catch {
+    return '';
+  } finally {
+    await task.destroy();
+  }
+}
+
+/**
+ * OCR 文本会把字与字之间插入空格（如「客 户 名 称 ： 长 城 汽 车」），
+ * 这里去掉中文字符/数字/字母/常见符号之间的空格，便于标签匹配。
+ */
+export function despaceOcrText(text: string): string {
+  return text
+    .replace(/(?<=[一-鿿0-9A-Za-z：:.．·•/\-+()（）])\s+(?=[一-鿿0-9A-Za-z：:.．·•/\-+()（）])/g, '')
+    .trim();
+}
+
+/** OCR 版本号清洗：「VI·0」「V1。0」→「V1.0」 */
+function cleanOcrVersion(raw: string): string {
+  if (!raw) return '';
+  let v = raw
+    .replace(/[·•。]/g, '.')
+    .replace(/\s+/g, '')
+    .trim();
+  // 常见误识：V1 被识别成 VI / Vl / V|
+  v = v.replace(/^V[Il|]/i, 'V1');
+  const m = v.match(/^(V\d+(?:\.\d+)*)/i);
+  return m ? m[1].toUpperCase() : '';
+}
+
+/** OCR 文本专用元字段解析：全文先 despace，按「下一已知标签」截止抓取 */
+export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
+  // 页眉编号在原始带空格文本上解析（正则本身兼容空格），避免 despace 后日期数字粘连
+  const header = parseHeaderCode(rawText);
+  const text = despaceOcrText(rawText);
+
+  const KNOWN_LABELS =
+    '(?:客户名称|委托单位|送样单位|项目名称|项目代号|产品名称|产品型号|报告编号|样品编号|样件编号|报告日期|试验日期|实验日期|检测日期|版本号|客户|委托方|甲方|项目|产品|版本|日期|编号)';
+  const NEXT_LABEL = `(?=(?:${KNOWN_LABELS}\\s*[：:.．]?|[一-鿿]{2,6}[：:]|\\s|$))`;
+
+  const grab = (label: string): string => {
+    const re = new RegExp(label + '\\s*[：:.．]?\\s*(.+?)' + NEXT_LABEL);
+    const m = text.match(re);
+    if (!m || !m[1]) return '';
+    return m[1].replace(/^[：:.．\s]+/, '').trim();
+  };
+
+  const customer =
+    header?.customer ||
+    normalizeCustomer(grab('客户(?:名称)?') || grab('(?:委托方|委托单位|甲方|送样单位)'));
+
+  const project = grab('项目(?:名称|代号)?');
+  const product = grab('产品(?:名称|型号)?');
+
+  let version = cleanOcrVersion(grab('版本(?:号)?'));
+  if (!version) version = cleanOcrVersion(text.match(/(?:^|[\s（(])(V[0-9Il|][0-9·•.。]*)/)?.[1] ?? '');
+  if (!version) {
+    const m = fileName.match(/(V\d+(?:\.\d+)*)/i);
+    if (m) version = m[1].toUpperCase();
+  }
+
+  let date = header?.date || normalizeDate(text);
+  if (!date) date = normalizeDate(fileName);
+
+  return { customer, project, product, version, date };
+}
+
 /** 从文本中提取「标签：值」字段 */
 function findField(text: string, label: RegExp): string {
   const m = text.match(label);

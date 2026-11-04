@@ -94,6 +94,8 @@ interface CtrApi {
   pdf: {
     /** 桌面版：由主进程提取 PDF 文字层 */
     extractText(filePath: string): Promise<{ ok: boolean; text?: string; message?: string }>;
+    /** 桌面版：对封面 PNG（base64）做系统 OCR（扫描件兜底） */
+    ocrImage(p: { base64: string }): Promise<{ ok: boolean; text?: string; message?: string }>;
   };
   db: {
     archive(p: { base64: string; fileName: string; libType: 'calc' | 'test' | 'trusted' | 'theory' | 'design' | 'fmea' }): Promise<{ ok: boolean; filePath?: string; targetDir?: string; message?: string }>;
@@ -196,6 +198,7 @@ const fallback: CtrApi = {
   },
   pdf: {
     extractText: async () => ({ ok: false, message: '浏览器调试模式不支持主进程解析' }),
+    ocrImage: async () => ({ ok: false, message: '浏览器调试模式不支持系统 OCR' }),
   },
   db: {
     archive: async () => ({ ok: false, message: '浏览器调试模式下无法写入 UNC 路径' }),

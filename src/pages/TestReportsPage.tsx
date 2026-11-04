@@ -4,7 +4,9 @@ import {
   bufToBase64,
   extractPdfText,
   missingMetaFields,
+  ocrPdfFirstPage,
   parseMetaOnly,
+  parseOcrMeta,
   type PdfReportMeta,
 } from '../report/testReport';
 import { archivePdfFileName } from '../report/db';
@@ -20,6 +22,8 @@ interface PdfReportEntry {
   originalName: string;
   file: File;
   meta: PdfReportMeta;
+  /** 扫描件（无文字层），元信息来自封面 OCR */
+  scanned?: boolean;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -52,13 +56,28 @@ export function TestReportsPage({ user, currentProject }: Props) {
       const added: PdfReportEntry[] = [];
       for (const file of Array.from(files)) {
         try {
-          const text = await extractPdfText(file);
-          const meta = parseMetaOnly(text, file.name);
+          let text = '';
+          try {
+            text = await extractPdfText(file);
+          } catch {
+            text = '';
+          }
+          let meta: PdfReportMeta;
+          let scanned = false;
+          if (text.trim()) {
+            meta = parseMetaOnly(text, file.name);
+          } else {
+            // 无文字层：扫描件，渲染封面走系统 OCR 识别
+            scanned = true;
+            showToast(`「${file.name}」无文字层（扫描件），正在 OCR 识别封面…`);
+            const ocrText = await ocrPdfFirstPage(file);
+            meta = ocrText.trim() ? parseOcrMeta(ocrText, file.name) : parseMetaOnly('', file.name);
+          }
           // 用当前项目兜底一些字段（如果 PDF 里没识别到）
           if (!meta.project && currentProject?.name) meta.project = currentProject.name;
           if (!meta.product && currentProject?.product) meta.product = currentProject.product;
           if (!meta.version && currentProject?.version) meta.version = currentProject.version;
-          added.push({ id: uid(), originalName: file.name, file, meta });
+          added.push({ id: uid(), originalName: file.name, file, meta, scanned });
         } catch (e) {
           showToast(`「${file.name}」解析失败：${e instanceof Error ? e.message : String(e)}`);
         }
@@ -179,6 +198,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
             点击上方「选择 PDF 实验报告」按钮，支持多选。系统会自动从报告封面与正文识别客户、项目、产品、版本号、日期等信息，
             其中客户与日期优先取报告顶端页眉编号（如 SYZX-BYD 26 07 01 01：客户 BYD，年份按当前电脑年份补齐前两位 26 → 2026）。
             所有字段均可在下方列表中校对 / 补全，确认无误后点击「全部归档到实验库」。
+            扫描件（无文字层的图片型 PDF）会自动对封面做系统 OCR 识别，准确率低于文字版，请重点核对。
             归档文件名统一格式为「客户+项目+产品+版本+日期.pdf」，存放在 UNC 实验库目录。
           </p>
         </div>
@@ -197,6 +217,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
           <div className="settings-card test-report-card" key={r.id}>
             <div className="pc-head">
               <h3>{r.originalName}</h3>
+              {r.scanned && <span className="tag light tag-warn">扫描件 OCR</span>}
               {missing.length > 0 ? (
                 <span className="tag light tag-warn">缺：{missing.join('、')}</span>
               ) : (

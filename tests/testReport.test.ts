@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_KEYWORDS,
   buildTestXlsxBase64,
+  despaceOcrText,
   normalizeCustomer,
   parseHeaderCode,
   parseMetaOnly,
+  parseOcrMeta,
   parseTestReport,
   testReportFileName,
 } from '../src/report/testReport';
@@ -124,5 +126,39 @@ describe('客户名称规范化（读到 XX汽车 为止）', () => {
   it('页眉编号客户优先，不受规范化影响', () => {
     const meta = parseMetaOnly('SYZX-BYD 26 07 01 01\n客户名称：长城汽车股份有限公司', 'x.pdf');
     expect(meta.customer).toBe('BYD');
+  });
+});
+
+describe('扫描件 OCR 文本解析', () => {
+  const expectedYear = (() => {
+    const now = new Date().getFullYear();
+    let y = Math.floor(now / 100) * 100 + 26;
+    if (y > now) y -= 100;
+    return y;
+  })();
+
+  // Windows 系统 OCR 的真实输出特征：字符间带空格、多行合并为一行、全角符号、V1.0 → VI·0
+  const OCR_SAMPLE =
+    '客 户 名 称 ： 长 城 汽 车 股 份 有 限 公 司 项 目 名 称 ． B26-A 进 气 系 统 阻 力 产 品 名 称 ： 空 气 滤 清 器 总 成 版 本 号 VI · 0 报 告 日 期 ： 2026 年 1 0 月 20 日 SYZX-BYD 26 07 01 01';
+
+  it('despaceOcrText 去掉字符间空格', () => {
+    expect(despaceOcrText('客 户 名 称 ： 长 城 汽 车')).toBe('客户名称：长城汽车');
+  });
+
+  it('有页眉编号：客户/日期取自页眉，其余字段从正文识别', () => {
+    const meta = parseOcrMeta(OCR_SAMPLE, 'B26-A进气阻力.pdf');
+    expect(meta.customer).toBe('BYD');
+    expect(meta.date).toBe(`${expectedYear}-07-01`);
+    expect(meta.project).toContain('B26-A');
+    expect(meta.product).toBe('空气滤清器总成');
+    expect(meta.version).toBe('V1.0');
+  });
+
+  it('无页眉编号：客户规范化 + 日期从正文识别', () => {
+    const noHeader = OCR_SAMPLE.replace(' SYZX-BYD 26 07 01 01', '');
+    const meta = parseOcrMeta(noHeader, 'x.pdf');
+    expect(meta.customer).toBe('长城汽车');
+    expect(meta.date).toBe('2026-10-20');
+    expect(meta.version).toBe('V1.0');
   });
 });
