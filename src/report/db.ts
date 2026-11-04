@@ -33,10 +33,17 @@ export function archiveFileName(project: string, product: string, version: strin
   return `${cleanFileName(project)}+${cleanFileName(product)}+${cleanFileName(version || 'V0')}+${d}.xlsx`;
 }
 
-/** 流量段：370 + kg/h → 370kg-h（文件名不能含「/」）；m³/h → 370m3-h */
+/**
+ * 流量段：370 + kg/h → 370kg-h（文件名不能含「/」）；m³/h → 370m3-h；
+ * 多个流量 260/240 → 260,240kg-h
+ */
 function flowSegment(flow: string, unit: string): string {
-  const v = cleanFileName(flow.trim());
-  if (!v || v === '未命名') return '';
+  const values = (flow || '')
+    .split(/[\/／、,，]+/)
+    .map((s) => cleanFileName(s.trim()))
+    .filter((s) => s && s !== '未命名');
+  if (!values.length) return '';
+  const v = values.join(',');
   const u = unit.trim().toLowerCase();
   if (/^m[³3]/.test(u)) return `${v}m3-h`;
   if (/^kg/.test(u)) return `${v}kg-h`;
@@ -44,11 +51,14 @@ function flowSegment(flow: string, unit: string): string {
   return cleaned && cleaned !== '未命名' ? `${v}${cleaned}` : v;
 }
 
-/** 反解流量段（370kg-h / 370m3-h） */
+/** 反解流量段（370kg-h / 370m3-h / 260,240kg-h） */
 function parseFlowSegment(segment: string): { flow: string; flowUnit: string } {
-  const m = segment.match(/^(\d+(?:\.\d+)?)(m3-h|kg-h)?$/i);
+  const m = segment.match(/^([\d.,]+)(m3-h|kg-h)?$/i);
   if (!m) return { flow: segment, flowUnit: '' };
-  return { flow: m[1], flowUnit: m[2] ? (m[2].toLowerCase().startsWith('m') ? 'm³/h' : 'kg/h') : '' };
+  return {
+    flow: m[1].replace(/,/g, '/'),
+    flowUnit: m[2] ? (m[2].toLowerCase().startsWith('m') ? 'm³/h' : 'kg/h') : '',
+  };
 }
 
 /**

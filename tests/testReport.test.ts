@@ -345,6 +345,22 @@ describe('归档文件名（客户+项目+试验项目+产品+版本+日期）',
     expect(parseArchiveName(name).flowUnit).toBe('m³/h');
   });
 
+  it('多个流量在文件名中以逗号分隔并可反解', () => {
+    const name = archivePdfFileName(
+      '长城汽车',
+      'B26-A',
+      '进气阻力',
+      '进气系统',
+      'V1.0',
+      '2026-08-19',
+      '260/240',
+      'kg/h',
+    );
+    expect(name).toContain('+260,240kg-h+');
+    expect(parseArchiveName(name).flow).toBe('260/240');
+    expect(parseArchiveName(name).flowUnit).toBe('kg/h');
+  });
+
   it('兼容旧版 5 段 PDF 与 4 段 xlsx 文件名', () => {
     expect(parseArchiveName('长城汽车+B26-A+进气系统+V1.0+20260819.pdf')).toEqual({
       customer: '长城汽车',
@@ -401,6 +417,19 @@ describe('进气阻力：读取流量与单位', () => {
     });
     // OCR 把数字与单位拆到不同行
     expect(parseFlow('在额定空气体积流量\n下 260\nkg/h')).toEqual({ flow: '260', flowUnit: 'kg/h' });
+  });
+
+  it('多个流量（多行接受标准）全部读取', () => {
+    const text = ['进气系统阻力≤', '3kPa@260kg/h', '进气系统阻力≤', '2.5kPa@240kg/h'].join('\n');
+    expect(parseFlow(text)).toEqual({ flow: '260/240', flowUnit: 'kg/h' });
+  });
+
+  it('多个样品各自的进气流量', () => {
+    const text = [
+      'SC6HAU进气流量380kg/h 阻力要求≤3.5±0.5kpa',
+      'SC6HEU进气流量265kg/h 阻力要求≤2.5±0.5kpa',
+    ].join('\n');
+    expect(parseFlow(text)).toEqual({ flow: '380/265', flowUnit: 'kg/h' });
   });
 
   it('非进气阻力的报告不保留流量', () => {

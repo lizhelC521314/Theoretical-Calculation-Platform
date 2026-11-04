@@ -277,7 +277,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
                     <input
                       value={r.meta.flow}
                       onChange={(e) => patchMeta(r.id, 'flow', e.target.value)}
-                      placeholder="如：370"
+                      placeholder="如：260 或 260/240（多个用 / 分隔）"
                     />
                   </label>
                   <label className="field">

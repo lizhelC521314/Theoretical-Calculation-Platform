@@ -171,17 +171,23 @@ export function despaceOcrText(text: string): string {
 }
 
 /**
- * 从报告中读取流量与单位：进气阻力报告的接受标准形如「在额定空气体积流量下260kg/h」
- * 或「3.5kPa@370kg/h」，取数值与单位（兼容扫描件 OCR 的 m3、全角斜杠、换行/空格拆词）。
+ * 从报告中读取流量与单位：进气阻力报告的接受标准形如「进气系统阻力≤3kPa@260kg/h」
+ * 「在额定空气体积流量下260kg/h」「SC6HAU进气流量380kg/h」等写法。
+ * 一份报告可能有多条流量（多个样件/多行接受标准），全部按出现顺序保留，用「/」分隔。
+ * 兼容扫描件 OCR 的 m3、全角斜杠、误识别的竖线，以及数字与单位被空格/换行拆开的情况。
  * 找不到返回空串。
  */
 export function parseFlow(text: string): { flow: string; flowUnit: string } {
   // 去掉所有空白（含换行）：OCR 常把「260」「kg/h」拆成多个词甚至两行
   const compact = text.replace(/\s+/g, '');
-  const m = compact.match(/(\d+(?:\.\d+)?)(?:kg|KG|Kg)[\/／|丨]h|(\d+(?:\.\d+)?)m[³3][\/／|丨]h/i);
-  if (!m) return { flow: '', flowUnit: '' };
-  const flow = m[1] ?? m[2];
-  return { flow, flowUnit: m[2] ? 'm³/h' : 'kg/h' };
+  const re = /(\d+(?:\.\d+)?)(kg|m[³3])[\/／|丨]h/gi;
+  const values: string[] = [];
+  let unit = '';
+  for (const m of compact.matchAll(re)) {
+    if (!values.includes(m[1])) values.push(m[1]);
+    unit = m[2].toLowerCase().startsWith('m') ? 'm³/h' : 'kg/h';
+  }
+  return { flow: values.join('/'), flowUnit: values.length ? unit : '' };
 }
 
 /** 表格里的「试验项目」标签（OCR 可能在字间插空格） */
