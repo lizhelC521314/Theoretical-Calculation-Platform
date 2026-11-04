@@ -444,6 +444,22 @@ describe('进气阻力：读取流量与单位', () => {
     expect(parseFlow(text)).toEqual({ flow: '380/265', flowUnit: 'kg/h' });
   });
 
+  it('试验结果表格「试验要求」行的流量', () => {
+    const text = [
+      '试验项目\t进气阻力',
+      '试验要求\t在额定空气体积流量下260kg/h，阻力≤3kPa',
+      '试验结果\t3.1kPa',
+      '试验项目\t进气阻力',
+      '试验要求\t在额定空气体积流量下240kg/h，阻力≤2.5kPa',
+      '试验结果\t2.3kPa',
+    ].join('\n');
+    expect(parseFlow(text)).toEqual({ flow: '260/240', flowUnit: 'kg/h' });
+  });
+
+  it('试验要求行的 m³/h 流量', () => {
+    expect(parseFlow('试验要求\t进气流量1200m³/h')).toEqual({ flow: '1200', flowUnit: 'm³/h' });
+  });
+
   it('接受标准以外的 kg/h（如图表坐标轴）不计入流量', () => {
     expect(parseFlow('流量kg/h 104 156 208 260 312')).toEqual({ flow: '', flowUnit: '' });
     expect(parseFlow('进气系统阻力≤3.5kPa@370kg/h')).toEqual({ flow: '', flowUnit: '' });

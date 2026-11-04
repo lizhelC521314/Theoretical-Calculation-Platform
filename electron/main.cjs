@@ -772,7 +772,7 @@ function extractTestItemFromWords(words) {
 }
 
 /**
- * 按列坐标读取试验项目表格中「接受标准（接受准则）」列的流量：
+ * 按列坐标读取试验项目表格中「接受标准（接受准则）」「试验要求」列的流量：
  * 定位该字段标签所在的列，取其右侧（值所在单元格）纵向范围内的全部词，
  * 用正则找「数字 + kg/h 或 m³/h」，多个流量按出现顺序用「/」连接。
  * 这样不会把图表坐标轴「流量kg/h」或相邻列的日期/温度当成流量。
@@ -805,14 +805,14 @@ function extractFlowFromWords(words) {
 
   for (let ri = 0; ri < rows.length; ri++) {
     const rw = [...rows[ri].words].sort((a, b) => a.x - b.x);
-    // 行内定位「接受标准 / 接受准则」标签（OCR 可能拆成多个词）
+    // 行内定位「接受标准 / 接受准则 / 试验要求」标签（OCR 可能拆成多个词）
     let s = -1;
     let e = -1;
     for (let i = 0; i < rw.length && s < 0; i++) {
       let acc = compact(rw[i].text);
       for (let j = i; j < Math.min(rw.length, i + 4); j++) {
         if (j > i) acc += compact(rw[j].text);
-        if (/接受(标准|准则)/.test(acc)) {
+        if (/(接受(标准|准则)|试验要求)/.test(acc)) {
           s = i;
           e = j;
           break;

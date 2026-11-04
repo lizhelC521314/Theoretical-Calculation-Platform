@@ -176,7 +176,7 @@ export function despaceOcrText(text: string): string {
 }
 
 /**
- * 读取流量与单位：只在试验项目表格的「接受标准 / 接受准则」字段中取，
+ * 读取流量与单位：只在试验项目表格的「接受标准 / 接受准则 / 试验要求」字段中取，
  * 内容形如「进气系统阻力≤3kPa@260kg/h」「在额定空气体积流量下260kg/h」
  * 「SC6HAU进气流量380kg/h」。多个流量按出现顺序用「/」连接（如 260/240/380）。
  * 兼容扫描件 OCR 的 m3、全角斜杠、误识别的竖线，以及数字与单位被空格/换行拆开的情况。
@@ -184,10 +184,10 @@ export function despaceOcrText(text: string): string {
  */
 export function parseFlow(text: string): { flow: string; flowUnit: string } {
   const lines = text.split(/\r?\n/).map((l) => l.replace(/\s+$/, ''));
-  const ACCEPT_LABEL = /接受(标准|准则)/;
-  // 后续行的行首若是另一个字段名，说明已离开「接受标准」单元格
+  const ACCEPT_LABEL = /(接受(标准|准则)|试验要求)/;
+  // 后续行的行首若是另一个字段名，说明已离开「接受标准 / 试验要求」单元格
   const NEXT_FIELD =
-    /^(试验项目|样品名称|样件名称|样品编号|样品件号|试验时间|试验日期|试验人员|试验方法|试验区域|试验部位|试验温度|试验设备|试验标准|试验结论|判定|备注|技术要求|序号)/;
+    /^(试验项目|样品名称|样件名称|样品编号|样品件号|试验时间|试验日期|试验人员|试验方法|试验区域|试验部位|试验温度|试验设备|试验标准|接受标准|接受准则|试验要求|试验结论|判定|备注|技术要求|序号)/;
   const FLOW_CELL = /(\d+(?:\.\d+)?)(kg|m[³3])[\/／|丨]h/gi;
   const values: string[] = [];
   let unit = '';
