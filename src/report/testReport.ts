@@ -245,7 +245,8 @@ function isLikelyTestItem(value: string): boolean {
  * 从「试验结果」表格的「试验项目」列提取值（优先级高于封面「项目名称」）：
  *  1) 网格表：表头行含「试验项目」及多个表头关键字（数量/样件编号/试验地点…），
  *     取下方数据行同一列的单元格；
- *  2) 表单式：标签与值同行且该行不含其他表头关键字，取标签右侧的单元格。
+ *  2) 标签行（表单式）：如「试验项目 | 进气阻力 | 试验时间 | 2026/2/7」，
+ *     取标签右侧、下一个字段标签之前的内容。
  * 找不到返回空串。
  */
 export function parseTestItemFromTable(text: string): string {
@@ -281,17 +282,20 @@ export function parseTestItemFromTable(text: string): string {
     }
   }
 
-  // 2) 表单式：标签与值同行（该行没有其他表头列）
+  // 2) 标签行：整行去掉字间空格后定位「试验项目」，取右侧到下一个字段标签之前的内容
+  //    （这样即使 OCR 把标签/值拆成多个词、同行还有别的字段也能取准）
+  const NEXT_LABEL =
+    /(样品名称|样件名称|样品编号|样品件号|样品批号|样品数量|试验时间|试验日期|试验人员|试验员|试验方法|试验区域|试验部位|试验温度|实验室温度|湿度|大气压|试验设备|设备号|设备有效日期|接受标准|接受准则|试验要求|试验结论|判定|备注|技术要求|序号|数量|试验地点|规格型号)/;
   for (const line of lines) {
-    const cells = splitCells(line);
-    const col = cells.findIndex((c) => TEST_ITEM_LABEL.test(c.replace(/[ \t]+/g, '')));
-    if (col < 0 || headerHits(cells) >= 2) continue;
-    const inline = squeezeCell(
-      cells[col].replace(TEST_ITEM_LABEL, '').replace(/^[：:]\s*/, ''),
-    );
-    if (isLikelyTestItem(inline)) return inline;
-    const right = cells[col + 1] ? squeezeCell(cells[col + 1]) : '';
-    if (isLikelyTestItem(right)) return right;
+    const compact = line.replace(/[ \t]+/g, '');
+    const m = TEST_ITEM_LABEL.exec(compact);
+    if (!m) continue;
+    let rest = compact.slice(m.index + m[0].length);
+    rest = rest.replace(/^(名称|代号|编号)?[：:＝=]/, ''); // 去掉「名称：」等前缀
+    rest = rest.replace(/^[0-9]{1,2}(?=[一-鿿A-Za-z])/, ''); // 去掉行首序号
+    const stop = rest.search(NEXT_LABEL);
+    const value = squeezeCell(stop >= 0 ? rest.slice(0, stop) : rest);
+    if (isLikelyTestItem(value)) return value;
   }
   return '';
 }

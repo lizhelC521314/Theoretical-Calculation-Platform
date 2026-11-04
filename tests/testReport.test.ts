@@ -180,6 +180,26 @@ describe('试验项目：按试验结果表的「试验项目」列读取', () =
     const meta = parseOcrMeta(GRID_TABLE, 'x.pdf', '进气阻力');
     expect(meta.testItem).toBe('进气阻力');
   });
+
+  it('标签行：试验项目 | 进气阻力 | 试验时间，取标签右侧的值', () => {
+    const text = [
+      '试验项目\t进气阻力\t试验时间\t2026/2/7',
+      '样品名称\tSC6HAU/SC6HEU 进气系统\t样件件号\t/',
+    ].join('\n');
+    expect(parseTestItemFromTable(text)).toBe('进气阻力');
+  });
+
+  it('标签行：OCR 字间空格 + 同行其他字段时不误取', () => {
+    const text = [
+      '试 验 项 目 进 气 阻 力 试 验 时 间 2026/2/7',
+      '样 品 名 称 SC6HAU/SC6HEU 进 气 系 统 样 件 件 号 /',
+    ].join('\n');
+    expect(parseTestItemFromTable(text)).toBe('进气阻力');
+  });
+
+  it('标签行：试验项目名称：压力损失', () => {
+    expect(parseTestItemFromTable('试验项目名称：压力损失')).toBe('压力损失');
+  });
 });
 
 describe('扫描件 OCR 文本解析', () => {

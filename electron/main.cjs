@@ -651,7 +651,13 @@ function isLikelyTestItemCell(value) {
   const s = value.replace(/[ \t]/g, '');
   if (!s) return false;
   if (/[试实]验项目/.test(s)) return false;
-  if (/(数量|样件编号|样品编号|试验地点|判定|备注|试验设备|规格型号|序号)/.test(s)) return false;
+  if (
+    /(数量|样件编号|样品编号|试验地点|判定|备注|试验设备|规格型号|序号|试验时间|试验日期|试验人员|试验员|试验方法|试验温度|实验室温度|湿度|大气压|设备号|样品批号|接受标准|接受准则|试验要求|试验标准)/.test(
+      s,
+    )
+  ) {
+    return false;
+  }
   if (/(公司|工厂|有限公司|合格|不合格|日期)/.test(s)) return false;
   if (!/^[一-鿿A-Za-z0-9·\-—（）()]{2,24}$/.test(s)) return false;
   if (/\d{3,}/.test(s)) return false;
@@ -730,12 +736,26 @@ function extractTestItemFromWords(words) {
     };
     const headerCells = splitCells(rw);
     const gridCol = headerCells.findIndex((c) => compact(c.text).includes('试验项目'));
+    if (gridCol < 0) continue;
     const otherHeaderHits = headerCells.filter(
       (c, idx) => idx !== gridCol && /(数量|样件编号|样品编号|试验地点|判定|备注|试验设备|规格型号|序号)/.test(compact(c.text)),
     ).length;
-    if (gridCol < 0 || otherHeaderHits < 2) continue;
 
-    // 右边界取右侧表头列的起点，避免把「数量」「试验地点」列的内容算进来
+    // 标签行（表单式，如「试验项目 | 进气阻力 | 试验时间 | 2026/2/7」）：
+    // 不是网格表头时，取同一行标签右侧的第一个有效单元格
+    if (otherHeaderHits < 2) {
+      for (const c of headerCells.slice(gridCol + 1)) {
+        const value = compact(c.text).replace(/^[：:＝=]+/, '');
+        if (isLikelyTestItemCell(value)) return value;
+      }
+      // 标签与值粘在同一个单元格里（无列间距）时，去掉标签后取剩余部分
+      const merged = compact(headerCells[gridCol].text).replace(/[试实]验项目/, '');
+      const mergedValue = merged.replace(/^(名称|代号|编号)?[：:＝=]/, '');
+      if (isLikelyTestItemCell(mergedValue)) return mergedValue;
+      continue;
+    }
+
+    // 网格表头：右边界取右侧表头列的起点，避免把「数量」「试验地点」列的内容算进来
     const rightCell = headerCells[gridCol + 1];
     const right = rightCell ? rightCell.x0 - 2 : last.x + last.w + medH * 0.5;
 
