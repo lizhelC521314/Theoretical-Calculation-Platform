@@ -181,6 +181,18 @@ describe('试验项目：按试验结果表的「试验项目」列读取', () =
     expect(meta.testItem).toBe('进气阻力');
   });
 
+  it('网格表：数据行没有「数量」列时仍取到试验项目（不取半截标签）', () => {
+    // BYD 报告 OCR 实况：表头「试验项目 数量 样件编号 试验地点 判定 备注」，
+    // 数据行没有数量值，第一格即「进气阻力」
+    const REAL = [
+      '试 验 项 目   数量   样件编号   试验地点   判定   备注',
+      '进气阻力   SYSQ一20260204一19一1#、2#   合格',
+    ].join('\n');
+    expect(parseTestItemFromTable(REAL)).toBe('进气阻力');
+    // 只有半截标签时不能被当成试验项目
+    expect(parseTestItemFromTable('试 验 项 目\n项目\n数量')).toBe('');
+  });
+
   it('标签行：试验项目 | 进气阻力 | 试验时间，取标签右侧的值', () => {
     const text = [
       '试验项目\t进气阻力\t试验时间\t2026/2/7',
@@ -480,6 +492,16 @@ describe('进气阻力：读取流量与单位', () => {
       '试验结果\t2.3kPa',
     ].join('\n');
     expect(parseFlow(text)).toEqual({ flow: '260/240', flowUnit: 'kg/h' });
+  });
+
+  it('试验结果表格：流量写在样品列（SC6HAU进气流量380kg/h）时按行读取', () => {
+    // BYD 报告 OCR 实况：表头「编号 接受准则 测试结果」，流量写在同一行的样品列
+    const text = [
+      '编号\t接受准则\t测试结果',
+      'SYSQ一20260204一19一1#\tSC6HAU进气流量380kg/h，阻力要求3.5±0.5kpa\t3.34kPa',
+      'SYSQ一20260204一19一2#\tSC6HEU进气流量265kg/h，阻力要求2.5±0.5kpa\t2.41kPa',
+    ].join('\n');
+    expect(parseFlow(text)).toEqual({ flow: '380/265', flowUnit: 'kg/h' });
   });
 
   it('试验要求行的 m³/h 流量', () => {

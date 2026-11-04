@@ -651,6 +651,7 @@ function isLikelyTestItemCell(value) {
   const s = value.replace(/[ \t]/g, '');
   if (!s) return false;
   if (/[试实]验项目/.test(s)) return false;
+  if (/^[试实]?[验]?[项]?[目]?$/.test(s)) return false; // 标签被 OCR 拆断的半截（「项目」「试验」）
   if (
     /(数量|样件编号|样品编号|试验地点|判定|备注|试验设备|规格型号|序号|试验时间|试验日期|试验人员|试验员|试验方法|试验温度|实验室温度|湿度|大气压|设备号|样品批号|接受标准|接受准则|试验要求|试验标准)/.test(
       s,
@@ -766,10 +767,14 @@ function extractTestItemFromWords(words) {
     const right = rightCell ? rightCell.x0 - 2 : last.x + last.w + medH * 0.5;
 
     // 表头下方的词按行聚合，逐行按列切分；跳过纯数字（序号列），取第一个像试验项目的单元格
+    // 注意排除表头行自身的词：OCR 的字高/基线有抖动，表头词可能被算到「表头下方」，
+    // 会拼出「试」「项目」这类半截标签被误当成试验项目
+    const headerWords = new Set(row.words);
     const dataWords = ws.filter((w) => {
+      if (headerWords.has(w)) return false;
       const cx = w.x + w.w / 2;
       const cy = w.y + w.h / 2;
-      return cy > row.cy + tol * 0.25 && cx < right;
+      return cy > row.cy + tol * 0.5 && cx < right;
     });
     if (!dataWords.length) continue;
 
@@ -798,10 +803,12 @@ function extractTestItemFromWords(words) {
 }
 
 /**
- * 按列坐标读取试验项目表格中「接受标准（接受准则）」「试验要求」列的流量：
- * 定位该字段标签所在的列，取其右侧（值所在单元格）纵向范围内的全部词，
- * 用正则找「数字 + kg/h 或 m³/h」，多个流量按出现顺序用「/」连接。
- * 这样不会把图表坐标轴「流量kg/h」或相邻列的日期/温度当成流量。
+ * 从试验结果表格读取流量：
+ * 先定位含「接受标准 / 接受准则 / 试验要求」的表头（或字段）行，
+ * 再在该行及其下方各行（直到「结论」行）的整行文字里找「数字 + kg/h 或 m³/h」。
+ * 试验要求可能写在相邻列（如「SC6HAU进气流量380kg/h」），因此不再限定某一列；
+ * 图表坐标轴「流量kg/h 104…312」没有「数字+kg/h」相邻形式，不会误取。
+ * 多个流量按出现顺序用「/」连接。
  */
 function extractFlowFromWords(words) {
   const ws = (words || []).filter((w) => w && w.text);
@@ -828,47 +835,15 @@ function extractFlowFromWords(words) {
   const FLOW_CELL = /(\d+(?:\.\d+)?)(kg|m[³3])[\/／|丨]h/gi;
   const values = [];
   let unit = '';
+  const rowText = (r) =>
+    compact([...r.words].sort((a, b) => a.x - b.x).map((w) => w.text).join(''));
 
   for (let ri = 0; ri < rows.length; ri++) {
-    const rw = [...rows[ri].words].sort((a, b) => a.x - b.x);
-    // 行内定位「接受标准 / 接受准则 / 试验要求」标签（OCR 可能拆成多个词）
-    let s = -1;
-    let e = -1;
-    for (let i = 0; i < rw.length && s < 0; i++) {
-      let acc = compact(rw[i].text);
-      for (let j = i; j < Math.min(rw.length, i + 4); j++) {
-        if (j > i) acc += compact(rw[j].text);
-        if (/(接受(标准|准则)|试验要求)/.test(acc)) {
-          s = i;
-          e = j;
-          break;
-        }
-        if (acc.length > 8) break;
-      }
-    }
-    if (s < 0) continue;
-
-    const labelLeft = rw[s].x;
-    const boundary = rw[e].x + (rw[e].w || 0) + medH * 0.2;
-
-    // 纵向范围：标签行起，直到同一左列又出现新的字段标签（试验结论、备注等）
-    let stopCy = Infinity;
-    for (let k = ri + 1; k < rows.length; k++) {
-      if (rows[k].words.some((w) => Math.abs(w.x - labelLeft) <= medH * 0.8)) {
-        stopCy = rows[k].cy;
-        break;
-      }
-    }
-
-    for (let k = ri; k < rows.length && rows[k].cy < stopCy - tol * 0.5; k++) {
-      const rowText = compact(
-        [...rows[k].words]
-          .sort((a, b) => a.x - b.x)
-          .filter((w) => w.x + w.w / 2 > boundary)
-          .map((w) => w.text)
-          .join(''),
-      );
-      for (const m of rowText.matchAll(FLOW_CELL)) {
+    if (!/(接受标准|接受准则|试验要求)/.test(rowText(rows[ri]))) continue;
+    for (let k = ri; k < rows.length; k++) {
+      const text = rowText(rows[k]);
+      if (k > ri && (/(判定及结论|判定和结论|试验结论|结论)/.test(text) || /(接受标准|接受准则|试验要求)/.test(text))) break;
+      for (const m of text.matchAll(FLOW_CELL)) {
         if (!values.includes(m[1])) values.push(m[1]);
         unit = m[2].toLowerCase().startsWith('m') ? 'm³/h' : 'kg/h';
       }

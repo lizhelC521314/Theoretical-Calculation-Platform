@@ -184,10 +184,7 @@ export function despaceOcrText(text: string): string {
  */
 export function parseFlow(text: string): { flow: string; flowUnit: string } {
   const lines = text.split(/\r?\n/).map((l) => l.replace(/\s+$/, ''));
-  const ACCEPT_LABEL = /(接受(标准|准则)|试验要求)/;
-  // 后续行的行首若是另一个字段名，说明已离开「接受标准 / 试验要求」单元格
-  const NEXT_FIELD =
-    /^(试验项目|样品名称|样件名称|样品编号|样品件号|试验时间|试验日期|试验人员|试验方法|试验区域|试验部位|试验温度|试验设备|试验标准|接受标准|接受准则|试验要求|试验结论|判定|备注|技术要求|序号)/;
+  const ACCEPT_LABEL = /(接受标准|接受准则|试验要求)/;
   const FLOW_CELL = /(\d+(?:\.\d+)?)(kg|m[³3])[\/／|丨]h/gi;
   const values: string[] = [];
   let unit = '';
@@ -201,15 +198,12 @@ export function parseFlow(text: string): { flow: string; flowUnit: string } {
   };
 
   for (let i = 0; i < lines.length; i++) {
-    const compact = lines[i].replace(/[ \t]+/g, '');
-    if (!ACCEPT_LABEL.test(compact)) continue;
-    // 标签行的值（同行），以及值单元格换行后的后续行（最多 4 行）
-    collect(compact);
-    for (let j = i + 1; j < Math.min(lines.length, i + 5); j++) {
-      const l = lines[j].trim();
-      if (!l) continue;
-      if (NEXT_FIELD.test(l)) break;
-      collect(l);
+    if (!ACCEPT_LABEL.test(lines[i].replace(/[ \t]+/g, ''))) continue;
+    // 试验要求可能写在同行或相邻列，故取该行起、到下一个字段/结论行之前的整行文字
+    for (let j = i; j < Math.min(lines.length, i + 12); j++) {
+      const compact = lines[j].replace(/[ \t]+/g, '');
+      if (j > i && (ACCEPT_LABEL.test(compact) || /(判定及结论|判定和结论|试验结论|结论)/.test(compact))) break;
+      collect(compact);
     }
   }
 
@@ -233,6 +227,7 @@ function isLikelyTestItem(value: string): boolean {
   const compact = value.replace(/[ \t]/g, '');
   if (!compact) return false;
   if (TEST_ITEM_LABEL.test(compact)) return false;
+  if (/^[试实]?[验]?[项]?[目]?$/.test(compact)) return false; // 标签被 OCR 拆断的半截（「项目」「试验」）
   if (TABLE_HEADER_HINTS.test(compact)) return false;
   if (/(公司|工厂|有限公司|地点|合格|不合格|结论)/.test(compact)) return false;
   if (!/^[一-鿿A-Za-z0-9·\-—（）()]{2,24}$/.test(compact)) return false;
