@@ -153,6 +153,72 @@ export function despaceOcrText(text: string): string {
     .trim();
 }
 
+/** 表格里的「试验项目 / 实验项目」标签（OCR 可能在字间插空格） */
+const TEST_ITEM_LABEL = /[试实]\s*验\s*项\s*目/;
+
+/** 表格中常见的表头关键字：用于区分「表头行」与「标签+值」行 */
+const TABLE_HEADER_HINTS =
+ /(数量|样件编号|样品编号|试验地点|试验日期|试验人员|判定|备注|试验设备|设备有效日期|试验标准|样品名称|规格型号)/;
+
+/** 单元格内容归一：去掉字间空格（「压 力 损 失」→「压力损失」），保留必要单空格 */
+function squeezeCell(raw: string): string {
+  return despaceOcrText(raw).replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+/** 判断候选值是否像「试验项目」名称（排除编号、日期、表头词与纯数字） */
+function isLikelyTestItem(value: string): boolean {
+  const compact = value.replace(/[ \t]/g, '');
+  if (!compact) return false;
+  if (TEST_ITEM_LABEL.test(compact)) return false;
+  if (TABLE_HEADER_HINTS.test(compact)) return false;
+  if (!/^[一-鿿A-Za-z0-9·\-—（）()]{2,24}$/.test(compact)) return false;
+  if (/\d{3,}/.test(compact)) return false; // 排除编号 / 年份 / 日期串
+  if ((compact.match(/[一-鿿]/g) || []).length < 2) return false; // 至少两个汉字
+  return true;
+}
+
+/**
+ * 从「试验结果」表格中提取实验项目（优先级高于封面「项目名称」）：
+ *  - 标签+值同行：「试验项目   压力损失   设备有效日期   …」
+ *  - 表头列：表头「No. 试验项目 数量 …」→ 下一非空行同列取「进气阻力」
+ * 找不到返回空串。
+ */
+export function parseTestItemFromTable(text: string): string {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+$/, ''))
+    .filter((l) => l.trim());
+  const splitCells = (line: string) =>
+    line
+      .split(/[ \t]{2,}/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+
+  for (let i = 0; i < lines.length; i++) {
+    if (!TEST_ITEM_LABEL.test(lines[i])) continue;
+    const cells = splitCells(lines[i]);
+    const col = cells.findIndex((c) => TEST_ITEM_LABEL.test(c));
+    if (col < 0) continue;
+
+    // 1) 标签与值在同一单元格（OCR 去掉列间距后粘连）
+    const inline = squeezeCell(cells[col].replace(TEST_ITEM_LABEL, '').replace(/^[：:]\s*/, ''));
+    if (isLikelyTestItem(inline)) return inline;
+
+    const headerHits = cells.filter((c) => TABLE_HEADER_HINTS.test(c.replace(/[ \t]+/g, ''))).length;
+    const right = cells[col + 1] ? squeezeCell(cells[col + 1]) : '';
+    // 2) 同一行右侧紧跟的单元格（标签+值行）
+    if (headerHits < 2 && isLikelyTestItem(right)) return right;
+
+    // 3) 表头行：取下一非空行同一列的单元格
+    for (let j = i + 1; j < Math.min(lines.length, i + 4); j++) {
+      const rowCells = splitCells(lines[j]);
+      const v = rowCells[col] ? squeezeCell(rowCells[col]) : '';
+      if (isLikelyTestItem(v)) return v;
+    }
+  }
+  return '';
+}
+
 /** OCR 版本号清洗：「VI·0」「V1。0」→「V1.0」 */
 function cleanOcrVersion(raw: string): string {
   if (!raw) return '';
@@ -166,12 +232,15 @@ function cleanOcrVersion(raw: string): string {
   return m ? m[1].toUpperCase() : '';
 }
 
-/** OCR 文本专用元字段解析：全文先 despace，按「下一已知标签」截止抓取 */
+/** OCR 文本专用元字段解析：封面页先 despace，按「下一已知标签」截止抓取 */
 export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
+  // 多页 OCR 时页与页之间以空行分隔：元字段只从封面页取，避免试验结果表里的
+  // 日期/委托方等内容污染字段；实验项目则在全文中查找（表格通常在后面几页）
+  const firstPage = rawText.split(/\n{2,}/)[0] || rawText;
   // 页眉编号在原始带空格文本上解析（正则本身兼容空格），避免 despace 后日期数字粘连；
   // 精确版失败时走 OCR 容错版（X 丢失、分隔符被误识为 ·/一 等）
-  const header = parseHeaderCode(rawText) || parseOcrHeaderCode(rawText);
-  const text = despaceOcrText(rawText);
+  const header = parseHeaderCode(firstPage) || parseOcrHeaderCode(firstPage);
+  const text = despaceOcrText(firstPage);
 
   const KNOWN_LABELS =
     '(?:客户名称|委托单位|送样单位|项目名称|项目代号|产品名称|产品型号|零件名称|零部件号|试验类型|报告编号|样品编号|样件编号|报告日期|试验日期|实验日期|检测日期|版本号|客户|委托方|甲方|项目|产品|版本|日期|编号)';
@@ -189,10 +258,11 @@ export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
     grab('客户(?:名称)?') || grab('(?:委托方|委托单位|甲方|送样单位)'),
   );
 
-  // 实验项目：封面「项目名称」一栏（如「压力损失」）
+  // 实验项目：优先取「试验结果」表格里的「试验项目」，否则回退封面「项目名称」一栏
   // 项目：零件名称中的字母数字段（如 B26-A、CS75-2025）
   // 产品：优先「产品名称」标签，否则取零件名称中字母数字段之外的文字部分
-  const testItem = grab('项目(?:名称|代号)?');
+  const tableItem = parseTestItemFromTable(rawText);
+  const testItem = tableItem || grab('项目(?:名称|代号)?');
   const partName = grab('零件名称');
   const split = splitPartName(partName);
   const project = split.project || testItem;
@@ -332,8 +402,9 @@ export function parseMetaOnly(text: string, fileName: string): PdfReportMeta {
     findField(text, /样件(?:名称|编号)?\s*[：:]\s*([^\n]{1,80})/) ||
     '';
   const split = splitPartName(partName);
-  // 实验项目：封面「项目名称」一栏（如「压力损失」）
-  const testItem = findField(text, /项目(?:名称|代号)?\s*[：:]\s*([^\n]{1,60})/) || '';
+  // 实验项目：优先取「试验结果」表格里的「试验项目」，否则回退封面「项目名称」一栏
+  const testItem =
+    parseTestItemFromTable(text) || findField(text, /项目(?:名称|代号)?\s*[：:]\s*([^\n]{1,60})/) || '';
   let project = split.project || testItem;
   let product = findField(text, /产品(?:名称|型号)?\s*[：:]\s*([^\n]{1,60})/) || split.product;
 

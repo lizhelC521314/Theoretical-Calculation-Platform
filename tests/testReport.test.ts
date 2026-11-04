@@ -8,6 +8,7 @@ import {
   parseHeaderCode,
   parseMetaOnly,
   parseOcrMeta,
+  parseTestItemFromTable,
   parseTestReport,
   testReportFileName,
 } from '../src/report/testReport';
@@ -198,6 +199,21 @@ describe('扫描件 OCR 文本解析', () => {
     expect(meta.product).toBe('进气系统');
     expect(meta.version).toBe('');
   });
+
+  it('多页 OCR：元字段取封面页，实验项目优先取试验结果表格', () => {
+    // 真实第 3 页 OCR 行（B26-A进气阻力.pdf）：试验结果表里是「标签+值」同行
+    const page3 = [
+      '试验结果：',
+      '试验项目   进气阻力   设备有效日期   2026/3/5一2027/3/4',
+      '送样日期   2026/7/17   样品状态   外观良好',
+    ].join('\n');
+    const meta = parseOcrMeta(`${REAL_OCR_ROWS}\n\n${page3}`, 'B26-A进气阻力.pdf');
+    expect(meta.customer).toBe('长城汽车');
+    expect(meta.date).toBe(`${expectedYear}-08-19`);
+    expect(meta.project).toBe('B26-A');
+    expect(meta.testItem).toBe('进气阻力');
+    expect(meta.version).toBe('');
+  });
 });
 
 describe('归档文件名（客户+项目+实验项目+产品+版本+日期）', () => {
@@ -231,5 +247,55 @@ describe('归档文件名（客户+项目+实验项目+产品+版本+日期）',
       version: 'V1.0',
       date: '20260819',
     });
+  });
+});
+
+describe('实验项目优先取试验结果表格', () => {
+  // 文字层提取：列间距以 3 个空格体现，行为「标签 + 值 + 设备 + 日期」
+  const ROW_STYLE = [
+    '试验结果',
+    '样品名称   B26-A 进气系统   试验设备/型号   滤清器颗粒计数法综合性能测试台',
+    '试验项目   压力损失   设备有效日期   2026/3/5−2027/3/4',
+  ].join('\n');
+
+  // 表头列样式：表头行含「试验项目」，值在下一行同列
+  const HEADER_STYLE = [
+    'No.   试验项目   数量   样件编号   试验地点   判定   备注',
+    '1   进气阻力   1   SYQ-20251105-09-1#   成都万友滤机有限公司   合格',
+  ].join('\n');
+
+  // OCR 形态：中文字符间额外插空格，列间距仍为 3 个空格
+  const OCR_ROWS = [
+    '试 验 项 目    压 力 损 失    设 备 有 效 日 期    2026/3/5−2027/3/4',
+  ].join('\n');
+
+  it('标签+值同行：取「压力损失」', () => {
+    expect(parseTestItemFromTable(ROW_STYLE)).toBe('压力损失');
+  });
+
+  it('表头列样式：取下一行同列「进气阻力」', () => {
+    expect(parseTestItemFromTable(HEADER_STYLE)).toBe('进气阻力');
+  });
+
+  it('OCR 字间带空格：仍能取到「压力损失」', () => {
+    expect(parseTestItemFromTable(OCR_ROWS)).toBe('压力损失');
+  });
+
+  it('优先于封面「项目名称」标签（文字版与 OCR 两条入口）', () => {
+    const text = '项目名称：其他项目\n试验项目   压力损失   设备有效日期   2026/3/5';
+    expect(parseMetaOnly(text, 'x.pdf').testItem).toBe('压力损失');
+    expect(parseOcrMeta('项 目 名 称 ：   其 他 项 目\n试 验 项 目    压 力 损 失', 'x.pdf').testItem).toBe(
+      '压力损失',
+    );
+  });
+
+  it('没有试验结果表格时回退封面「项目名称」', () => {
+    expect(parseTestItemFromTable('项目名称：压力损失')).toBe('');
+    expect(parseMetaOnly('项目名称：压力损失', 'x.pdf').testItem).toBe('压力损失');
+  });
+
+  it('表格里的编号 / 日期 / 表头词不会被误取', () => {
+    expect(parseTestItemFromTable('试验项目   1   合格')).toBe('');
+    expect(parseTestItemFromTable('试验项目   数量   样件编号')).toBe('');
   });
 });

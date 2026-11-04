@@ -569,10 +569,88 @@ function ocrWordsToLines(words) {
     .join('\n');
 }
 
+/** 取 PDF 某页最大的内嵌扫描图（页面无图像时返回 null） */
+async function pdfPageLargestImage(doc, pageNumber, OPS) {
+  const page = await doc.getPage(pageNumber);
+  const ops = await page.getOperatorList();
+  let img = null;
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    if (ops.fnArray[i] !== OPS.paintImageXObject) continue;
+    const cand = await new Promise((res) => page.objs.get(ops.argsArray[i][0], res));
+    if (cand && cand.data && (!img || cand.width * cand.height > img.width * img.height)) img = cand;
+  }
+  return img;
+}
+
+/** 用 Windows 系统 OCR 识别一张扫描图：BMP 临时文件 → WinRT OCR → 按词坐标还原来行 */
+async function ocrImageToText(img) {
+  const tmpPath = path.join(os.tmpdir(), `ctr-ocr-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.bmp`);
+  fs.writeFileSync(tmpPath, encodeBmp24(img));
+  const psPath = tmpPath.replace(/'/g, "''");
+  const ps = [
+    '$ErrorActionPreference = "Stop"',
+    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+    'Add-Type -AssemblyName System.Runtime.WindowsRuntime',
+    '[void][Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]',
+    '[void][Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics, ContentType=WindowsRuntime]',
+    '[void][Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType=WindowsRuntime]',
+    '$asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods("Public, Static") | Where-Object { $_.Name -eq "AsTask" -and $_.GetParameters().Count -eq 1 -and $_.IsGenericMethodDefinition -and $_.GetParameters()[0].ParameterType.Name -eq "IAsyncOperation``1" })[0]',
+    'function Await-Op($op, $rt) { $m = $asTask.MakeGenericMethod($rt); $t = $m.Invoke($null, @($op)); $t.Wait(); return $t.Result }',
+    `if (-not (Test-Path '${psPath}')) { [Console]::Error.WriteLine("IMAGE_NOT_FOUND"); exit 2 }`,
+    `$file = Await-Op ([Windows.Storage.StorageFile]::GetFileFromPathAsync('${psPath}')) ([Windows.Storage.StorageFile])`,
+    '$stream = Await-Op ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream, Windows.Storage, ContentType=WindowsRuntime])',
+    '$decoder = Await-Op ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])',
+    '$bitmap = Await-Op ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics, ContentType=WindowsRuntime])',
+    '$engine = $null',
+    '$zh = [Windows.Media.Ocr.OcrEngine]::AvailableRecognizerLanguages | Where-Object { $_.LanguageTag -like "zh*" } | Select-Object -First 1',
+    'if ($zh) { $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($zh) }',
+    'if (-not $engine) { $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages() }',
+    'if (-not $engine) { [Console]::Error.WriteLine("NO_OCR_ENGINE"); exit 2 }',
+    '$result = Await-Op ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult, Windows.Foundation, ContentType=WindowsRuntime])',
+    'foreach ($line in $result.Lines) { foreach ($w in $line.Words) { $r = $w.BoundingRect; [Console]::Out.WriteLine(([string][int]$r.X) + "`t" + ([string][int]$r.Y) + "`t" + ([string][int]$r.Width) + "`t" + ([string][int]$r.Height) + "`t" + $w.Text) } }',
+  ].join('\n');
+
+  const encoded = Buffer.from(ps, 'utf16le').toString('base64');
+  try {
+    const stdout = await new Promise((resolve, reject) => {
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+        { timeout: 120000, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
+        (err, out, stderr) => {
+          if (err) {
+            const detail = String(stderr || '').trim();
+            if (detail.includes('NO_OCR_ENGINE')) reject(new Error('系统 OCR 引擎不可用（请确认系统语言含中文）'));
+            else reject(new Error(detail || String(err.message || err)));
+            return;
+          }
+          resolve(String(out || ''));
+        },
+      );
+    });
+    const words = [];
+    for (const ln of stdout.split(/\r?\n/)) {
+      const parts = ln.split('\t');
+      if (parts.length < 5) continue;
+      const x = Number(parts[0]);
+      const y = Number(parts[1]);
+      const w = Number(parts[2]);
+      const h = Number(parts[3]);
+      const text = parts.slice(4).join('\t').trim();
+      if (!text || !Number.isFinite(x) || !Number.isFinite(y)) continue;
+      words.push({ x, y, w: Number.isFinite(w) ? w : 0, h: Number.isFinite(h) ? h : 0, text });
+    }
+    return ocrWordsToLines(words);
+  } finally {
+    try { fs.unlinkSync(tmpPath); } catch {}
+  }
+}
+
 /**
- * 扫描件 OCR：主进程提取 PDF 封面内嵌扫描图（pdfjs operator list，无需 canvas/worker），
+ * 扫描件 OCR：主进程逐页提取内嵌扫描图（pdfjs operator list，无需 canvas/worker），
  * 编码为 BMP 后调用 Windows 系统 OCR（WinRT Windows.Media.Ocr，离线、支持中文），
- * 按词坐标还原来版面行返回文本。
+ * 按词坐标还原来版面行返回文本。封面必读；之后逐页识别直到找到「试验项目」表格（最多 8 页），
+ * 因为实验项目优先取试验结果表里的值，单靠封面「项目名称」不一定准确。
  * 通过 PowerShell -EncodedCommand 执行，避免编码与转义问题。
  * 注意：WinRT 异步对象在 PowerShell 里是原始 COM 对象（Status/GetResults 不可直接用），
  * 必须经 WindowsRuntimeSystemExtensions.AsTask 反射包装；泛型重载按参数类型名
@@ -582,7 +660,6 @@ ipcMain.handle('pdf:ocrFirstPage', async (_e, filePath) => {
   try {
     if (!filePath || !fs.existsSync(filePath)) return { ok: false, message: '文件不存在' };
 
-    // 1. 提取封面最大内嵌图像（扫描件封面即整页扫描图）
     const pdfjsFile = app.isPackaged
       ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.mjs')
       : require.resolve('pdfjs-dist/legacy/build/pdf.mjs');
@@ -595,95 +672,36 @@ ipcMain.handle('pdf:ocrFirstPage', async (_e, filePath) => {
       useWorkerFetch: false,
       disableFontFace: true,
     });
-    let img = null;
+
+    const pagesText = [];
     try {
       const doc = await task.promise;
-      const page = await doc.getPage(1);
-      const ops = await page.getOperatorList();
-      for (let i = 0; i < ops.fnArray.length; i++) {
-        if (ops.fnArray[i] !== OPS.paintImageXObject) continue;
-        const cand = await new Promise((res) => page.objs.get(ops.argsArray[i][0], res));
-        if (cand && cand.data && (!img || cand.width * cand.height > img.width * img.height)) img = cand;
+      const maxPages = Math.min(doc.numPages, 8);
+      for (let p = 1; p <= maxPages; p++) {
+        const img = await pdfPageLargestImage(doc, p, OPS);
+        if (!img || !img.data) continue;
+        let pageText = '';
+        try {
+          pageText = await ocrImageToText(img);
+        } catch (err) {
+          // 封面识别失败直接报错；后续页失败则不再继续扫描
+          if (p === 1) return { ok: false, message: String((err && err.message) || err) };
+          break;
+        }
+        if (pageText) pagesText.push(pageText);
+        // 已识别到试验结果表格里的「试验项目」，无需再往后翻
+        if (/[试实]\s*验\s*项\s*目/.test(pageText)) break;
       }
     } finally {
       await task.destroy();
     }
-    if (!img) return { ok: false, message: '封面未找到扫描图像' };
 
-    // 2. 编码 BMP 写临时文件
-    const tmpPath = path.join(os.tmpdir(), `ctr-ocr-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.bmp`);
-    try {
-      fs.writeFileSync(tmpPath, encodeBmp24(img));
-    } catch (err) {
-      return { ok: false, message: '临时文件写入失败：' + String((err && err.message) || err) };
-    }
-
-    // 3. 系统 OCR，输出词坐标 TSV（x\ty\tw\th\ttext）
-    const psPath = tmpPath.replace(/'/g, "''");
-    const ps = [
-      '$ErrorActionPreference = "Stop"',
-      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
-      'Add-Type -AssemblyName System.Runtime.WindowsRuntime',
-      '[void][Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]',
-      '[void][Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics, ContentType=WindowsRuntime]',
-      '[void][Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType=WindowsRuntime]',
-      '$asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods("Public, Static") | Where-Object { $_.Name -eq "AsTask" -and $_.GetParameters().Count -eq 1 -and $_.IsGenericMethodDefinition -and $_.GetParameters()[0].ParameterType.Name -eq "IAsyncOperation``1" })[0]',
-      'function Await-Op($op, $rt) { $m = $asTask.MakeGenericMethod($rt); $t = $m.Invoke($null, @($op)); $t.Wait(); return $t.Result }',
-      `if (-not (Test-Path '${psPath}')) { [Console]::Error.WriteLine("IMAGE_NOT_FOUND"); exit 2 }`,
-      `$file = Await-Op ([Windows.Storage.StorageFile]::GetFileFromPathAsync('${psPath}')) ([Windows.Storage.StorageFile])`,
-      '$stream = Await-Op ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream, Windows.Storage, ContentType=WindowsRuntime])',
-      '$decoder = Await-Op ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])',
-      '$bitmap = Await-Op ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics, ContentType=WindowsRuntime])',
-      '$engine = $null',
-      '$zh = [Windows.Media.Ocr.OcrEngine]::AvailableRecognizerLanguages | Where-Object { $_.LanguageTag -like "zh*" } | Select-Object -First 1',
-      'if ($zh) { $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($zh) }',
-      'if (-not $engine) { $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages() }',
-      'if (-not $engine) { [Console]::Error.WriteLine("NO_OCR_ENGINE"); exit 2 }',
-      '$result = Await-Op ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult, Windows.Foundation, ContentType=WindowsRuntime])',
-      'foreach ($line in $result.Lines) { foreach ($w in $line.Words) { $r = $w.BoundingRect; [Console]::Out.WriteLine(([string][int]$r.X) + "`t" + ([string][int]$r.Y) + "`t" + ([string][int]$r.Width) + "`t" + ([string][int]$r.Height) + "`t" + $w.Text) } }',
-    ].join('\n');
-
-    const encoded = Buffer.from(ps, 'utf16le').toString('base64');
-    try {
-      const stdout = await new Promise((resolve, reject) => {
-        execFile(
-          'powershell.exe',
-          ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
-          { timeout: 120000, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
-          (err, out, stderr) => {
-            if (err) {
-              const detail = String(stderr || '').trim();
-              if (detail.includes('NO_OCR_ENGINE')) reject(new Error('系统 OCR 引擎不可用（请确认系统语言含中文）'));
-              else reject(new Error(detail || String(err.message || err)));
-              return;
-            }
-            resolve(String(out || ''));
-          },
-        );
-      });
-      const words = [];
-      for (const ln of stdout.split(/\r?\n/)) {
-        const parts = ln.split('\t');
-        if (parts.length < 5) continue;
-        const x = Number(parts[0]);
-        const y = Number(parts[1]);
-        const w = Number(parts[2]);
-        const h = Number(parts[3]);
-        const text = parts.slice(4).join('\t').trim();
-        if (!text || !Number.isFinite(x) || !Number.isFinite(y)) continue;
-        words.push({ x, y, w: Number.isFinite(w) ? w : 0, h: Number.isFinite(h) ? h : 0, text });
-      }
-      return { ok: true, text: ocrWordsToLines(words) };
-    } catch (err) {
-      return { ok: false, message: String((err && err.message) || err) };
-    } finally {
-      try { fs.unlinkSync(tmpPath); } catch {}
-    }
+    if (!pagesText.length) return { ok: false, message: '未识别到文字' };
+    return { ok: true, text: pagesText.join('\n\n') };
   } catch (err) {
     return { ok: false, message: String((err && err.message) || err) };
   }
 });
-
 /** 将 PDF 文件（含 UNC 路径）拷贝到临时目录，返回 file:// URL 供 iframe 原生 PDF 查看器加载（避免 data URL 长度限制） */
 ipcMain.handle('db:pdfData', async (_e, filePath) => {
   try {
