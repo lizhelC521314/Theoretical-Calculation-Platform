@@ -582,7 +582,7 @@ async function pdfPageLargestImage(doc, pageNumber, OPS) {
   return img;
 }
 
-/** 用 Windows 系统 OCR 识别一张扫描图：BMP 临时文件 → WinRT OCR → 按词坐标还原来行 */
+/** 用 Windows 系统 OCR 识别一张扫描图：BMP 临时文件 → WinRT OCR → 返回版面行文本与词坐标 */
 async function ocrImageToText(img) {
   const tmpPath = path.join(os.tmpdir(), `ctr-ocr-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.bmp`);
   fs.writeFileSync(tmpPath, encodeBmp24(img));
@@ -640,10 +640,97 @@ async function ocrImageToText(img) {
       if (!text || !Number.isFinite(x) || !Number.isFinite(y)) continue;
       words.push({ x, y, w: Number.isFinite(w) ? w : 0, h: Number.isFinite(h) ? h : 0, text });
     }
-    return ocrWordsToLines(words);
+    return { text: ocrWordsToLines(words), words };
   } finally {
     try { fs.unlinkSync(tmpPath); } catch {}
   }
+}
+
+/** 单元格内容校验：排除表头词、地点/结论、编号与纯数字，避免误取相邻列 */
+function isLikelyTestItemCell(value) {
+  const s = value.replace(/[ \t]/g, '');
+  if (!s) return false;
+  if (/[试实]验项目/.test(s)) return false;
+  if (/(数量|样件编号|样品编号|试验地点|判定|备注|试验设备|规格型号|序号)/.test(s)) return false;
+  if (/(公司|工厂|有限公司|合格|不合格|日期)/.test(s)) return false;
+  if (!/^[一-鿿A-Za-z0-9·\-—（）()]{2,24}$/.test(s)) return false;
+  if (/\d{3,}/.test(s)) return false;
+  if ((s.match(/[一-鿿]/g) || []).length < 2) return false;
+  return true;
+}
+
+/**
+ * 按列坐标从词里取「试验结果」表格的试验项目：
+ * 先在表头行定位「试验项目」单元格的 x 范围（含「试验」「项目」被 OCR 拆开的写法），
+ * 再取该列下方（或表头/数据被合并进同一行时同行）最近一行落在列内的词。
+ * 这样不会把右侧「试验地点」「判定」等列的内容误当成试验项目。
+ */
+function extractTestItemFromWords(words) {
+  const ws = (words || []).filter((w) => w && w.text);
+  if (!ws.length) return '';
+  const compact = (t) => t.replace(/[ \t]/g, '');
+  const hs = ws.map((w) => w.h || 0).filter((v) => v > 0).sort((a, b) => a - b);
+  const medH = hs[Math.floor(hs.length / 2)] || 20;
+  const tol = Math.max(10, medH * 0.6);
+
+  // 按 y 中心聚成行
+  const rows = [];
+  for (const w of [...ws].sort((a, b) => a.y + a.h / 2 - (b.y + b.h / 2))) {
+    const cy = w.y + w.h / 2;
+    const row = rows.find((r) => Math.abs(r.cy - cy) <= tol);
+    if (row) {
+      row.words.push(w);
+      row.cy = (row.cy * (row.words.length - 1) + cy) / row.words.length;
+    } else {
+      rows.push({ cy, words: [w] });
+    }
+  }
+  rows.sort((a, b) => a.cy - b.cy);
+
+  for (let ri = 0; ri < rows.length; ri++) {
+    const row = rows[ri];
+    const rw = [...row.words].sort((a, b) => a.x - b.x);
+    if (!compact(rw.map((w) => w.text).join('')).includes('试验项目')) continue;
+
+    // 行内定位「试验项目」：单字词或被拆成多段均可
+    let startIdx = -1;
+    let endIdx = -1;
+    for (let i = 0; i < rw.length && startIdx < 0; i++) {
+      let acc = compact(rw[i].text);
+      for (let j = i; j < Math.min(rw.length, i + 4); j++) {
+        if (j > i) acc += compact(rw[j].text);
+        if (acc.includes('试验项目')) { startIdx = i; endIdx = j; break; }
+        if (acc.length > 8) break;
+      }
+    }
+    if (startIdx < 0) continue;
+
+    const first = rw[startIdx];
+    const last = rw[endIdx];
+    const nextHeader = rw[endIdx + 1];
+    const left = first.x - medH * 0.3;
+    // 右边界取右侧表头词的起点，避免把「数量」「试验地点」列的内容算进来
+    const right = nextHeader ? nextHeader.x - 2 : last.x + last.w + medH * 0.5;
+
+    const cand = ws.filter((w) => {
+      if (w.x >= first.x && w.x <= last.x + last.w && Math.abs((w.y + w.h / 2) - row.cy) <= tol) return false;
+      const cx = w.x + w.w / 2;
+      const cy = w.y + w.h / 2;
+      return cy >= row.cy - tol && cx >= left && cx <= right;
+    });
+    if (!cand.length) continue;
+
+    // 取列内最近的一行（表头/数据被合并时即同一行）
+    const topCy = Math.min(...cand.map((w) => w.y + w.h / 2));
+    const picked = cand
+      .filter((w) => Math.abs((w.y + w.h / 2) - topCy) <= tol)
+      .sort((a, b) => a.x - b.x)
+      .map((w) => w.text)
+      .join('');
+    const value = compact(picked).replace(/^[：:]+/, '');
+    if (isLikelyTestItemCell(value)) return value;
+  }
+  return '';
 }
 
 /**
@@ -674,30 +761,34 @@ ipcMain.handle('pdf:ocrFirstPage', async (_e, filePath) => {
     });
 
     const pagesText = [];
+    let tableItem = '';
     try {
       const doc = await task.promise;
       const maxPages = Math.min(doc.numPages, 8);
       for (let p = 1; p <= maxPages; p++) {
         const img = await pdfPageLargestImage(doc, p, OPS);
         if (!img || !img.data) continue;
-        let pageText = '';
+        let ocr = { text: '', words: [] };
         try {
-          pageText = await ocrImageToText(img);
+          ocr = await ocrImageToText(img);
         } catch (err) {
           // 封面识别失败直接报错；后续页失败则不再继续扫描
           if (p === 1) return { ok: false, message: String((err && err.message) || err) };
           break;
         }
+        const pageText = ocr.text;
         if (pageText) pagesText.push(pageText);
-        // 已识别到试验结果表格里的「试验项目」，无需再往后翻
-        if (/[试实]\s*验\s*项\s*目/.test(pageText)) break;
+        // 试验项目取「试验结果」表格里的值（按列坐标提取，避免误取相邻列）
+        if (!tableItem) tableItem = extractTestItemFromWords(ocr.words);
+        // 已识别到表格中的「试验项目」，无需再往后翻
+        if (tableItem || /[试实]\s*验\s*项\s*目/.test(pageText)) break;
       }
     } finally {
       await task.destroy();
     }
 
     if (!pagesText.length) return { ok: false, message: '未识别到文字' };
-    return { ok: true, text: pagesText.join('\n\n') };
+    return { ok: true, text: pagesText.join('\n\n'), testItem: tableItem };
   } catch (err) {
     return { ok: false, message: String((err && err.message) || err) };
   }

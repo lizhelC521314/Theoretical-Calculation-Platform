@@ -70,8 +70,10 @@ export function TestReportsPage({ user, currentProject }: Props) {
             // 无文字层：扫描件，渲染封面走系统 OCR 识别
             scanned = true;
             showToast(`「${file.name}」无文字层（扫描件），正在 OCR 识别封面…`);
-            const ocrText = await ocrPdfFirstPage(file);
-            meta = ocrText.trim() ? parseOcrMeta(ocrText, file.name) : parseMetaOnly('', file.name);
+            const ocr = await ocrPdfFirstPage(file);
+            meta = ocr.text.trim()
+              ? parseOcrMeta(ocr.text, file.name, ocr.testItem)
+              : parseMetaOnly('', file.name);
           }
           // 用当前项目兜底一些字段（如果 PDF 里没识别到）
           if (!meta.project && currentProject?.name) meta.project = currentProject.name;

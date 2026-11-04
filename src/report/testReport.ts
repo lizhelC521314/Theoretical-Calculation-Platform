@@ -131,15 +131,20 @@ export async function extractPdfText(file: File): Promise<string> {
 }
 
 /**
- * 扫描件兜底：主进程提取 PDF 封面内嵌扫描图并做系统 OCR（按词坐标还原版面行）。
- * 识别失败或无文字时返回空串。
+ * 扫描件兜底：主进程逐页提取内嵌扫描图并做系统 OCR（按词坐标还原版面行）。
+ * 返回 { text, testItem }；testItem 由主进程按「试验项目」列坐标从表格中取，
+ * 识别失败或无文字时为空串。
  */
-export async function ocrPdfFirstPage(file: File): Promise<string> {
+export async function ocrPdfFirstPage(file: File): Promise<{ text: string; testItem: string }> {
   const { api } = await import('../api');
   const filePath = api.file.getPath(file);
-  if (!filePath) return '';
+  if (!filePath) return { text: '', testItem: '' };
   const res = await api.pdf.ocrFirstPage(filePath);
-  return res.ok && typeof res.text === 'string' ? res.text : '';
+  if (!res.ok) return { text: '', testItem: '' };
+  return {
+    text: typeof res.text === 'string' ? res.text : '',
+    testItem: typeof res.testItem === 'string' ? res.testItem : '',
+  };
 }
 
 /**
@@ -165,12 +170,13 @@ function squeezeCell(raw: string): string {
   return despaceOcrText(raw).replace(/[ \t]{2,}/g, ' ').trim();
 }
 
-/** 判断候选值是否像「试验项目」名称（排除编号、日期、表头词与纯数字） */
+/** 判断候选值是否像「试验项目」名称（排除编号、日期、地点/结论、表头词与纯数字） */
 function isLikelyTestItem(value: string): boolean {
   const compact = value.replace(/[ \t]/g, '');
   if (!compact) return false;
   if (TEST_ITEM_LABEL.test(compact)) return false;
   if (TABLE_HEADER_HINTS.test(compact)) return false;
+  if (/(公司|工厂|有限公司|地点|合格|不合格|结论)/.test(compact)) return false;
   if (!/^[一-鿿A-Za-z0-9·\-—（）()]{2,24}$/.test(compact)) return false;
   if (/\d{3,}/.test(compact)) return false; // 排除编号 / 年份 / 日期串
   if ((compact.match(/[一-鿿]/g) || []).length < 2) return false; // 至少两个汉字
@@ -178,9 +184,10 @@ function isLikelyTestItem(value: string): boolean {
 }
 
 /**
- * 从「试验结果」表格中提取试验项目（优先级高于封面「项目名称」）：
- *  - 标签+值同行：「试验项目   压力损失   设备有效日期   …」
- *  - 表头列：表头「No. 试验项目 数量 …」→ 下一非空行同列取「进气阻力」
+ * 从「试验结果」表格的「试验项目」列提取值（优先级高于封面「项目名称」）：
+ *  1) 网格表：表头行含「试验项目」及多个表头关键字（数量/样件编号/试验地点…），
+ *     取下方数据行同一列的单元格；
+ *  2) 表单式：标签与值同行且该行不含其他表头关键字，取标签右侧的单元格。
  * 找不到返回空串。
  */
 export function parseTestItemFromTable(text: string): string {
@@ -190,31 +197,38 @@ export function parseTestItemFromTable(text: string): string {
     .filter((l) => l.trim());
   const splitCells = (line: string) =>
     line
-      .split(/[ \t]{2,}/)
+      .split(/\t|[ \t]{2,}/)
       .map((c) => c.trim())
       .filter(Boolean);
+  const headerHits = (cells: string[]) =>
+    cells.filter((c) => TABLE_HEADER_HINTS.test(c.replace(/[ \t]+/g, ''))).length;
 
+  // 1) 网格表：表头行 → 下方同列
   for (let i = 0; i < lines.length; i++) {
-    if (!TEST_ITEM_LABEL.test(lines[i])) continue;
     const cells = splitCells(lines[i]);
-    const col = cells.findIndex((c) => TEST_ITEM_LABEL.test(c));
+    if (cells.length < 3) continue;
+    const col = cells.findIndex((c) => TEST_ITEM_LABEL.test(c.replace(/[ \t]+/g, '')));
     if (col < 0) continue;
-
-    // 1) 标签与值在同一单元格（OCR 去掉列间距后粘连）
-    const inline = squeezeCell(cells[col].replace(TEST_ITEM_LABEL, '').replace(/^[：:]\s*/, ''));
-    if (isLikelyTestItem(inline)) return inline;
-
-    const headerHits = cells.filter((c) => TABLE_HEADER_HINTS.test(c.replace(/[ \t]+/g, ''))).length;
-    const right = cells[col + 1] ? squeezeCell(cells[col + 1]) : '';
-    // 2) 同一行右侧紧跟的单元格（标签+值行）
-    if (headerHits < 2 && isLikelyTestItem(right)) return right;
-
-    // 3) 表头行：取下一非空行同一列的单元格
+    if (headerHits(cells) < 2) continue; // 不是表头行
     for (let j = i + 1; j < Math.min(lines.length, i + 4); j++) {
-      const rowCells = splitCells(lines[j]);
-      const v = rowCells[col] ? squeezeCell(rowCells[col]) : '';
+      const row = splitCells(lines[j]);
+      if (col >= row.length) continue;
+      const v = squeezeCell(row[col]);
       if (isLikelyTestItem(v)) return v;
     }
+  }
+
+  // 2) 表单式：标签与值同行（该行没有其他表头列）
+  for (const line of lines) {
+    const cells = splitCells(line);
+    const col = cells.findIndex((c) => TEST_ITEM_LABEL.test(c.replace(/[ \t]+/g, '')));
+    if (col < 0 || headerHits(cells) >= 2) continue;
+    const inline = squeezeCell(
+      cells[col].replace(TEST_ITEM_LABEL, '').replace(/^[：:]\s*/, ''),
+    );
+    if (isLikelyTestItem(inline)) return inline;
+    const right = cells[col + 1] ? squeezeCell(cells[col + 1]) : '';
+    if (isLikelyTestItem(right)) return right;
   }
   return '';
 }
@@ -232,8 +246,8 @@ function cleanOcrVersion(raw: string): string {
   return m ? m[1].toUpperCase() : '';
 }
 
-/** OCR 文本专用元字段解析：封面页先 despace，按「下一已知标签」截止抓取 */
-export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
+/** OCR 文本专用元字段解析：封面页先 despace，按「下一已知标签」截止抓取。ocrTableItem 为主进程按列坐标取到的试验项目 */
+export function parseOcrMeta(rawText: string, fileName: string, ocrTableItem = ''): PdfReportMeta {
   // 多页 OCR 时页与页之间以空行分隔：元字段只从封面页取，避免试验结果表里的
   // 日期/委托方等内容污染字段；试验项目则在全文中查找（表格通常在后面几页）
   const firstPage = rawText.split(/\n{2,}/)[0] || rawText;
@@ -258,10 +272,11 @@ export function parseOcrMeta(rawText: string, fileName: string): PdfReportMeta {
     grab('客户(?:名称)?') || grab('(?:委托方|委托单位|甲方|送样单位)'),
   );
 
-  // 试验项目：优先取「试验结果」表格里的「试验项目」，否则回退封面「项目名称」一栏
+  // 试验项目：主进程按「试验项目」列坐标取到的表格值优先，其次按文本表格解析，
+  // 最后回退封面「项目名称」一栏
   // 项目：零件名称中的字母数字段（如 B26-A、CS75-2025）
   // 产品：优先「产品名称」标签，否则取零件名称中字母数字段之外的文字部分
-  const tableItem = parseTestItemFromTable(rawText);
+  const tableItem = ocrTableItem.trim() || parseTestItemFromTable(rawText);
   const testItem = tableItem || grab('项目(?:名称|代号)?');
   const partName = grab('零件名称');
   const split = splitPartName(partName);

@@ -139,6 +139,34 @@ describe('客户名称规范化（读到 XX汽车 为止）', () => {
   });
 });
 
+describe('试验项目：按试验结果表的「试验项目」列读取', () => {
+  // 截图中的真实版面：表头行 + 数据行（列间以多个空格分隔），
+  // 旧逻辑会把右侧「试验地点」列的「成都万友」误当成试验项目
+  const GRID_TABLE = [
+    '试 验 结 果',
+    '№   试 验 项 目   数量   样 件 编 号   试 验 地 点   判定   备注',
+    '1   进 气 阻 力   1   SYSQ-20251105-09-1#   成 都 万 友 滤 机 有 限 公 司   合格',
+  ].join('\n');
+
+  it('网格表：取「试验项目」列下方数据行，不取试验地点', () => {
+    const meta = parseOcrMeta(GRID_TABLE, 'CNH+1.5L.pdf');
+    expect(meta.testItem).toBe('进气阻力');
+  });
+
+  it('表单式：标签与值同行仍可识别（B26-A 压力损失）', () => {
+    const meta = parseOcrMeta(
+      '试 验 项 目   压 力 损 失   设备有效日期   2026/3/5一2027/3/4',
+      'B26-A进气阻力.pdf',
+    );
+    expect(meta.testItem).toBe('压力损失');
+  });
+
+  it('主进程按列坐标取到的值优先于文本解析', () => {
+    const meta = parseOcrMeta(GRID_TABLE, 'x.pdf', '进气阻力');
+    expect(meta.testItem).toBe('进气阻力');
+  });
+});
+
 describe('扫描件 OCR 文本解析', () => {
   const expectedYear = (() => {
     const now = new Date().getFullYear();

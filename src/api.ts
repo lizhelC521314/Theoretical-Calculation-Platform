@@ -94,8 +94,8 @@ interface CtrApi {
   pdf: {
     /** 桌面版：由主进程提取 PDF 文字层 */
     extractText(filePath: string): Promise<{ ok: boolean; text?: string; message?: string }>;
-    /** 桌面版：主进程提取 PDF 封面扫描图并做系统 OCR，按词坐标还原行返回文本（扫描件兜底） */
-    ocrFirstPage(filePath: string): Promise<{ ok: boolean; text?: string; message?: string }>;
+    /** 桌面版：主进程逐页 OCR（封面 + 试验结果表所在页），返回版面行文本与表格中的试验项目 */
+    ocrFirstPage(filePath: string): Promise<{ ok: boolean; text?: string; testItem?: string; message?: string }>;
     /** 桌面版：内置阅读器——页数与首页尺寸（scale=1） */
     pageInfo(filePath: string): Promise<{ ok: boolean; pageCount?: number; width?: number; height?: number; message?: string }>;
     /** 桌面版：内置阅读器——渲染指定页为 PNG data URL */
