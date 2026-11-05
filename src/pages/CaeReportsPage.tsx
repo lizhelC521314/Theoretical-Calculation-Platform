@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api, type CtrUser, type Project } from '../api';
 import {
   bufToBase64,
+  caeNeedsFlow,
   extractPdfText,
   fillCaeMetaMissing,
   missingCaeMetaFields,
@@ -44,8 +45,12 @@ async function parseMetaFromPdfPath(
   pdfPath: string,
 ): Promise<{ meta: CaeReportMeta; scanned: boolean }> {
   let text = '';
+  let pages: string[] = [];
   const res = await api.pdf.extractText(pdfPath);
-  if (res.ok && typeof res.text === 'string') text = res.text;
+  if (res.ok && typeof res.text === 'string') {
+    text = res.text;
+    if (Array.isArray(res.pages)) pages = res.pages;
+  }
 
   let scanned = false;
   if (!text.trim()) {
@@ -57,9 +62,20 @@ async function parseMetaFromPdfPath(
   }
   if (!text.trim()) return { meta: parseCaeMeta('', fileName), scanned: false };
 
-  const primary = scanned ? parseCaeOcrMeta(text, fileName) : parseCaeMeta(text, fileName);
+  // 正文第一页：封面为第 1 页，正文从第 2 页开始；OCR 文本按页用空行分隔
+  const bodyText = scanned
+    ? text.split(/\n{2,}/).slice(1).join('\n\n')
+    : pages.length > 1
+      ? pages.slice(1).join('\n')
+      : text;
+
+  const primary = scanned
+    ? parseCaeOcrMeta(text, fileName, bodyText)
+    : parseCaeMeta(text, fileName, bodyText);
   // 文字版再用 OCR 规则互补，避免 PPT 导出的文本框换行造成漏读
-  const merged = scanned ? primary : fillCaeMetaMissing(primary, parseCaeOcrMeta(text, fileName));
+  const merged = scanned
+    ? primary
+    : fillCaeMetaMissing(primary, parseCaeOcrMeta(text, fileName, bodyText));
   return { meta: merged, scanned };
 }
 
@@ -73,7 +89,10 @@ async function parseMetaFromFile(file: File): Promise<{ meta: CaeReportMeta; sca
   }
   if (!text.trim()) return { meta: parseCaeMeta('', file.name), scanned: false };
   return {
-    meta: fillCaeMetaMissing(parseCaeMeta(text, file.name), parseCaeOcrMeta(text, file.name)),
+    meta: fillCaeMetaMissing(
+      parseCaeMeta(text, file.name, text),
+      parseCaeOcrMeta(text, file.name, text),
+    ),
     scanned: false,
   };
 }
@@ -193,6 +212,7 @@ export function CaeReportsPage({ user, currentProject }: Props) {
       for (const r of reports) {
         try {
           const b64 = r.pdfBase64 ?? (await fileToBase64(r.file));
+          const flow = caeNeedsFlow(r.meta.caeItem) ? r.meta.flow : '';
           const fileName = archiveCaeFileName(
             r.meta.customer,
             r.meta.project,
@@ -200,6 +220,8 @@ export function CaeReportsPage({ user, currentProject }: Props) {
             r.meta.product,
             r.meta.version,
             r.meta.date,
+            flow,
+            r.meta.flowUnit,
           );
           const res = await api.db.archive({ base64: b64, fileName, libType: 'cae' });
           if (res.ok) {
@@ -260,12 +282,14 @@ export function CaeReportsPage({ user, currentProject }: Props) {
           <h3>选择 PPT CAE 报告开始归档</h3>
           <p className="settings-hint">
             点击上方「选择 PPT CAE 报告」按钮，支持多选 PPT / PPTX（也兼容 PDF）。系统会先用本机 PowerPoint（WPS 演示兜底、
-            LibreOffice 备用）把报告转换为「文字版 PDF」，再从转换后的 PDF 中识别客户、项目、仿真项目、产品、版本号、日期等信息，
-            其中日期优先取报告顶端页眉编号（如 SYZX-BYD 26 07 01 01：年份按当前电脑年份补齐前两位 26 → 2026），
-            客户取封面「客户名称」并截取到「XX汽车」为止，仿真项目优先取「仿真项目 / 分析项目」字段，其次取封面「项目名称」一栏。
+            LibreOffice 备用）把报告转换为「文字版 PDF」，再从转换后的 PDF 中识别字段：
+            客户取封面标题开头的中文，项目维持原有规则，仿真项目按标题中的分析类型（CFD、流阻、模态、强度等）匹配，
+            产品取标题中「项目与仿真项目之间」的文字并去掉「的」；日期、版本号只取封面下部「时间」「版本」右侧内容。
+            仿真项目为 CFD / 流阻时，还会从正文第一页读取流量：优先找「数字 + 流量单位」（如 10L/min、10kg/h、10m³/h），
+            其次取表格「流量」列下一行的数值。
             所有字段均可在下方列表中校对 / 补全，确认无误后点击「全部归档到 CAE 库」。
             PPT 中若只有图片没有文字，转换后的 PDF 同样会走系统 OCR，请重点核对识别结果。
-            归档文件名统一格式为「客户+项目+仿真项目+产品+版本+日期.pdf」，库中保存的是转换后的文字版 PDF，
+            归档文件名统一格式为「客户+项目+仿真项目+[流量]+产品+版本+日期.pdf」，库中保存的是转换后的文字版 PDF，
             存放在 UNC 的 Virtual Verification Library 目录。
           </p>
         </div>
@@ -273,6 +297,7 @@ export function CaeReportsPage({ user, currentProject }: Props) {
 
       {reports.map((r) => {
         const missing = missingCaeMetaFields(r.meta);
+        const flow = caeNeedsFlow(r.meta.caeItem) ? r.meta.flow : '';
         const previewName = archiveCaeFileName(
           r.meta.customer,
           r.meta.project,
@@ -280,6 +305,8 @@ export function CaeReportsPage({ user, currentProject }: Props) {
           r.meta.product,
           r.meta.version,
           r.meta.date,
+          flow,
+          r.meta.flowUnit,
         );
         return (
           <div className="settings-card test-report-card" key={r.id}>
@@ -322,6 +349,35 @@ export function CaeReportsPage({ user, currentProject }: Props) {
                   placeholder="如：进气阻力仿真分析"
                 />
               </label>
+              {caeNeedsFlow(r.meta.caeItem) && (
+                <>
+                  <label className={`field ${!r.meta.flow ? 'field-warn' : ''}`}>
+                    <span>流量（CFD / 流阻，可修改）</span>
+                    <input
+                      value={r.meta.flow}
+                      onChange={(e) => patchMeta(r.id, 'flow', e.target.value)}
+                      placeholder="如：330 或 330/300（多个用 / 分隔）"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>流量单位</span>
+                    <select
+                      value={r.meta.flowUnit}
+                      onChange={(e) => patchMeta(r.id, 'flowUnit', e.target.value)}
+                    >
+                      <option value="">请选择</option>
+                      <option value="kg/h">kg/h</option>
+                      <option value="m³/h">m³/h</option>
+                      <option value="L/min">L/min</option>
+                      <option value="m³/min">m³/min</option>
+                      <option value="m³/s">m³/s</option>
+                      <option value="L/h">L/h</option>
+                      <option value="L/s">L/s</option>
+                      <option value="kg/s">kg/s</option>
+                    </select>
+                  </label>
+                </>
+              )}
               <label className={`field ${!r.meta.product ? 'field-warn' : ''}`}>
                 <span>产品（必填）</span>
                 <input

@@ -17,6 +17,7 @@ export const UNC_CALC_LIB = `${UNC_ROOT}\\Theoretical Calculation Library`;
 export const UNC_TEST_LIB = `${UNC_ROOT}\\Experimental Test Database`;
 export const UNC_TRUSTED = `${UNC_ROOT}\\Trusted Data Asset Library`;
 export const UNC_CAE_LIB = `${UNC_ROOT}\\Virtual Verification Library`;
+export const UNC_MATERIAL_LIB = '\\\\10.1.1.245\\materials library';
 
 /** 项目-产品-版本键：统一空格，避免因字符差异导致匹配失败 */
 export function productKey(project: string, product: string, version: string): string {
@@ -45,21 +46,23 @@ function flowSegment(flow: string, unit: string): string {
     .filter((s) => s && s !== '未命名');
   if (!values.length) return '';
   const v = values.join(',');
-  const u = unit.trim().toLowerCase();
-  if (/^m[³3]/.test(u)) return `${v}m3-h`;
-  if (/^kg/.test(u)) return `${v}kg-h`;
-  const cleaned = cleanFileName(u);
+  const u = unit.trim().replace(/\s+/g, '').toLowerCase().replace(/³/g, '3');
+  const flowUnit = u.match(/^(m3|kg|ml|l)\/(h|min|s)$/);
+  if (flowUnit) return `${v}${flowUnit[1]}-${flowUnit[2]}`;
+  const cleaned = cleanFileName(u.replace(/[\/／]/g, '-'));
   return cleaned && cleaned !== '未命名' ? `${v}${cleaned}` : v;
 }
 
-/** 反解流量段（370kg-h / 370m3-h / 260,240kg-h） */
+/** 反解流量段（370kg-h / 370m3-h / 370l-min / 260,240kg-h） */
 function parseFlowSegment(segment: string): { flow: string; flowUnit: string } {
-  const m = segment.match(/^([\d.,]+)(m3-h|kg-h)?$/i);
+  const m = segment.match(/^([\d.,]+)(m3-|kg-|ml-|l-)?(h|min|s)?$/i);
   if (!m) return { flow: segment, flowUnit: '' };
-  return {
-    flow: m[1].replace(/,/g, '/'),
-    flowUnit: m[2] ? (m[2].toLowerCase().startsWith('m') ? 'm³/h' : 'kg/h') : '',
-  };
+  const vol = (m[2] || '').toLowerCase().replace('-', '');
+  const time = (m[3] || '').toLowerCase();
+  if (!vol || !time) return { flow: m[1].replace(/,/g, '/'), flowUnit: '' };
+  const unit =
+    vol === 'm3' ? `m³/${time}` : vol === 'kg' ? `kg/${time}` : vol === 'ml' ? `mL/${time}` : `L/${time}`;
+  return { flow: m[1].replace(/,/g, '/'), flowUnit: unit };
 }
 
 /**
@@ -141,8 +144,8 @@ export function trustedFileName(project: string, product: string, version: strin
 }
 
 /**
- * CAE 报告归档文件名：客户+项目+仿真项目+产品+版本+日期.pdf
- * 与试验报告命名规则一致，便于检索页统一解析展示。
+ * CAE 报告归档文件名：客户+项目+仿真项目+[流量]+产品+版本+日期.pdf
+ * 与试验报告命名规则一致；流量段仅 CFD / 流阻报告出现，其余保持原六段格式。
  */
 export function archiveCaeFileName(
   customer: string,
@@ -151,17 +154,24 @@ export function archiveCaeFileName(
   product: string,
   version: string,
   date: string,
+  flow = '',
+  flowUnit = '',
 ): string {
   const d = (date || new Date().toISOString().slice(0, 10)).replace(/-/g, '');
-  const parts = [customer, project, caeItem, product, version || 'V0', d].map((s) => cleanFileName(s));
+  const flowSeg = flowSegment(flow, flowUnit);
+  const parts = [customer, project, caeItem, ...(flowSeg ? [flowSeg] : []), product, version || 'V0', d].map(
+    (s) => cleanFileName(s),
+  );
   return `${parts.join('+')}.pdf`;
 }
 
-/** 从 CAE 归档文件名反解元信息：客户+项目+仿真项目+产品+版本+日期 */
+/** 从 CAE 归档文件名反解元信息：客户+项目+仿真项目+[流量]+产品+版本+日期 */
 export function parseCaeArchiveName(name: string): {
   customer: string;
   project: string;
   caeItem: string;
+  flow: string;
+  flowUnit: string;
   product: string;
   version: string;
   date: string;
@@ -172,8 +182,22 @@ export function parseCaeArchiveName(name: string): {
   if (parts.length > 0 && /^\d{6,8}$/.test(parts[parts.length - 1])) {
     date = parts.pop()!;
   }
+  if (parts.length >= 6) {
+    const [customer = '', project = '', caeItem = '', flowOnly = '', product = '', version = ''] = parts;
+    const flowInfo = parseFlowSegment(flowOnly);
+    return {
+      customer,
+      project,
+      caeItem,
+      flow: flowInfo.flow,
+      flowUnit: flowInfo.flowUnit,
+      product,
+      version,
+      date,
+    };
+  }
   const [customer = '', project = '', caeItem = '', product = '', version = ''] = parts;
-  return { customer, project, caeItem, product, version, date };
+  return { customer, project, caeItem, flow: '', flowUnit: '', product, version, date };
 }
 
 /**

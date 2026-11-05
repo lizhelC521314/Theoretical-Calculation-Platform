@@ -1,0 +1,1473 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>材料库数据导入 · 交互原型</title>
+<style>
+:root {
+  --blue: #1a5fb4;
+  --blue-dark: #0e2a47;
+  --blue-deep: #0b3a72;
+  --blue-light: #eef4ff;
+  --bg: #f5f7fa;
+  --card: #ffffff;
+  --border: #e2e8f0;
+  --text: #1f2937;
+  --muted: #64748b;
+  --warn: #b45309;
+  --warn-bg: #fef3e2;
+  --danger: #c0392b;
+  --danger-bg: #fdecea;
+  --ok: #15803d;
+  --ok-bg: #eaf6ee;
+  font-family: 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.6;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); }
+button, input, select, textarea { font-family: inherit; font-size: 14px; }
+button { cursor: pointer; }
+.muted { color: var(--muted); }
+.small { font-size: 11.5px; }
+.mono { font-family: Consolas, 'Courier New', monospace; }
+
+/* ---------- 外壳：复用现有软件的深蓝侧栏 + 白色顶栏 ---------- */
+.app-shell { display: flex; min-height: 100vh; }
+.sidebar {
+  width: 216px; flex-shrink: 0; background: var(--blue-dark); color: #dce7f5;
+  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+}
+.sidebar-brand { display: flex; align-items: center; gap: 10px; padding: 18px 16px; border-bottom: 1px solid #1c3d61; }
+.logo {
+  width: 42px; height: 42px; border-radius: 8px; background: #fff; color: var(--blue-deep);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; letter-spacing: .5px;
+  font-size: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.12);
+}
+.sb-company { font-size: 12px; color: #9db6d3; }
+.sb-product { font-size: 14px; font-weight: 600; color: #fff; }
+.sidebar-nav { padding: 12px 10px; flex: 1; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; margin-bottom: 4px;
+  background: none; border: none; border-radius: 6px; color: #c4d5e8; text-align: left; font-size: 13.5px;
+}
+.nav-item:hover { background: #16395d; color: #fff; }
+.nav-item.active { background: var(--blue); color: #fff; font-weight: 600; }
+.nav-icon { width: 18px; text-align: center; opacity: .9; }
+.nav-sub { padding-left: 32px; font-size: 13px; }
+.nav-sub.active { background: #1e4f82; font-weight: 600; }
+.nav-group > .nav-item.active { background: #1e4f82; }
+.nav-chev { margin-left: auto; font-size: 14px; color: #7f9dbf; }
+.sidebar-footer { padding: 14px 16px; border-top: 1px solid #1c3d61; font-size: 11px; color: #7593b5; }
+.main-area { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.topbar {
+  height: 54px; flex-shrink: 0; background: #fff; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; padding: 0 20px;
+}
+.topbar-title { font-size: 16px; font-weight: 600; color: var(--blue-deep); }
+.topbar-user { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.tu-project { height: 30px; border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; background: #fff; color: var(--text); max-width: 220px; }
+.tu-name { color: var(--text); font-weight: 600; }
+.tu-role { background: var(--blue-light); color: var(--blue-deep); border-radius: 10px; padding: 1px 8px; font-size: 12px; }
+.content { padding: 18px 22px 40px; }
+
+/* ---------- 通用组件 ---------- */
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; }
+.card + .card { margin-top: 14px; }
+.card h3 { margin: 0 0 6px; font-size: 15px; color: var(--blue-deep); }
+.hint { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.8; }
+.btn-primary {
+  background: var(--blue); color: #fff; border: none; border-radius: 6px; padding: 9px 18px;
+  font-size: 14px; font-weight: 600; transition: background .15s;
+}
+.btn-primary:hover { background: var(--blue-deep); }
+.btn-primary:disabled { background: #b8c4d6; cursor: not-allowed; }
+.btn-primary.sm { padding: 6px 14px; font-size: 13px; }
+.btn-ghost {
+  background: #fff; color: var(--blue); border: 1px solid var(--blue); border-radius: 6px;
+  padding: 6px 14px; font-size: 13px;
+}
+.btn-ghost:hover { background: var(--blue-light); }
+.btn-ghost.sm { padding: 4px 10px; font-size: 12.5px; }
+.btn-link { background: none; border: none; color: var(--blue); padding: 2px 4px; font-size: 12.5px; }
+.btn-link:hover { text-decoration: underline; }
+.btn-link.danger { color: var(--danger); }
+.tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; line-height: 18px; background: #eef2f7; color: var(--muted); margin-right: 6px; }
+.tag.ok { background: var(--ok-bg); color: var(--ok); }
+.tag.warn { background: var(--warn-bg); color: var(--warn); }
+.tag.danger { background: var(--danger-bg); color: var(--danger); }
+.tag.info { background: var(--blue-light); color: var(--blue-deep); }
+
+/* ---------- 页头 / 步骤条 ---------- */
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+.page-head h2 { margin: 0 0 4px; font-size: 19px; color: var(--blue-deep); }
+.head-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.type-switch { display: inline-flex; background: #e8eef7; border-radius: 8px; padding: 3px; }
+.type-btn {
+  border: none; background: none; color: var(--muted); padding: 8px 18px; border-radius: 6px;
+  font-size: 13.5px; font-weight: 600;
+}
+.type-btn.active { background: #fff; color: var(--blue-deep); box-shadow: 0 1px 3px rgba(15, 40, 70, .14); }
+.stepper { display: flex; align-items: center; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.step { display: flex; align-items: center; gap: 8px; color: #94a3b8; font-size: 12.5px; }
+.step-no {
+  width: 22px; height: 22px; border-radius: 50%; background: #e8eef7; color: #7b8fa8;
+  display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+}
+.step.active { color: var(--blue-deep); font-weight: 600; }
+.step.active .step-no { background: var(--blue); color: #fff; }
+.step.done { color: var(--ok); }
+.step.done .step-no { background: var(--ok); color: #fff; }
+.step-line { width: 34px; height: 1px; background: #dbe4ef; }
+
+/* ---------- 双栏 ---------- */
+.grid-2 { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, .88fr); gap: 14px; margin-top: 14px; align-items: start; }
+@media (max-width: 1180px) { .grid-2 { grid-template-columns: 1fr; } .sidebar { width: 190px; } }
+
+/* ---------- 表单 ---------- */
+.form-group { margin-bottom: 14px; }
+.form-group:last-of-type { margin-bottom: 0; }
+.fg-title {
+  font-size: 12px; font-weight: 700; color: var(--blue-deep); letter-spacing: .5px;
+  border-left: 3px solid var(--blue); padding-left: 8px; margin: 4px 0 10px;
+}
+.fg-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+@media (max-width: 620px) { .fg-grid { grid-template-columns: 1fr; } }
+.field { min-width: 0; }
+.field label { display: block; font-size: 12.5px; color: #43566c; margin-bottom: 4px; }
+.req { color: var(--danger); font-weight: 700; margin-left: 2px; }
+.opt { color: #9aa9bb; font-size: 11px; margin-left: 4px; }
+.input-wrap { display: flex; align-items: stretch; border: 1px solid var(--border); border-radius: 6px; background: #fff; overflow: hidden; }
+.input-wrap:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(26, 95, 180, .08); }
+.input-wrap input { flex: 1; min-width: 0; border: none; outline: none; padding: 7px 10px; background: transparent; }
+.unit { display: flex; align-items: center; padding: 0 9px; background: #f6f8fb; border-left: 1px solid var(--border); color: var(--muted); font-size: 12px; white-space: nowrap; }
+.input-wrap.invalid { border-color: var(--danger); background: #fffafa; }
+.field-err { color: var(--danger); font-size: 11.5px; margin-top: 3px; display: none; }
+.field-err.show { display: block; }
+.field.curve-label { grid-column: 1 / -1; }
+
+/* ---------- 曲线区 ---------- */
+.curve-box { border: 1px dashed #cbd8e8; border-radius: 8px; background: #fbfcfe; padding: 9px 10px; }
+.curve-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.curve-status { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+.curve-status.ok { color: var(--ok); font-weight: 600; }
+.curve-status.bad { color: var(--danger); font-weight: 600; }
+.curve-paste { display: none; width: 100%; min-height: 76px; margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-family: Consolas, monospace; font-size: 12px; resize: vertical; }
+.curve-paste.show { display: block; }
+.curve-preview { margin-top: 8px; background: #fff; border: 1px solid #edf1f7; border-radius: 6px; padding: 4px; }
+.curve-empty { padding: 18px 8px; text-align: center; color: #a3b1c2; font-size: 12px; }
+.curve-note { margin-top: 6px; color: #94a3b8; font-size: 11px; }
+
+/* ---------- 导入区 ---------- */
+.dropzone {
+  border: 1.5px dashed #b9c9dc; border-radius: 10px; background: #fafbfd; padding: 22px 16px;
+  text-align: center; color: var(--muted); cursor: pointer; transition: .15s;
+}
+.dropzone:hover, .dropzone.drag { border-color: var(--blue); background: var(--blue-light); }
+.dropzone-title { color: var(--blue-deep); font-weight: 600; font-size: 13.5px; margin-bottom: 4px; }
+.strategy { margin-top: 14px; }
+.strategy-title { font-size: 12px; font-weight: 700; color: var(--blue-deep); margin-bottom: 6px; }
+.radio-row { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0; font-size: 12.5px; color: #3d4f63; }
+.radio-row input { margin-top: 3px; accent-color: var(--blue); }
+.radio-row .r-note { display: block; color: #8a99ab; font-size: 11px; }
+
+/* ---------- 预览 ---------- */
+.preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.preview-head h3 { margin: 0; }
+.count-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { padding: 3px 9px; border-radius: 12px; font-size: 11.5px; background: #eef4fb; color: var(--blue-deep); }
+.chip.ok { background: var(--ok-bg); color: var(--ok); }
+.chip.warn { background: var(--warn-bg); color: var(--warn); }
+.chip.danger { background: var(--danger-bg); color: var(--danger); }
+.preview-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 10px; }
+.preview-toolbar .spacer { flex: 1; }
+.partial-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: #43566c; }
+.partial-check input { accent-color: var(--blue); }
+.table-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: auto; }
+table.mtable { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 860px; }
+.mtable th, .mtable td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #eef2f7; vertical-align: top; }
+.mtable th { background: #f4f7fb; color: #46586d; font-weight: 700; font-size: 12px; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+.mtable tr:last-child td { border-bottom: none; }
+.mtable tr.row-error { background: #fffafa; }
+.mtable tr.row-conflict { background: #fffcf5; }
+.mtable tr.row-warn { background: #fcfdff; }
+.msg-line { font-size: 11.8px; line-height: 1.6; }
+.msg-line.err { color: var(--danger); }
+.msg-line.warn { color: var(--warn); }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.badge.pass { background: var(--ok-bg); color: var(--ok); }
+.badge.warn { background: var(--warn-bg); color: var(--warn); }
+.badge.conflict { background: #fff3e0; color: #a15c00; }
+.badge.error { background: var(--danger-bg); color: var(--danger); }
+.curve-mini { font-size: 11.5px; color: var(--muted); line-height: 1.7; }
+.empty-preview { padding: 30px 10px; text-align: center; color: #9aa9bb; font-size: 13px; }
+.inline-error { margin: 10px 0 0; background: var(--danger-bg); border: 1px solid #f3c9c4; color: #8f2f22; border-radius: 6px; padding: 9px 12px; font-size: 12.5px; display: none; white-space: pre-wrap; }
+.inline-error.show { display: block; }
+.result-card { margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 14px; display: none; }
+.result-card.show { display: block; }
+.result-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.result-head h4 { margin: 0; color: var(--blue-deep); font-size: 13.5px; }
+.result-note { font-size: 12px; color: var(--muted); }
+.fail-list { margin: 8px 0 0; padding: 0; list-style: none; }
+.fail-list li { background: #fffafa; border: 1px solid #f6dedb; border-radius: 6px; padding: 7px 10px; margin-bottom: 6px; font-size: 12px; }
+.fail-list .f-title { font-weight: 600; color: #8f2f22; }
+.fail-list .f-reason { color: var(--danger); }
+
+/* ---------- 规则说明 ---------- */
+details.rules { margin-top: 14px; }
+details.rules summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--blue-deep); outline: none; }
+.rules-body { margin-top: 12px; }
+.rules-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 900px) { .rules-grid { grid-template-columns: 1fr; } }
+.rules-block h4 { margin: 0 0 6px; font-size: 12.5px; color: #43566c; }
+.rules-block ul { margin: 0; padding-left: 18px; font-size: 12px; color: var(--muted); line-height: 1.9; }
+.rules-block code { background: #f3f6fa; border-radius: 3px; padding: 0 4px; color: #31465d; font-family: Consolas, monospace; font-size: 11.5px; }
+.rules-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.rules-table th, .rules-table td { border: 1px solid #edf1f7; padding: 5px 8px; text-align: left; }
+.rules-table th { background: #f4f7fb; color: #46586d; }
+.foot-note { margin-top: 16px; color: #95a3b6; font-size: 11.5px; }
+
+/* ---------- toast ---------- */
+.toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+  background: rgba(14, 42, 71, .95); color: #fff; padding: 9px 20px; border-radius: 8px;
+  font-size: 13px; box-shadow: 0 8px 24px rgba(10, 30, 55, .22); opacity: 0; pointer-events: none;
+  transition: opacity .2s, transform .2s; z-index: 20; max-width: 80vw;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="logo">CTR</div>
+      <div class="sb-text">
+        <div class="sb-company">汽车零部件</div>
+        <div class="sb-product">理论计算平台</div>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="nav-item"><span class="nav-icon">⌂</span>工作台</button>
+      <button class="nav-item"><span class="nav-icon">▤</span>项目管理</button>
+      <button class="nav-item"><span class="nav-icon">✎</span>产品理论设计<span class="nav-chev">›</span></button>
+      <button class="nav-item"><span class="nav-icon">✓</span>产品验证<span class="nav-chev">›</span></button>
+      <button class="nav-item active"><span class="nav-icon">▦</span>产品数据库<span class="nav-chev">›</span></button>
+      <button class="nav-item nav-sub active"><span class="nav-icon">◫</span>材料库</button>
+      <button class="nav-item nav-sub"><span class="nav-icon">⇪</span>材料数据导入</button>
+      <button class="nav-item nav-sub"><span class="nav-icon">⌕</span>材料数据检索</button>
+      <button class="nav-item"><span class="nav-icon">◈</span>知识经验库</button>
+      <button class="nav-item"><span class="nav-icon">⚙</span>设置</button>
+    </nav>
+    <div class="sidebar-footer">v0.1.0 · 材料库导入原型</div>
+  </aside>
+
+  <div class="main-area">
+    <header class="topbar">
+      <div class="topbar-title">材料数据导入</div>
+      <div class="topbar-user">
+        <span>当前项目</span>
+        <select class="tu-project">
+          <option>AS5PM 出气谐振器</option>
+          <option>（临时任务）</option>
+        </select>
+        <span class="tu-name">张工</span>
+        <span class="tu-role">工程师</span>
+        <button class="btn-link">退出</button>
+      </div>
+    </header>
+
+    <main class="content">
+      <!-- 页头：类型切换 -->
+      <div class="card">
+        <div class="page-head">
+          <div>
+            <h2>材料库数据导入</h2>
+            <p class="hint">
+              常规材料与超弹性材料共用一套导入流程。必填字段仅 3 项：<b>牌号、系列号、温度</b>；
+              其余物性、曲线均可留空，后续按需补充。
+            </p>
+            <div class="head-tags">
+              <span class="tag info">必填 3 项</span>
+              <span class="tag info">温度是记录维度</span>
+              <span class="tag">曲线选填，可 CSV 导入</span>
+              <span class="tag">唯一键：牌号 + 系列号 + 温度</span>
+            </div>
+          </div>
+          <div class="type-switch" id="typeSwitch">
+            <button class="type-btn active" data-type="conventional">常规材料 <span id="cnt-conventional">(0)</span></button>
+            <button class="type-btn" data-type="hyperelastic">超弹性材料 <span id="cnt-hyperelastic">(0)</span></button>
+          </div>
+        </div>
+        <div class="stepper" id="stepper">
+          <div class="step" data-step="1"><span class="step-no">1</span>模板下载</div>
+          <div class="step-line"></div>
+          <div class="step active" data-step="2"><span class="step-no">2</span>上传 / 手动录入</div>
+          <div class="step-line"></div>
+          <div class="step" data-step="3"><span class="step-no">3</span>校验预览</div>
+          <div class="step-line"></div>
+          <div class="step" data-step="4"><span class="step-no">4</span>确认入库</div>
+        </div>
+      </div>
+
+      <!-- 双栏：手动录入 + 批量导入 -->
+      <div class="grid-2">
+        <section class="card">
+          <h3>手动录入单条材料</h3>
+          <p class="hint" style="margin-bottom:12px">红色星号为必填；数值字段留空表示该材料无此参数。</p>
+          <div id="formCols"></div>
+
+          <div id="tempHint" class="curve-note" style="margin:12px 0 4px"></div>
+
+          <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap">
+            <button class="btn-primary sm" data-act="add-row">校验并加入预览</button>
+            <button class="btn-ghost sm" data-act="reset-form">清空表单</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3>批量导入</h3>
+          <p class="hint" style="margin-bottom:10px">
+            正式版模板为多工作表 xlsx（说明 / 数据 / 曲线）。原型以 CSV 演示解析与校验流程。
+          </p>
+          <div class="dropzone" id="dropzone">
+            <div class="dropzone-title">拖拽 CSV 到这里，或点击选择文件</div>
+            <div class="small">列名：牌号、系列号、供应商、温度、密度、泊松比、弹性模量、抗拉强度、破坏应变</div>
+          </div>
+          <input type="file" id="batchFileInput" accept=".csv,.txt" hidden>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px">
+            <button class="btn-ghost sm" data-act="tpl">下载当前类型模板</button>
+            <button class="btn-ghost sm" data-act="curve-tpl">下载曲线模板</button>
+            <button class="btn-ghost sm" data-act="sample">载入示例数据</button>
+          </div>
+
+          <div class="strategy">
+            <div class="strategy-title">主键冲突处理（牌号 + 系列号 + 温度已存在）</div>
+            <label class="radio-row">
+              <input type="radio" name="strategy" value="overwrite" checked>
+              <span>覆盖已有记录<span class="r-note">写入新版本，旧版本保留在历史中，检索默认显示最新版</span></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="strategy" value="skip">
+              <span>跳过该行<span class="r-note">保留库内原记录，本行不写入</span></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="strategy" value="pending">
+              <span>待人工处理<span class="r-note">标记为冲突并阻止本批入库，导出后线下确认</span></span>
+            </label>
+          </div>
+          <p class="curve-note">
+            同一牌号 + 系列号下的不同温度属于不同记录（例如 25 °C 与 80 °C 各一条），只有温度也相同才算冲突。
+          </p>
+        </section>
+      </div>
+
+      <!-- 校验预览 -->
+      <section class="card" id="previewCard">
+        <div class="preview-head">
+          <h3>校验结果预览</h3>
+          <div class="count-chips" id="countChips"></div>
+        </div>
+
+        <div class="preview-toolbar">
+          <button class="btn-ghost sm" data-act="validate">重新校验</button>
+          <button class="btn-link danger" data-act="clear-rows">清空预览</button>
+          <label class="partial-check">
+            <input type="checkbox" id="chkPartial" checked>
+            仅导入通过行（部分成功）
+          </label>
+          <span class="spacer"></span>
+          <button class="btn-primary sm" data-act="import" id="btnImport">确认入库 (0)</button>
+        </div>
+
+        <div class="inline-error" id="previewError"></div>
+
+        <div class="table-wrap">
+          <table class="mtable" id="previewTable">
+            <thead id="previewHead"></thead>
+            <tbody id="previewBody"></tbody>
+          </table>
+        </div>
+        <p class="curve-note">
+          行级事务：每行独立校验、独立写入；失败行不写入并留在预览中，可修正后重新提交，不整批回滚。
+          曲线数据先写临时文件，记录写入成功后原子改名，避免出现“字段已写、曲线缺失”的半条记录。
+        </p>
+
+        <div class="result-card" id="resultCard"></div>
+      </section>
+
+      <!-- 规则说明 -->
+      <details class="card rules">
+        <summary>字段定义与校验规则（设计说明）</summary>
+        <div class="rules-body">
+          <div class="rules-grid">
+            <div class="rules-block">
+              <h4>字段分组</h4>
+              <ul>
+                <li><b>标识与来源</b>：牌号<code>*</code>、系列号<code>*</code>、供应商（仅常规材料）</li>
+                <li><b>工况</b>：温度<code>*</code>（°C）</li>
+                <li><b>基础物性</b>：密度、泊松比、弹性模量（后两项中密度与模量属于常规材料）</li>
+                <li><b>力学性能</b>：抗拉强度、破坏应变（仅常规材料）</li>
+                <li><b>曲线数据</b>：应力应变曲线、疲劳寿命曲线（两类材料都有）</li>
+              </ul>
+            </div>
+            <div class="rules-block">
+              <h4>必填与唯一键</h4>
+              <ul>
+                <li>必填：<b>牌号、系列号、温度</b>，两类材料一致</li>
+                <li>唯一键：<code>材料类型 + 牌号 + 系列号 + 温度</code></li>
+                <li>比较前统一去空格、英文转小写、温度保留 1 位小数</li>
+                <li>空字符串不等于 0：选填数值留空按“无此参数”处理</li>
+                <li>同一牌号不同温度 = 多条独立记录</li>
+              </ul>
+            </div>
+          </div>
+
+          <table class="rules-table">
+            <thead>
+              <tr><th>字段</th><th>单位</th><th>校验规则</th><th>必填</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>牌号</td><td>—</td><td>1–40 字符；不含 Windows 非法字符；去首尾空格</td><td>是</td></tr>
+              <tr><td>系列号</td><td>—</td><td>2–40 字符；允许字母、数字、中文、空格、- _ / ( )</td><td>是</td></tr>
+              <tr><td>温度</td><td>°C</td><td>数值；-60 ~ 400；超弹性材料 &gt; 200 时给出温区警告</td><td>是</td></tr>
+              <tr><td>密度</td><td>g/cm³</td><td>0.05 ~ 30</td><td>否</td></tr>
+              <tr><td>泊松比</td><td>—</td><td>0 &lt; v &lt; 0.5；超弹性材料 &lt; 0.4 时提示压缩性异常</td><td>否</td></tr>
+              <tr><td>弹性模量</td><td>MPa</td><td>0.01 ~ 100000</td><td>否</td></tr>
+              <tr><td>抗拉强度</td><td>MPa</td><td>0.01 ~ 5000</td><td>否</td></tr>
+              <tr><td>破坏应变</td><td>%</td><td>0 ~ 1000；不得小于应力应变曲线的最大应变</td><td>否</td></tr>
+              <tr><td>应力应变曲线</td><td>应变 % / 应力 MPa</td><td>至少 5 点；应变严格递增；应力、应变非负</td><td>否</td></tr>
+              <tr><td>疲劳寿命曲线</td><td>寿命 cycles / 应力 MPa</td><td>至少 4 点；寿命递增且 &gt; 0；应力非负；应力随寿命不升时给出警告</td><td>否</td></tr>
+            </tbody>
+          </table>
+
+          <p class="curve-note">
+            曲线数据格式：CSV 两列（首行可为表头），如 <code>0,0</code>、<code>2,150</code>；
+            内部按 SI 制存储（应变无量纲 ε = %/100，应力 Pa），界面按工程单位展示。
+          </p>
+        </div>
+      </details>
+
+      <p class="foot-note">
+        原型说明：本页数据均为本地模拟，不写入任何服务器；样式与字段命名沿用平台现有约定（camelCase 字段、UNC 库目录、蓝色主题）。
+        材料库存放于 <span class="mono">\\10.1.1.245\materials library</span>。
+      </p>
+    </main>
+  </div>
+</div>
+
+<input type="file" id="curveFileInput" accept=".csv,.txt" hidden>
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ==================== 字段定义 ====================
+  const GROUP_ORDER = ['标识与来源', '工况', '基础物性', '力学性能', '曲线数据'];
+
+  const FIELDS = {
+    conventional: [
+      { k: 'grade', label: '牌号', group: '标识与来源', req: true, ph: '如 SPCC、PA66-GF30' },
+      { k: 'series', label: '系列号', group: '标识与来源', req: true, ph: '如 冷轧钢板、铝合金系列' },
+      { k: 'supplier', label: '供应商', group: '标识与来源', ph: '如 宝钢、巴斯夫' },
+      { k: 'temperature', label: '温度', group: '工况', req: true, unit: '°C', num: true, ph: '-60 ~ 400' },
+      { k: 'density', label: '密度', group: '基础物性', unit: 'g/cm³', num: true, ph: '0.05 ~ 30' },
+      { k: 'poisson', label: '泊松比', group: '基础物性', num: true, ph: '0 < v < 0.5' },
+      { k: 'elasticModulus', label: '弹性模量', group: '基础物性', unit: 'MPa', num: true, ph: '> 0' },
+      { k: 'tensileStrength', label: '抗拉强度', group: '力学性能', unit: 'MPa', num: true, ph: '选填' },
+      { k: 'failureStrain', label: '破坏应变', group: '力学性能', unit: '%', num: true, ph: '选填' },
+      { k: 'stressStrainCurve', label: '应力应变曲线', group: '曲线数据', curve: 'stressStrain' },
+      { k: 'fatigueCurve', label: '疲劳寿命曲线', group: '曲线数据', curve: 'fatigue' }
+    ],
+    hyperelastic: [
+      { k: 'grade', label: '牌号', group: '标识与来源', req: true, ph: '如 EPDM-70、FKM-80' },
+      { k: 'series', label: '系列号', group: '标识与来源', req: true, ph: '如 密封橡胶、氟橡胶系列' },
+      { k: 'temperature', label: '温度', group: '工况', req: true, unit: '°C', num: true, ph: '-60 ~ 400' },
+      { k: 'poisson', label: '泊松比', group: '基础物性', num: true, ph: '建议 0.45 ~ 0.5' },
+      { k: 'stressStrainCurve', label: '应力应变曲线（单轴）', group: '曲线数据', curve: 'stressStrain' },
+      { k: 'fatigueCurve', label: '疲劳寿命曲线', group: '曲线数据', curve: 'fatigue' }
+    ]
+  };
+
+  const FIELD_LABEL = {};
+  Object.keys(FIELDS).forEach(function (t) {
+    FIELDS[t].forEach(function (f) { FIELD_LABEL[f.k] = f.label; });
+  });
+
+  // 模拟库内已有记录：同一牌号存在多个温度，用于演示“温度维度”
+  const EXISTING = [
+    { type: 'conventional', values: { grade: 'SPCC', series: '冷轧钢板', supplier: '宝钢', temperature: '25', density: '7.85', poisson: '0.30', elasticModulus: '205000', tensileStrength: '370', failureStrain: '32' } },
+    { type: 'conventional', values: { grade: 'SPCC', series: '冷轧钢板', supplier: '宝钢', temperature: '80', density: '7.85', poisson: '0.30', elasticModulus: '203000', tensileStrength: '355', failureStrain: '30' } },
+    { type: 'conventional', values: { grade: '6061-T6', series: '铝合金', supplier: '中铝', temperature: '25', density: '2.70', poisson: '0.33', elasticModulus: '68000', tensileStrength: '310', failureStrain: '12' } },
+    { type: 'hyperelastic', values: { grade: 'EPDM-70', series: '密封橡胶', temperature: '23', poisson: '0.48' } },
+    { type: 'hyperelastic', values: { grade: 'EPDM-70', series: '密封橡胶', temperature: '80', poisson: '0.48' } }
+  ];
+
+  const S = {
+    type: 'conventional',
+    forms: {
+      conventional: { grade: 'SPCC', series: '冷轧钢板', temperature: '25' },
+      hyperelastic: { grade: 'EPDM-70', series: '密封橡胶', temperature: '23' }
+    },
+    curves: { conventional: {}, hyperelastic: {} },
+    rows: { conventional: [], hyperelastic: [] },
+    seq: 1,
+    strategy: 'overwrite',
+    step: 2,
+    importing: false,
+    curveTarget: '',
+    lastResult: null,
+    pasteTimers: {}
+  };
+
+  // ==================== 工具函数 ====================
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function num(v) {
+    if (v == null) return NaN;
+    var s = String(v).trim();
+    if (!s) return NaN;
+    return Number(s);
+  }
+  function norm(v) {
+    return String(v == null ? '' : v).trim().replace(/\s+/g, '').toLowerCase();
+  }
+  function keyOfRow(o) {
+    var v = o.values || {};
+    var t = num(v.temperature);
+    return [o.type, norm(v.grade), norm(v.series), Number.isFinite(t) ? t.toFixed(1) : ''].join('|');
+  }
+  function ensureCurve(type, k) {
+    if (!S.curves[type][k]) {
+      S.curves[type][k] = { points: [], text: '', error: '', source: '' };
+    }
+    return S.curves[type][k];
+  }
+  function fieldDef(type, k) {
+    var list = FIELDS[type] || [];
+    for (var i = 0; i < list.length; i++) if (list[i].k === k) return list[i];
+    return null;
+  }
+  function labelOf(k) { return FIELD_LABEL[k] || k; }
+
+  function showToast(msg) {
+    var el = $('#toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(function () { el.classList.remove('show'); }, 2800);
+  }
+
+  function setStep(n) {
+    S.step = n;
+    $$('#stepper .step').forEach(function (el) {
+      var s = Number(el.dataset.step);
+      el.classList.toggle('active', s === n);
+      el.classList.toggle('done', s < n);
+    });
+  }
+
+  function downloadText(name, text) {
+    var blob = new Blob(['\uFEFF' + text], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 600);
+  }
+
+  // ==================== 表单渲染 ====================
+  function fieldHtml(f) {
+    if (f.curve) {
+      return '' +
+        '<div class="field curve-label" data-wrap="' + f.k + '">' +
+          '<label>' + esc(f.label) + '<span class="opt">选填</span></label>' +
+          '<div class="curve-box">' +
+            '<div class="curve-actions">' +
+              '<button type="button" class="btn-ghost sm" data-act="curve-file" data-curve="' + f.curve + '">选择 CSV</button>' +
+              '<button type="button" class="btn-link" data-act="curve-paste" data-curve="' + f.curve + '">粘贴数据</button>' +
+              '<button type="button" class="btn-link danger" data-act="curve-clear" data-curve="' + f.curve + '">清空</button>' +
+              '<span class="curve-status" id="cs-status-' + f.curve + '">未上传</span>' +
+            '</div>' +
+            '<textarea class="curve-paste" id="cs-paste-' + f.curve + '" placeholder="应变(%),应力(MPa)\n0,0\n0.5,12\n2,80"></textarea>' +
+            '<div class="curve-preview" id="cs-chart-' + f.curve + '"></div>' +
+            '<div class="curve-note">' + (f.curve === 'stressStrain'
+              ? 'CSV 两列：应变(%)、应力(MPa)，至少 5 点，应变严格递增'
+              : 'CSV 两列：寿命(cycles)、应力(MPa)，至少 4 点') + '</div>' +
+          '</div>' +
+          '<div class="field-err" id="err-' + f.k + '"></div>' +
+        '</div>';
+    }
+    var input = '<div class="input-wrap">' +
+      '<input type="text" data-field="' + f.k + '" placeholder="' + esc(f.ph || '选填') + '">' +
+      (f.unit ? '<span class="unit">' + esc(f.unit) + '</span>' : '') +
+      '</div>';
+    return '' +
+      '<div class="field" data-wrap="' + f.k + '">' +
+        '<label>' + esc(f.label) + (f.req ? '<span class="req">*</span>' : '<span class="opt">选填</span>') + '</label>' +
+        input +
+        '<div class="field-err" id="err-' + f.k + '"></div>' +
+      '</div>';
+  }
+
+  function renderForm() {
+    var type = S.type;
+    var form = S.forms[type];
+    var html = '';
+    GROUP_ORDER.forEach(function (g) {
+      var fields = FIELDS[type].filter(function (f) { return f.group === g; });
+      if (!fields.length) return;
+      html += '<div class="form-group"><div class="fg-title">' + g + '</div><div class="fg-grid">';
+      fields.forEach(function (f) { html += fieldHtml(f); });
+      html += '</div></div>';
+    });
+    $('#formCols').innerHTML = html;
+
+    FIELDS[type].forEach(function (f) {
+      if (f.curve) {
+        var c = ensureCurve(type, f.curve);
+        var ta = $('#cs-paste-' + f.curve);
+        if (ta) ta.value = c.text || '';
+      } else {
+        var input = $('input[data-field="' + f.k + '"]');
+        if (input) input.value = form[f.k] || '';
+      }
+    });
+    updateCurveUI();
+    updateTempHint();
+  }
+
+  function showFieldError(k, msg) {
+    var wrap = $('[data-wrap="' + k + '"]');
+    var inputWrap = wrap ? $('.input-wrap', wrap) : null;
+    var err = $('#err-' + k);
+    if (inputWrap) inputWrap.classList.add('invalid');
+    if (err) { err.textContent = msg; err.classList.add('show'); }
+  }
+
+  function clearFieldErrors() {
+    $$('.field-err').forEach(function (el) { el.textContent = ''; el.classList.remove('show'); });
+    $$('.input-wrap').forEach(function (el) { el.classList.remove('invalid'); });
+  }
+
+  // ==================== 曲线 ====================
+  function parseCurveText(text) {
+    var lines = String(text || '').split(/\r?\n/).map(function (l) { return l.trim(); })
+      .filter(function (l) { return l && l.charAt(0) !== '#'; });
+    if (!lines.length) return { points: [], error: '没有可解析的数据行' };
+    var pts = [];
+    for (var i = 0; i < lines.length; i++) {
+      var parts = lines[i].split(/[,，;；\t ]+/).filter(Boolean);
+      if (parts.length < 2) {
+        if (pts.length === 0) continue;
+        return { points: pts, error: '第 ' + (i + 1) + ' 行不是两个数值' };
+      }
+      var x = Number(parts[0]);
+      var y = Number(parts[1]);
+      if (!isFinite(x) || !isFinite(y)) {
+        if (pts.length === 0) continue;
+        return { points: pts, error: '第 ' + (i + 1) + ' 行包含非数值' };
+      }
+      pts.push({ x: x, y: y });
+    }
+    if (pts.length < 2) return { points: pts, error: '至少需要 2 个数据点' };
+    return { points: pts, error: '' };
+  }
+
+  function validateCurvePoints(points, kind) {
+    var errors = [], warnings = [];
+    if (kind === 'stressStrain') {
+      if (points.length < 5) errors.push('应力应变曲线至少 5 个数据点');
+      if (points.some(function (p) { return p.x < 0; })) errors.push('应变不能为负');
+      if (points.some(function (p) { return p.y < 0; })) errors.push('应力不能为负');
+      for (var i = 1; i < points.length; i++) {
+        if (points[i].x <= points[i - 1].x) { errors.push('应变必须严格递增（第 ' + (i + 1) + ' 行）'); break; }
+      }
+      var maxStrain = Math.max.apply(null, points.map(function (p) { return p.x; }));
+      if (maxStrain > 1000) warnings.push('最大应变超过 1000%，请确认单位是否为 %');
+    } else {
+      if (points.length < 4) errors.push('疲劳寿命曲线至少 4 个数据点');
+      if (points.some(function (p) { return p.x <= 0; })) errors.push('寿命必须为正数（cycles）');
+      if (points.some(function (p) { return p.y < 0; })) errors.push('应力幅不能为负');
+      for (var j = 1; j < points.length; j++) {
+        if (points[j].x <= points[j - 1].x) { errors.push('寿命必须递增（第 ' + (j + 1) + ' 行）'); break; }
+      }
+      for (var m = 1; m < points.length; m++) {
+        if (points[m].y > points[m - 1].y) { warnings.push('应力随寿命出现上升，请确认 S-N 曲线方向'); break; }
+      }
+    }
+    return { errors: errors, warnings: warnings };
+  }
+
+  function curveSummary(c, kind) {
+    if (!c || !c.points.length) return '—';
+    var xs = c.points.map(function (p) { return p.x; });
+    var ys = c.points.map(function (p) { return p.y; });
+    var f = function (n) { return n >= 10000 ? (n / 10000).toFixed(0) + 'e4' : String(Number(n.toFixed(2))); };
+    if (kind === 'stressStrain') {
+      return c.points.length + ' 点 · ε ' + f(Math.min.apply(null, xs)) + '–' + f(Math.max.apply(null, xs)) + '% · σ≤' + f(Math.max.apply(null, ys)) + 'MPa';
+    }
+    return c.points.length + ' 点 · N ' + f(Math.min.apply(null, xs)) + '–' + f(Math.max.apply(null, xs)) + ' · σ≤' + f(Math.max.apply(null, ys)) + 'MPa';
+  }
+
+  function drawChart(el, points, kind) {
+    if (!el) return;
+    if (!points || !points.length) {
+      el.innerHTML = '<div class="curve-empty">上传后在此显示曲线</div>';
+      return;
+    }
+    var W = 380, H = 140;
+    var pad = { l: 44, r: 10, t: 10, b: 24 };
+    var list = points.slice().sort(function (a, b) { return a.x - b.x; });
+    var xs = list.map(function (p) { return kind === 'fatigue' ? Math.log10(Math.max(p.x, 1)) : p.x; });
+    var ys = list.map(function (p) { return p.y; });
+    var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+    var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+    if (minX === maxX) { maxX = minX + 1; }
+    if (minY === maxY) { maxY = minY + 1; }
+    var x0 = Math.min(0, minX), y0 = Math.min(0, minY);
+    var px = function (x) { return pad.l + (x - x0) / ((maxX - x0) || 1) * (W - pad.l - pad.r); };
+    var py = function (y) { return H - pad.b - (y - y0) / ((maxY - y0) || 1) * (H - pad.t - pad.b); };
+    var grid = '';
+    for (var i = 0; i <= 3; i++) {
+      var gy = pad.t + i * (H - pad.t - pad.b) / 3;
+      grid += '<line x1="' + pad.l + '" y1="' + gy + '" x2="' + (W - pad.r) + '" y2="' + gy + '" stroke="#eef2f7"/>';
+    }
+    var poly = list.map(function (p, idx) {
+      var x = kind === 'fatigue' ? Math.log10(Math.max(p.x, 1)) : p.x;
+      return (idx === 0 ? 'M' : 'L') + px(x).toFixed(1) + ',' + py(p.y).toFixed(1);
+    }).join(' ');
+    var dots = list.map(function (p) {
+      var x = kind === 'fatigue' ? Math.log10(Math.max(p.x, 1)) : p.x;
+      return '<circle cx="' + px(x).toFixed(1) + '" cy="' + py(p.y).toFixed(1) + '" r="2.4" fill="#1a5fb4"/>';
+    }).join('');
+    var xLabel = kind === 'fatigue' ? 'N (cycles)' : 'ε (%)';
+    var yLabel = kind === 'fatigue' ? 'σ (MPa)' : 'σ (MPa)';
+    el.innerHTML = '' +
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:132px;display:block">' +
+        grid +
+        '<line x1="' + pad.l + '" y1="' + (H - pad.b) + '" x2="' + (W - pad.r) + '" y2="' + (H - pad.b) + '" stroke="#cfdbe9"/>' +
+        '<line x1="' + pad.l + '" y1="' + pad.t + '" x2="' + pad.l + '" y2="' + (H - pad.b) + '" stroke="#cfdbe9"/>' +
+        '<path d="' + poly + '" fill="none" stroke="#1a5fb4" stroke-width="1.8"/>' +
+        dots +
+        '<text x="' + (W - pad.r) + '" y="' + (H - 6) + '" font-size="9" fill="#8a99ab" text-anchor="end">' + xLabel + '</text>' +
+        '<text x="8" y="14" font-size="9" fill="#8a99ab">' + yLabel + '</text>' +
+      '</svg>';
+  }
+
+  function updateCurveUI() {
+    var type = S.type;
+    ['stressStrain', 'fatigue'].forEach(function (kind) {
+      var c = ensureCurve(type, kind);
+      var status = $('#cs-status-' + kind);
+      var chart = $('#cs-chart-' + kind);
+      if (status) {
+        status.classList.remove('ok', 'bad');
+        if (c.error) {
+          status.textContent = '解析失败：' + c.error;
+          status.classList.add('bad');
+        } else if (c.points && c.points.length) {
+          status.textContent = '已导入 ' + c.points.length + ' 点';
+          status.classList.add('ok');
+        } else {
+          status.textContent = '未上传（选填）';
+        }
+      }
+      drawChart(chart, c.points, kind);
+    });
+  }
+
+  function setCurveText(kind, text, source) {
+    var c = ensureCurve(S.type, kind);
+    var parsed = parseCurveText(text);
+    c.text = text;
+    c.source = source || '';
+    c.points = parsed.points || [];
+    c.error = parsed.error || '';
+    if (c.error) {
+      showToast('曲线解析失败：' + c.error);
+    } else if (c.points.length) {
+      showToast('曲线已解析：' + c.points.length + ' 个数据点');
+    }
+    updateCurveUI();
+    var ta = $('#cs-paste-' + kind);
+    if (ta && ta.value !== text) ta.value = text;
+  }
+
+  // ==================== 温度提示 ====================
+  function updateTempHint() {
+    var el = $('#tempHint');
+    if (!el) return;
+    var type = S.type;
+    var v = S.forms[type];
+    var grade = (v.grade || '').trim();
+    var series = (v.series || '').trim();
+    if (!grade || !series) {
+      el.textContent = '填写牌号与系列号后，这里显示库内已有的温度记录，便于判断是新增温度还是主键冲突。';
+      return;
+    }
+    var list = EXISTING.filter(function (e) {
+      return e.type === type && norm(e.values.grade) === norm(grade) && norm(e.values.series) === norm(series);
+    });
+    if (!list.length) {
+      el.textContent = '库内尚无「' + grade + ' / ' + series + '」的记录，本次将新建材料。';
+      return;
+    }
+    var temps = list.map(function (e) { return e.values.temperature; }).sort(function (a, b) { return num(a) - num(b); });
+    var cur = num(v.temperature);
+    var hit = Number.isFinite(cur) && temps.some(function (t) { return Math.abs(num(t) - cur) < 0.05; });
+    el.textContent = '已有温度：' + temps.map(function (t) { return t + ' °C'; }).join('、') +
+      (hit ? '；当前温度 ' + v.temperature + ' °C 已存在，将按冲突策略处理。' : '；当前温度将作为一条新记录。');
+  }
+
+  // ==================== 校验 ====================
+  function validateValues(row) {
+    row.errors = [];
+    row.warnings = [];
+    row.conflict = null;
+    var v = row.values || {};
+    var type = row.type;
+
+    function err(k, msg) { row.errors.push({ field: k, msg: msg }); }
+    function warn(k, msg) { row.warnings.push({ field: k, msg: msg }); }
+
+    var grade = String(v.grade == null ? '' : v.grade).trim();
+    if (!grade) err('grade', '牌号必填');
+    else if (grade.length > 40) err('grade', '牌号不能超过 40 个字符');
+    else if (/[\\/:*?"<>|]/.test(grade)) err('grade', '牌号不能包含 \\ / : * ? " < > |');
+
+    var series = String(v.series == null ? '' : v.series).trim();
+    if (!series) err('series', '系列号必填');
+    else if (series.length < 2 || series.length > 40) err('series', '系列号需为 2–40 个字符');
+
+    var tempRaw = String(v.temperature == null ? '' : v.temperature).trim();
+    var temp = num(tempRaw);
+    if (!tempRaw) err('temperature', '温度必填');
+    else if (!Number.isFinite(temp)) err('temperature', '温度必须为数值');
+    else if (temp < -60 || temp > 400) err('temperature', '温度需在 -60 ~ 400 °C 之间（当前 ' + temp + '）');
+    else if (type === 'hyperelastic' && temp > 200) warn('temperature', '超弹性材料温度高于 200 °C，请确认是否超出长期使用温区');
+
+    var numericFields = [
+      ['density', '密度', 0.05, 30, 'g/cm³'],
+      ['poisson', '泊松比', 0.001, 0.499, ''],
+      ['elasticModulus', '弹性模量', 0.01, 100000, 'MPa'],
+      ['tensileStrength', '抗拉强度', 0.01, 5000, 'MPa'],
+      ['failureStrain', '破坏应变', 0.01, 1000, '%']
+    ];
+    if (type === 'hyperelastic') {
+      numericFields = [['poisson', '泊松比', 0.001, 0.499, '']];
+    }
+    numericFields.forEach(function (def) {
+      var k = def[0], label = def[1], min = def[2], max = def[3];
+      var raw = String(v[k] == null ? '' : v[k]).trim();
+      if (!raw) return;
+      var n = num(raw);
+      if (!Number.isFinite(n)) { err(k, label + '必须为数值'); return; }
+      if (k === 'poisson') {
+        if (n <= 0 || n >= 0.5) err(k, '泊松比需满足 0 < v < 0.5（当前 ' + n + '）');
+        else if (type === 'hyperelastic' && n < 0.4) warn(k, '超弹性材料泊松比通常 0.45 ~ 0.5，当前偏低');
+      } else if (n < min || n > max) {
+        err(k, label + '需在 ' + min + ' ~ ' + max + (def[4] ? ' ' + def[4] : '') + '（当前 ' + n + '）');
+      }
+    });
+
+    var curves = row.curves || {};
+    ['stressStrain', 'fatigue'].forEach(function (kind) {
+      var c = curves[kind];
+      var label = kind === 'stressStrain' ? '应力应变曲线' : '疲劳寿命曲线';
+      if (c && c.error) { err(kind, label + '：' + c.error); return; }
+      if (!c || !c.points || !c.points.length) {
+        if (kind === 'stressStrain') {
+          warn(kind, type === 'hyperelastic' ? '未提供应力应变曲线：无法拟合超弹性本构' : '未提供应力应变曲线：仅支持线弹性计算');
+        } else {
+          warn(kind, '未提供疲劳寿命曲线：无法进行疲劳校核');
+        }
+        return;
+      }
+      var vr = validateCurvePoints(c.points, kind);
+      vr.errors.forEach(function (m) { err(kind, label + '：' + m); });
+      vr.warnings.forEach(function (m) { warn(kind, label + '：' + m); });
+    });
+
+    // 交叉校验：破坏应变不得小于曲线最大应变
+    if (type === 'conventional' && curves.stressStrain && curves.stressStrain.points && curves.stressStrain.points.length) {
+      var fs = num(v.failureStrain);
+      var maxStrain = Math.max.apply(null, curves.stressStrain.points.map(function (p) { return p.x; }));
+      if (Number.isFinite(fs) && fs > 0 && fs < maxStrain) {
+        err('failureStrain', '破坏应变 ' + fs + '% 小于曲线最大应变 ' + maxStrain + '%');
+      }
+    }
+
+    var hit = EXISTING.filter(function (e) { return keyOfRow(e) === keyOfRow(row); });
+    if (hit.length) row.conflict = hit[0];
+  }
+
+  function validateAll() {
+    var rows = S.rows[S.type];
+    var seen = {};
+    rows.forEach(function (row, idx) {
+      validateValues(row);
+      var key = keyOfRow(row);
+      if (Object.prototype.hasOwnProperty.call(seen, key)) {
+        row.errors.push({ field: '主键', msg: '与预览第 ' + (seen[key] + 1) + ' 行重复（牌号 + 系列号 + 温度）' });
+      } else {
+        seen[key] = idx;
+      }
+    });
+  }
+
+  function statusOf(row) {
+    if (row.errors && row.errors.length) return 'error';
+    if (row.conflict) return 'conflict';
+    if (row.warnings && row.warnings.length) return 'warn';
+    return 'pass';
+  }
+
+  var STATUS_TEXT = { pass: '通过', warn: '警告', conflict: '冲突', error: '不通过' };
+
+  // ==================== 预览渲染 ====================
+  function renderPreview() {
+    var type = S.type;
+    var rows = S.rows[type];
+    var counts = { pass: 0, warn: 0, conflict: 0, error: 0 };
+    rows.forEach(function (r) { counts[statusOf(r)]++; });
+
+    var chips = $('#countChips');
+    chips.innerHTML =
+      '<span class="chip ok">通过 ' + counts.pass + '</span>' +
+      '<span class="chip warn">警告 ' + counts.warn + '</span>' +
+      '<span class="chip warn">冲突 ' + counts.conflict + '</span>' +
+      '<span class="chip danger">不通过 ' + counts.error + '</span>';
+
+    var isConv = type === 'conventional';
+    var head = '<tr><th>#</th><th>状态</th><th>牌号</th><th>系列号</th><th>温度</th>' +
+      (isConv ? '<th>供应商</th><th>密度</th><th>弹性模量</th>' : '') +
+      '<th>泊松比</th><th>曲线</th><th>问题说明</th><th>操作</th></tr>';
+    $('#previewHead').innerHTML = head;
+
+    var body = $('#previewBody');
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="' + (isConv ? 12 : 8) + '"><div class="empty-preview">当前类型暂无待入库数据。可在左侧手动录入，或载入示例数据 / 上传 CSV。</div></td></tr>';
+    } else {
+      body.innerHTML = rows.map(function (r, i) {
+        var status = statusOf(r);
+        var cls = status === 'error' ? 'row-error' : status === 'conflict' ? 'row-conflict' : status === 'warn' ? 'row-warn' : '';
+        var msgs = [];
+        if (r.conflict) {
+          var strategyText = S.strategy === 'skip' ? '确认后跳过' : S.strategy === 'pending' ? '待人工处理，阻止本批入库' : '确认后覆盖';
+          msgs.push('<div class="msg-line warn">主键已存在（' + esc(r.conflict.values.grade) + ' / ' + esc(r.conflict.values.series) + ' / ' + esc(r.conflict.values.temperature) + ' °C）；' + strategyText + '</div>');
+        }
+        (r.errors || []).forEach(function (e) {
+          msgs.push('<div class="msg-line err">' + (e.field === '主键' ? '' : esc(labelOf(e.field)) + '：') + esc(e.msg) + '</div>');
+        });
+        (r.warnings || []).forEach(function (w) {
+          msgs.push('<div class="msg-line warn">' + esc(labelOf(w.field)) + '：' + esc(w.msg) + '</div>');
+        });
+        if (!msgs.length) msgs.push('<span class="muted">—</span>');
+
+        var curveText = '<div class="curve-mini">' +
+          'σ-ε：' + (r.curves && r.curves.stressStrain && r.curves.stressStrain.points && r.curves.stressStrain.points.length
+            ? r.curves.stressStrain.points.length + ' 点' : '未提供') + '<br>' +
+          'S-N：' + (r.curves && r.curves.fatigue && r.curves.fatigue.points && r.curves.fatigue.points.length
+            ? r.curves.fatigue.points.length + ' 点' : '未提供') +
+          '</div>';
+
+        return '<tr class="' + cls + '">' +
+          '<td>' + (i + 1) + '</td>' +
+          '<td><span class="badge ' + status + '">' + STATUS_TEXT[status] + '</span></td>' +
+          '<td>' + esc(r.values.grade || '—') + '</td>' +
+          '<td>' + esc(r.values.series || '—') + '</td>' +
+          '<td>' + esc(r.values.temperature || '—') + ' °C</td>' +
+          (isConv
+            ? '<td>' + esc(r.values.supplier || '—') + '</td>' +
+              '<td>' + esc(r.values.density || '—') + '</td>' +
+              '<td>' + esc(r.values.elasticModulus || '—') + '</td>'
+            : '') +
+          '<td>' + esc(r.values.poisson || '—') + '</td>' +
+          '<td>' + curveText + '</td>' +
+          '<td style="min-width:230px">' + msgs.join('') + '</td>' +
+          '<td><button class="btn-link" data-act="edit-row" data-id="' + r.id + '">载入表单</button>' +
+          '<button class="btn-link danger" data-act="del-row" data-id="' + r.id + '">删除</button></td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    var btn = $('#btnImport');
+    btn.textContent = S.importing ? '写入中…' : '确认入库 (' + rows.length + ')';
+    btn.disabled = S.importing || rows.length === 0;
+
+    $('#cnt-conventional').textContent = '(' + S.rows.conventional.length + ')';
+    $('#cnt-hyperelastic').textContent = '(' + S.rows.hyperelastic.length + ')';
+  }
+
+  // ==================== 表单提交 ====================
+  function collectForm() {
+    var type = S.type;
+    var values = {};
+    FIELDS[type].forEach(function (f) {
+      if (f.curve) return;
+      values[f.k] = (S.forms[type][f.k] || '').trim();
+    });
+    var curves = {};
+    ['stressStrain', 'fatigue'].forEach(function (k) {
+      var c = ensureCurve(type, k);
+      if (c.points && c.points.length && !c.error) {
+        curves[k] = { points: c.points.slice(), error: '', source: c.source || '' };
+      } else if (c.error) {
+        curves[k] = { points: [], error: c.error, source: c.source || '' };
+      }
+    });
+    return { values: values, curves: curves };
+  }
+
+  function addRowFromForm() {
+    clearFieldErrors();
+    var collected = collectForm();
+    var probe = { type: S.type, values: collected.values, curves: collected.curves };
+    validateValues(probe);
+
+    var bad = probe.errors.slice();
+    ['stressStrain', 'fatigue'].forEach(function (k) {
+      var c = ensureCurve(S.type, k);
+      if (c.error) bad.push({ field: k, msg: c.error });
+    });
+    if (bad.length) {
+      bad.forEach(function (e) { showFieldError(e.field, e.msg); });
+      showToast('存在 ' + bad.length + ' 处问题，请先修正表单');
+      return;
+    }
+
+    var row = { id: S.seq++, type: S.type, values: collected.values, curves: collected.curves };
+    S.rows[S.type].push(row);
+    validateAll();
+    renderPreview();
+    setStep(3);
+    showToast('已加入预览：' + (row.values.grade || '未命名') + ' / ' + (row.values.temperature || '?') + ' °C');
+    S.lastResult = null;
+    $('#resultCard').classList.remove('show');
+
+    // 保留标识字段，清空温度与物性，便于连续录入不同温度
+    var keep = { grade: S.forms[S.type].grade, series: S.forms[S.type].series };
+    S.forms[S.type] = { grade: keep.grade || '', series: keep.series || '' };
+    S.curves[S.type] = {};
+    renderForm();
+  }
+
+  // ==================== 示例数据 / 批量 ====================
+  function sampleCurve(kind) {
+    if (kind === 'stressStrain') {
+      return { points: [{ x: 0, y: 0 }, { x: 2, y: 150 }, { x: 5, y: 240 }, { x: 10, y: 300 }, { x: 20, y: 350 }, { x: 30, y: 370 }], error: '', source: '示例', text: '' };
+    }
+    return { points: [{ x: 1e4, y: 220 }, { x: 1e5, y: 180 }, { x: 1e6, y: 140 }, { x: 1e7, y: 110 }], error: '', source: '示例', text: '' };
+  }
+
+  function loadSample() {
+    var type = S.type;
+    var demo = type === 'conventional'
+      ? [
+          { values: { grade: 'SPCC', series: '冷轧钢板', supplier: '宝钢', temperature: '25', density: '7.85', poisson: '0.30', elasticModulus: '205000', tensileStrength: '370', failureStrain: '32' }, curves: { stressStrain: sampleCurve('stressStrain'), fatigue: sampleCurve('fatigue') } },
+          { values: { grade: 'PA66-GF30', series: '尼龙加玻纤', supplier: '巴斯夫', temperature: '120', density: '1.35', poisson: '0.34', elasticModulus: '95000', tensileStrength: '185', failureStrain: '3.5' }, curves: { stressStrain: { points: [{ x: 0, y: 0 }, { x: 0.5, y: 40 }, { x: 1, y: 80 }, { x: 2, y: 140 }, { x: 3, y: 175 }, { x: 3.5, y: 185 }], error: '', source: '示例', text: '' } } },
+          { values: { grade: '6061-T6', series: '铝合金', supplier: '中铝', temperature: '25', density: '2.70', poisson: '0.52', elasticModulus: '68000', tensileStrength: '310', failureStrain: '8' }, curves: { stressStrain: { points: [{ x: 0, y: 0 }, { x: 1, y: 68 }, { x: 3, y: 200 }, { x: 6, y: 270 }, { x: 9, y: 300 }, { x: 12, y: 310 }], error: '', source: '示例', text: '' } } },
+          { values: { grade: 'Q235', series: '', supplier: '鞍钢', temperature: '-20', density: '7.85', poisson: '0.30', elasticModulus: '200000' }, curves: {} }
+        ]
+      : [
+          { values: { grade: 'EPDM-70', series: '密封橡胶', temperature: '23', poisson: '0.48' }, curves: { stressStrain: { points: [{ x: 0, y: 0 }, { x: 10, y: 1.2 }, { x: 50, y: 3.5 }, { x: 100, y: 5.2 }, { x: 200, y: 7.0 }, { x: 300, y: 8.1 }], error: '', source: '示例', text: '' } } },
+          { values: { grade: 'FKM-80', series: '氟橡胶', temperature: '150', poisson: '0.47' }, curves: {} },
+          { values: { grade: 'HNBR-60', series: '氢化丁腈', temperature: '-30', poisson: '0.70' }, curves: {} },
+          { values: { grade: '', series: '丁腈橡胶', temperature: '25', poisson: '0.46' }, curves: {} }
+        ];
+
+    demo.forEach(function (d) {
+      S.rows[type].push({ id: S.seq++, type: type, values: d.values, curves: d.curves || {} });
+    });
+    validateAll();
+    renderPreview();
+    setStep(3);
+    showToast('已载入 ' + demo.length + ' 行示例：含主键冲突、必填缺失与数值越界');
+  }
+
+  function parseBatchCsv(text) {
+    var lines = String(text || '').split(/\r?\n/).filter(function (l) { return l.trim() && l.trim().charAt(0) !== '#'; });
+    if (lines.length < 2) return { rows: [], error: '文件至少需要表头与 1 行数据' };
+    var header = lines[0].split(/[,，;；\t]+/).map(function (s) { return s.trim(); });
+    var map = {};
+    header.forEach(function (h, i) {
+      if (/牌号/.test(h)) map.grade = i;
+      else if (/系列号/.test(h)) map.series = i;
+      else if (/供应商/.test(h)) map.supplier = i;
+      else if (/温度/.test(h)) map.temperature = i;
+      else if (/密度/.test(h)) map.density = i;
+      else if (/泊松比/.test(h)) map.poisson = i;
+      else if (/弹性模量|弹性模量/.test(h)) map.elasticModulus = i;
+      else if (/抗拉强度/.test(h)) map.tensileStrength = i;
+      else if (/破坏应变/.test(h)) map.failureStrain = i;
+    });
+    if (map.grade == null || map.series == null || map.temperature == null) {
+      return { rows: [], error: '表头缺少必填列：牌号 / 系列号 / 温度' };
+    }
+    var rows = [];
+    for (var i = 1; i < lines.length; i++) {
+      var cells = lines[i].split(/[,，;；\t]+/).map(function (s) { return s.trim(); });
+      var values = {};
+      Object.keys(map).forEach(function (k) { values[k] = cells[map[k]] != null ? cells[map[k]] : ''; });
+      rows.push({ values: values, curves: {} });
+    }
+    return { rows: rows, error: '' };
+  }
+
+  function importBatchFile(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var parsed = parseBatchCsv(String(reader.result || ''));
+      if (parsed.error) { showToast('解析失败：' + parsed.error); return; }
+      parsed.rows.forEach(function (r) {
+        S.rows[S.type].push({ id: S.seq++, type: S.type, values: r.values, curves: r.curves });
+      });
+      validateAll();
+      renderPreview();
+      setStep(3);
+      showToast('已解析 ' + parsed.rows.length + ' 行；曲线需按材料单独上传（正式版由 xlsx 曲线工作表导入）');
+    };
+    reader.onerror = function () { showToast('文件读取失败'); };
+    reader.readAsText(file, 'utf-8');
+  }
+
+  // ==================== 入库 ====================
+  function confirmImport() {
+    if (S.importing) return;
+    validateAll();
+    renderPreview();
+    var rows = S.rows[S.type];
+    if (!rows.length) { showToast('预览中没有待入库数据'); return; }
+
+    var partial = $('#chkPartial').checked;
+    var blockers = rows.filter(function (r) {
+      return r.errors.length > 0 || (r.conflict && S.strategy === 'pending');
+    });
+    var errBox = $('#previewError');
+    if (blockers.length && !partial) {
+      errBox.textContent = '整批入库未执行：' + blockers.length + ' 行存在错误或未处理冲突。\n可勾选「仅导入通过行」改为部分成功，或修正后再提交。';
+      errBox.classList.add('show');
+      showToast('存在阻塞行，整批未入库');
+      return;
+    }
+    errBox.classList.remove('show');
+
+    S.importing = true;
+    renderPreview();
+
+    setTimeout(function () {
+      var success = [], skipped = [], failed = [];
+      rows.forEach(function (r) {
+        if (r.errors.length) { failed.push(r); return; }
+        if (r.conflict) {
+          if (S.strategy === 'skip') { skipped.push(r); return; }
+          if (S.strategy === 'pending') { failed.push(r); return; }
+        }
+        success.push(r);
+        var idx = -1;
+        for (var i = 0; i < EXISTING.length; i++) if (keyOfRow(EXISTING[i]) === keyOfRow(r)) { idx = i; break; }
+        if (idx >= 0) EXISTING[idx] = { type: r.type, values: Object.assign({}, r.values) };
+        else EXISTING.push({ type: r.type, values: Object.assign({}, r.values) });
+      });
+
+      S.rows[S.type] = failed;
+      S.importing = false;
+      S.lastResult = { success: success, skipped: skipped, failed: failed };
+      renderPreview();
+      showResult();
+      setStep(4);
+      showToast('入库完成：成功 ' + success.length + ' 行' +
+        (skipped.length ? '，跳过 ' + skipped.length + ' 行' : '') +
+        (failed.length ? '，失败 ' + failed.length + ' 行' : ''));
+    }, 600);
+  }
+
+  function showResult() {
+    var card = $('#resultCard');
+    var res = S.lastResult;
+    if (!res) { card.classList.remove('show'); return; }
+    var total = res.success.length + res.skipped.length + res.failed.length;
+    var html = '<div class="result-head">' +
+      '<h4>入库结果</h4>' +
+      '<span class="chip ok">成功 ' + res.success.length + '</span>' +
+      (res.skipped.length ? '<span class="chip warn">跳过 ' + res.skipped.length + '</span>' : '') +
+      (res.failed.length ? '<span class="chip danger">失败 ' + res.failed.length + '</span>' : '') +
+      '<span class="result-note">共 ' + total + ' 行；冲突策略：' +
+        ({ overwrite: '覆盖', skip: '跳过', pending: '待人工处理' })[S.strategy] + '</span>' +
+      '</div>';
+
+    if (res.failed.length) {
+      html += '<ul class="fail-list">' + res.failed.map(function (r) {
+        var reasons = r.errors.map(function (e) { return (e.field === '主键' ? '' : labelOf(e.field) + '：') + e.msg; }).join('；');
+        return '<li><span class="f-title">' + esc(r.values.grade || '（缺牌号）') + ' / ' + esc(r.values.series || '（缺系列号）') + ' / ' + esc(r.values.temperature || '?') + ' °C</span>' +
+          '<div class="f-reason">' + esc(reasons || '冲突未处理') + '</div></li>';
+      }).join('') + '</ul>';
+      html += '<div class="pc-actions" style="display:flex;gap:8px;margin-top:8px">' +
+        '<button class="btn-ghost sm" data-act="export-fail">导出失败行 CSV</button>' +
+        '<span class="curve-note">失败行已保留在预览中，修正后可重新提交。</span></div>';
+    } else {
+      html += '<p class="curve-note">全部行处理完成。不同温度的同牌号材料已分别写入，可在材料检索页按温度筛选。</p>';
+    }
+    card.innerHTML = html;
+    card.classList.add('show');
+  }
+
+  function exportFailures() {
+    var res = S.lastResult;
+    if (!res || !res.failed.length) { showToast('没有失败行可导出'); return; }
+    var lines = ['牌号,系列号,温度(°C),失败原因'];
+    res.failed.forEach(function (r) {
+      var reasons = r.errors.map(function (e) { return (e.field === '主键' ? '' : labelOf(e.field) + '：') + e.msg; }).join('；');
+      var cells = [r.values.grade || '', r.values.series || '', r.values.temperature || '', reasons || '冲突未处理'];
+      lines.push(cells.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(','));
+    });
+    downloadText('材料库导入失败行.csv', lines.join('\r\n'));
+    showToast('失败行清单已导出');
+  }
+
+  // ==================== 模板 ====================
+  function templateCsv() {
+    if (S.type === 'conventional') {
+      return [
+        '牌号,系列号,供应商,温度(°C),密度(g/cm³),泊松比,弹性模量(MPa),抗拉强度(MPa),破坏应变(%),应力应变曲线,疲劳寿命曲线',
+        'SPCC,冷轧钢板,宝钢,25,7.85,0.30,205000,370,32,,',
+        'PA66-GF30,尼龙加玻纤,巴斯夫,120,1.35,0.34,95000,185,3.5,,'
+      ].join('\r\n');
+    }
+    return [
+      '牌号,系列号,温度(°C),泊松比,应力应变曲线,疲劳寿命曲线',
+      'EPDM-70,密封橡胶,23,0.48,,',
+      'FKM-80,氟橡胶,150,0.47,,'
+    ].join('\r\n');
+  }
+
+  function curveTemplateCsv() {
+    return [
+      '# 曲线模板（CSV 两列）',
+      '# 应力应变：应变(%),应力(MPa)',
+      '0,0',
+      '2,150',
+      '5,240',
+      '10,300',
+      '20,350',
+      '30,370',
+      '',
+      '# 疲劳寿命：寿命(cycles),应力(MPa)（请另存一个文件）',
+      '10000,220',
+      '100000,180',
+      '1000000,140',
+      '10000000,110'
+    ].join('\r\n');
+  }
+
+  // ==================== 事件 ====================
+  function bind() {
+    document.addEventListener('click', function (e) {
+      var typeBtn = e.target.closest('.type-btn');
+      if (typeBtn) {
+        if (S.importing) return;
+        S.type = typeBtn.dataset.type;
+        $$('.type-btn').forEach(function (b) { b.classList.toggle('active', b === typeBtn); });
+        renderForm();
+        renderPreview();
+        setStep(2);
+        $('#resultCard').classList.remove('show');
+        $('#previewError').classList.remove('show');
+        var rows = S.rows[S.type];
+        if (rows.length) setStep(3);
+        return;
+      }
+
+      var btn = e.target.closest('[data-act]');
+      if (!btn) return;
+      var act = btn.dataset.act;
+
+      if (act === 'add-row') { addRowFromForm(); return; }
+      if (act === 'reset-form') {
+        S.forms[S.type] = {};
+        S.curves[S.type] = {};
+        renderForm();
+        clearFieldErrors();
+        showToast('表单已清空');
+        return;
+      }
+      if (act === 'sample') { loadSample(); return; }
+      if (act === 'tpl') {
+        downloadText('材料库导入模板-' + (S.type === 'conventional' ? '常规材料' : '超弹性材料') + '.csv', templateCsv());
+        showToast('模板已下载（含水印 BOM，Excel 可直接打开）');
+        return;
+      }
+      if (act === 'curve-tpl') {
+        downloadText('曲线数据模板.csv', curveTemplateCsv());
+        showToast('曲线模板已下载');
+        return;
+      }
+      if (act === 'validate') {
+        validateAll();
+        renderPreview();
+        var bad = S.rows[S.type].filter(function (r) { return r.errors.length; }).length;
+        showToast(bad ? '校验完成：' + bad + ' 行不通过' : '校验完成：全部行可入库');
+        return;
+      }
+      if (act === 'clear-rows') {
+        S.rows[S.type] = [];
+        S.lastResult = null;
+        validateAll();
+        renderPreview();
+        $('#resultCard').classList.remove('show');
+        $('#previewError').classList.remove('show');
+        setStep(2);
+        showToast('预览已清空');
+        return;
+      }
+      if (act === 'import') { confirmImport(); return; }
+      if (act === 'export-fail') { exportFailures(); return; }
+      if (act === 'del-row') {
+        var id = Number(btn.dataset.id);
+        S.rows[S.type] = S.rows[S.type].filter(function (r) { return r.id !== id; });
+        validateAll();
+        renderPreview();
+        showToast('已删除该行');
+        return;
+      }
+      if (act === 'edit-row') {
+        var rid = Number(btn.dataset.id);
+        var target = S.rows[S.type].filter(function (r) { return r.id === rid; })[0];
+        if (!target) return;
+        S.forms[S.type] = Object.assign({}, target.values);
+        S.curves[S.type] = {};
+        Object.keys(target.curves || {}).forEach(function (k) { S.curves[S.type][k] = Object.assign({}, target.curves[k]); });
+        S.rows[S.type] = S.rows[S.type].filter(function (r) { return r.id !== rid; });
+        renderForm();
+        validateAll();
+        renderPreview();
+        showToast('已载入表单，修改后重新加入预览');
+        return;
+      }
+      if (act === 'curve-file') {
+        S.curveTarget = btn.dataset.curve;
+        $('#curveFileInput').click();
+        return;
+      }
+      if (act === 'curve-paste') {
+        var ta = $('#cs-paste-' + btn.dataset.curve);
+        if (ta) {
+          ta.classList.toggle('show');
+          if (ta.classList.contains('show')) ta.focus();
+        }
+        return;
+      }
+      if (act === 'curve-clear') {
+        var kind = btn.dataset.curve;
+        S.curves[S.type][kind] = { points: [], text: '', error: '', source: '' };
+        var box = $('#cs-paste-' + kind);
+        if (box) box.value = '';
+        updateCurveUI();
+        showToast('曲线已清空');
+        return;
+      }
+    });
+
+    // 表单输入
+    $('#formCols').addEventListener('input', function (e) {
+      var k = e.target.dataset.field;
+      if (!k) return;
+      S.forms[S.type][k] = e.target.value;
+      var wrap = e.target.closest('.input-wrap');
+      if (wrap) wrap.classList.remove('invalid');
+      var err = $('#err-' + k);
+      if (err) { err.textContent = ''; err.classList.remove('show'); }
+      if (k === 'grade' || k === 'series' || k === 'temperature') updateTempHint();
+    });
+
+    // 曲线粘贴（防抖解析）
+    $('#formCols').addEventListener('input', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('curve-paste')) return;
+      var id = e.target.id || '';
+      var kind = id.replace('cs-paste-', '');
+      if (!kind || kind === id) return;
+      var val = e.target.value;
+      clearTimeout(S.pasteTimers[kind]);
+      S.pasteTimers[kind] = setTimeout(function () {
+        if (!val.trim()) return;
+        setCurveText(kind, val, '粘贴');
+      }, 450);
+    });
+
+    // 曲线文件
+    $('#curveFileInput').addEventListener('change', function (e) {
+      var file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file || !S.curveTarget) return;
+      var kind = S.curveTarget;
+      var reader = new FileReader();
+      reader.onload = function () { setCurveText(kind, String(reader.result || ''), file.name); };
+      reader.onerror = function () { showToast('曲线文件读取失败'); };
+      reader.readAsText(file, 'utf-8');
+    });
+
+    // 批量文件
+    var drop = $('#dropzone');
+    var fileInput = $('#batchFileInput');
+    if (drop) {
+      drop.addEventListener('click', function () { fileInput.click(); });
+      drop.addEventListener('dragover', function (e) { e.preventDefault(); drop.classList.add('drag'); });
+      drop.addEventListener('dragleave', function () { drop.classList.remove('drag'); });
+      drop.addEventListener('drop', function (e) {
+        e.preventDefault();
+        drop.classList.remove('drag');
+        var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f) importBatchFile(f);
+      });
+    }
+    if (fileInput) {
+      fileInput.addEventListener('change', function (e) {
+        var f = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (f) importBatchFile(f);
+      });
+    }
+
+    // 冲突策略
+    $$('input[name="strategy"]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        S.strategy = r.value;
+        validateAll();
+        renderPreview();
+        if (S.lastResult) { S.lastResult = null; $('#resultCard').classList.remove('show'); }
+        showToast('冲突策略：' + ({ overwrite: '覆盖', skip: '跳过', pending: '待人工处理' })[S.strategy]);
+      });
+    });
+  }
+
+  // ==================== 初始化 ====================
+  function init() {
+    renderForm();
+    validateAll();
+    renderPreview();
+    setStep(2);
+    bind();
+    showToast('原型已就绪：可切换材料类型、载入示例数据或上传 CSV');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

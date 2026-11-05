@@ -84,7 +84,7 @@ interface CtrApi {
     activate(code: string): Promise<{ ok: boolean; message?: string }>;
   };
   file: {
-    save(p: { defaultName: string; content: string }): Promise<{ ok: boolean; canceled?: boolean }>;
+    save(p: { defaultName: string; content?: string; buffer?: ArrayBuffer; encoding?: 'base64' | 'utf8' }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string; message?: string }>;
     saveDocx(p: { defaultName: string; base64: string }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string }>;
     savePdf(p: { defaultName: string; html: string }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string }>;
     saveXlsx(p: { defaultName: string; base64: string }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string }>;
@@ -92,8 +92,10 @@ interface CtrApi {
     getPath(file: File): string;
   };
   pdf: {
-    /** 桌面版：由主进程提取 PDF 文字层 */
-    extractText(filePath: string): Promise<{ ok: boolean; text?: string; message?: string }>;
+    /** 桌面版：由主进程提取 PDF 文字层，pages 为逐页文本（用于 CAE 正文第一页取流量） */
+    extractText(
+      filePath: string,
+    ): Promise<{ ok: boolean; text?: string; pages?: string[]; message?: string }>;
     /** 桌面版：主进程逐页 OCR（封面 + 试验项目表格所在页），返回版面行文本、表格中的试验项目与「接受标准」列流量 */
     ocrFirstPage(
       filePath: string,
@@ -108,12 +110,24 @@ interface CtrApi {
     }): Promise<{ ok: boolean; pageCount?: number; page?: number; width?: number; height?: number; dataUrl?: string; message?: string }>;
   };
   db: {
-    archive(p: { base64: string; fileName: string; libType: 'calc' | 'test' | 'trusted' | 'cae' | 'theory' | 'design' | 'fmea' }): Promise<{ ok: boolean; filePath?: string; targetDir?: string; message?: string }>;
-    list(p: { libType: 'calc' | 'test' | 'trusted' | 'cae' | 'theory' | 'design' | 'fmea' }): Promise<{ ok: boolean; dir?: string; files?: { name: string; size: number; mtime: string; fullPath: string }[]; message?: string }>;
+    archive(p: { base64: string; fileName: string; libType: 'calc' | 'test' | 'trusted' | 'cae' | 'material' | 'theory' | 'design' | 'fmea'; overwrite?: boolean }): Promise<{ ok: boolean; filePath?: string; targetDir?: string; message?: string }>;
+    list(p: { libType: 'calc' | 'test' | 'trusted' | 'cae' | 'material' | 'theory' | 'design' | 'fmea' }): Promise<{ ok: boolean; dir?: string; files?: { name: string; size: number; mtime: string; fullPath: string }[]; message?: string }>;
     read(p: { fullPath: string }): Promise<{ ok: boolean; rows?: unknown[][]; sheetCount?: number; message?: string }>;
+    /** 读取文本类归档；材料库 .parquet 由主进程转为 JSON 文本 */
+    readText(p: { fullPath: string }): Promise<{ ok: boolean; text?: string; message?: string }>;
     pdfData(filePath: string): Promise<{ ok: boolean; fileUrl?: string; size?: number; message?: string }>;
     remove(p: { fullPath: string }): Promise<{ ok: boolean; message?: string }>;
-    ping(): Promise<{ reachable: boolean; root: string; calc: string; test: string; trusted: string; cae: string; kbeRoot: string; kbeTheory: string; kbeDesign: string; kbeFmea: string }>;
+    ping(): Promise<{ reachable: boolean; root: string; calc: string; test: string; trusted: string; cae: string; material: string; kbeRoot: string; kbeTheory: string; kbeDesign: string; kbeFmea: string }>;
+  };
+  material: {
+    /** 材料库：以 Apache Parquet 写入一条记录 */
+    write(p: { record: unknown; fileName: string; overwrite?: boolean }): Promise<{
+      ok: boolean;
+      exists?: boolean;
+      filePath?: string;
+      targetDir?: string;
+      message?: string;
+    }>;
   };
   ppt: {
     /** 桌面版：PPT / PPTX 转文字版 PDF（PowerPoint / WPS / LibreOffice），返回临时路径与 base64 */
@@ -222,9 +236,13 @@ const fallback: CtrApi = {
     archive: async () => ({ ok: false, message: '浏览器调试模式下无法写入 UNC 路径' }),
     list: async () => ({ ok: false, files: [] }),
     read: async () => ({ ok: false, rows: [] }),
+    readText: async () => ({ ok: false, message: '浏览器调试模式无法读取 UNC 路径文件' }),
     pdfData: async () => ({ ok: false, message: '浏览器调试模式无法读取 UNC 路径 PDF' }),
     remove: async () => ({ ok: false, message: '浏览器调试模式无法删除服务器文件' }),
-    ping: async () => ({ reachable: false, root: '', calc: '', test: '', trusted: '', cae: '', kbeRoot: '', kbeTheory: '', kbeDesign: '', kbeFmea: '' }),
+    ping: async () => ({ reachable: false, root: '', calc: '', test: '', trusted: '', cae: '', material: '', kbeRoot: '', kbeTheory: '', kbeDesign: '', kbeFmea: '' }),
+  },
+  material: {
+    write: async () => ({ ok: false, message: '浏览器调试模式无法写入 UNC 路径' }),
   },
   ppt: {
     toPdf: async () => ({ ok: false, message: '浏览器调试模式不支持 PPT 转 PDF' }),

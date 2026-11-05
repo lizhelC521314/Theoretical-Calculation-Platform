@@ -15,10 +15,12 @@ import { CaeReportsPage } from './pages/CaeReportsPage';
 import { CaeSearchPage } from './pages/CaeSearchPage';
 import { LabPage } from './pages/LabPage';
 import { DatabasePage } from './pages/DatabasePage';
+import { MaterialsImportPage } from './pages/MaterialsImportPage';
+import { MaterialsSearchPage } from './pages/MaterialsSearchPage';
 import { KnowledgeBasePage } from './pages/KnowledgeBasePage';
 import { SettingsPage } from './pages/SettingsPage';
 
-type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'db' | 'kbe' | 'compare' | 'settings';
+type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'materialImport' | 'materialSearch' | 'db' | 'kbe' | 'compare' | 'settings';
 
 interface NavLeaf { key: Page; label: string; icon?: string }
 /** 分组可嵌套：如「产品验证」下的「试验报告」子分组 */
@@ -61,6 +63,15 @@ const NAV: NavItem[] = [
     ],
   },
   { key: 'db', label: '产品数据库', icon: '🗄' },
+  {
+    key: 'material',
+    label: '材料库',
+    icon: '◫',
+    children: [
+      { key: 'materialImport', label: '材料数据导入', icon: '⇪' },
+      { key: 'materialSearch', label: '材料检索', icon: '🔍' },
+    ],
+  },
   { key: 'kbe', label: '知识经验库', icon: '📚' },
   { key: 'settings', label: '设置', icon: '⚙' },
 ];
@@ -89,7 +100,7 @@ export function App() {
   const [libDomain, setLibDomain] = useState<string | undefined>(undefined);
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(['theory', 'validation', 'virtualValidation']));
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(['theory', 'validation', 'virtualValidation', 'material']));
 
   // 侧边栏可拖动宽度
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -181,6 +192,8 @@ export function App() {
     lab: '实验数据入库与模型校准',
     caeImport: 'CAE报告导入',
     caeSearch: 'CAE报告检索',
+    materialImport: '材料数据导入',
+    materialSearch: '材料检索',
     db: '产品数据库',
     kbe: '知识经验库',
     compare: '方案对比',
@@ -242,7 +255,9 @@ export function App() {
         </div>
         <nav className="sidebar-nav">{renderNavItems(NAV, 0)}</nav>
         <div className="sidebar-footer">
-          <div className="sf-version">v{BRAND.version}</div>
+          <div className="sf-version">
+            v{BRAND.version} · {__BUILD_TIME__.slice(0, 16).replace('T', ' ')}
+          </div>
           <div className="sf-copy">{BRAND.companyName}</div>
         </div>
       </aside>
@@ -318,6 +333,8 @@ export function App() {
           {page === 'lab' && <LabPage user={user} />}
           {page === 'caeImport' && <CaeReportsPage user={user} currentProject={currentProject} />}
           {page === 'caeSearch' && <CaeSearchPage user={user} />}
+          {page === 'materialImport' && <MaterialsImportPage user={user} />}
+          {page === 'materialSearch' && <MaterialsSearchPage user={user} />}
           {page === 'db' && <DatabasePage user={user} />}
           {page === 'kbe' && <KnowledgeBasePage user={user} />}
           {page === 'compare' && compare && (

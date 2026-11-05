@@ -29,6 +29,9 @@ export function PdfViewer({ filePath }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   /** 渲染请求序号：快速翻页时丢弃过期结果 */
   const seq = useRef(0);
+  /** 滚轮翻页：累积滚动量与翻页冷却（防止一次猛滚连翻多页） */
+  const wheelAccum = useRef(0);
+  const wheelLockUntil = useRef(0);
 
   const calcFitScale = useCallback((pageWidth: number): number => {
     const boxWidth = wrapRef.current?.clientWidth ?? 0;
@@ -110,6 +113,40 @@ export function PdfViewer({ filePath }: Props) {
   const zoom = (delta: number) =>
     setScale((s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number((s + delta).toFixed(2)))));
 
+  // 翻页后回到页面顶部
+  useEffect(() => {
+    if (wrapRef.current) wrapRef.current.scrollTop = 0;
+  }, [page]);
+
+  /**
+   * 滚轮翻页：页面超出视口时先正常滚动内容；滚到顶/底（或页面无需滚动）时
+   * 继续滚动则翻页。触控板小步滚动会累积到阈值才触发，翻页后有冷却期。
+   */
+  const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (pageCount <= 1) return;
+    const el = wrapRef.current;
+    if (!el) return;
+    const dy = e.deltaY;
+    if (!dy) return;
+    const canScrollDown = el.scrollTop + el.clientHeight < el.scrollHeight - 2;
+    const canScrollUp = el.scrollTop > 2;
+    // 内容还能朝该方向滚动 → 交给原生滚动
+    if ((dy > 0 && canScrollDown) || (dy < 0 && canScrollUp)) {
+      wheelAccum.current = 0;
+      return;
+    }
+    const now = Date.now();
+    if (busy || now < wheelLockUntil.current) return;
+    wheelAccum.current += dy;
+    if (Math.abs(wheelAccum.current) < 60) return;
+    const dir = wheelAccum.current > 0 ? 1 : -1;
+    wheelAccum.current = 0;
+    const next = page + dir;
+    if (next < 1 || next > maxPage) return;
+    wheelLockUntil.current = now + 400;
+    gotoPage(next);
+  };
+
   const fitWidth = useCallback(async () => {
     const res = await api.pdf.pageInfo(filePath);
     if (res.ok) setScale(calcFitScale(res.width || 0));
@@ -153,7 +190,7 @@ export function PdfViewer({ filePath }: Props) {
         {busy && <span className="pdf-hint">渲染中…</span>}
       </div>
 
-      <div className="pdf-canvas-wrap" ref={wrapRef}>
+      <div className="pdf-canvas-wrap" ref={wrapRef} onWheel={onWheel}>
         {error ? (
           <div className="preview-empty">
             <div className="pe-icon">📄</div>

@@ -1,0 +1,7 @@
+﻿# 旁注：第 1 行示例（SPCC / 冷轧钢板 / 25.0 °C）与库内已有记录主键冲突，用于演示冲突处理。
+# 旁注：第 2–4 行留空的曲线与其他可选单元格表示“无此参数”，不应填 0；缺少曲线会触发校验警告。
+grade,series,supplier,temperature,density,poisson,elasticModulus,tensileStrength,failureStrain,stressStrainCurve,fatigueCurve
+SPCC,冷轧钢板,宝钢,25.0,7.85,0.30,205000.0,370.0,32.0,curve-stress-strain-sample.csv,curve-fatigue-sample.csv
+SPCC,冷轧钢板,宝钢,80.0,7.85,0.30,203000.0,355.0,30.0,,
+6061-T6,铝合金,中铝,25.0,2.70,0.33,68000.0,310.0,8.0,,
+Q235,碳钢,鞍钢,-20.0,7.85,0.30,200000.0,235.0,,,

@@ -8,12 +8,40 @@ const crypto = require('node:crypto');
 const bcrypt = require('bcryptjs');
 const store = require('./store.cjs');
 const license = require('./license.cjs');
+const { writeMaterialParquet, readMaterialParquet } = require('./materialParquet.cjs');
+
+// 打包后 @napi-rs/canvas 会被加载两次：主进程 require 解析到 app.asar 虚拟路径，
+// pdfjs 的 node_utils 用 createRequire 解析到 app.asar.unpacked 真实路径。
+// 同一原生库 dlopen 两次会让先加载实例的 Path2D 类注册被后加载实例覆盖，
+// 之后任何 Path2D（无论来自哪个实例）传给 ctx.clip() 都会报
+// "parameter 1 is not of type 'Path2D'"。仅设置 globalThis.Path2D 无法解决，
+// 必须在任何 pdfjs 导入之前，把 unpacked 路径的模块缓存预填为同一份 exports。
+(function seedNapiCanvasCache() {
+  if (!app.isPackaged) return;
+  try {
+    const napi = require('@napi-rs/canvas');
+    const asarEntry = require.resolve('@napi-rs/canvas');
+    const unpackedEntry = asarEntry.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1');
+    if (unpackedEntry === asarEntry) return;
+    const Module = require('node:module');
+    if (Module._cache[unpackedEntry]) return;
+    const m = new Module(unpackedEntry, module);
+    m.filename = unpackedEntry;
+    m.paths = Module._nodeModulePaths(path.dirname(unpackedEntry));
+    m.exports = napi;
+    m.loaded = true;
+    Module._cache[unpackedEntry] = m;
+  } catch (e) {
+    console.warn('@napi-rs/canvas 缓存预填失败：', (e && e.message) || e);
+  }
+})();
 
 const UNC_ROOT = '\\\\10.1.1.245\\Product Database';
 const UNC_CALC_LIB = `${UNC_ROOT}\\Theoretical Calculation Library`;
 const UNC_TEST_LIB = `${UNC_ROOT}\\Experimental Test Database`;
 const UNC_TRUSTED = `${UNC_ROOT}\\Trusted Data Asset Library`;
 const UNC_CAE_LIB = `${UNC_ROOT}\\Virtual Verification Library`;
+const UNC_MATERIAL_LIB = '\\\\10.1.1.245\\materials library';
 
 const KBE_ROOT = '\\\\10.1.1.245\\Knowledge & Experience Base';
 const KBE_THEORY = `${KBE_ROOT}\\Theoretical Knowledge Base`;
@@ -26,6 +54,7 @@ function libDir(libType) {
     case 'test': return UNC_TEST_LIB;
     case 'trusted': return UNC_TRUSTED;
     case 'cae': return UNC_CAE_LIB;
+    case 'material': return UNC_MATERIAL_LIB;
     case 'theory': return KBE_THEORY;
     case 'design': return KBE_DESIGN;
     case 'fmea': return KBE_FMEA;
@@ -33,6 +62,22 @@ function libDir(libType) {
   }
 }
 function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
+
+/** 路径安全：判断 target 是否位于某个允许的根目录下（兼容 UNC 与盘符路径） */
+function isInAnyRoot(target, roots) {
+  const t = path.resolve(target);
+  for (const root of roots) {
+    const r = path.resolve(root);
+    // path.relative 处理 UNC 和盘符路径都稳健：
+    //   - 如果 t 在 r 下，返回相对路径不以 '..' 开头，也不以盘符开头
+    //   - 如果 t === r，返回 '' 也应视为在根内
+    if (t === r) return true;
+    const rel = path.relative(r, t);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
+    return true;
+  }
+  return false;
+}
 
 const isDev = !app.isPackaged;
 const PRODUCT_TITLE = '汽车零部件理论计算平台';
@@ -231,18 +276,23 @@ ipcMain.handle('license:activate', (_e, code) => {
 
 // ---------- 导出 ----------
 ipcMain.handle('export:save', async (_e, payload) => {
-  const { defaultName, content, encoding } = payload || {};
+  const { defaultName, content, buffer, encoding } = payload || {};
   const res = await dialog.showSaveDialog(mainWindow, {
-    title: '保存计算结果',
-    defaultPath: defaultName || 'calculation.csv',
+    title: '保存文件',
+    defaultPath: defaultName || 'file.txt',
     filters: [
       { name: 'CSV 表格', extensions: ['csv'] },
+      { name: 'Excel 表格', extensions: ['xlsx', 'xls'] },
       { name: 'JSON 数据', extensions: ['json'] },
       { name: '所有文件', extensions: ['*'] },
     ],
   });
   if (res.canceled || !res.filePath) return { ok: false, canceled: true };
-  fs.writeFileSync(res.filePath, content, encoding === 'base64' ? 'base64' : 'utf8');
+  let data = content;
+  if (buffer instanceof ArrayBuffer) data = Buffer.from(buffer);
+  else if (buffer) data = Buffer.from(buffer);
+  if (data == null) return { ok: false, message: '无内容可写' };
+  fs.writeFileSync(res.filePath, data, encoding === 'base64' ? 'base64' : undefined);
   return { ok: true, filePath: res.filePath };
 });
 
@@ -355,7 +405,7 @@ ipcMain.handle('test:pdfText', async (_e, filePath) => {
       pages.push(pdfLinesFromItems(content.items));
     }
     await task.destroy();
-    return { ok: true, text: pages.join('\n') };
+    return { ok: true, text: pages.join('\n'), pages };
   } catch (err) {
     return { ok: false, message: String((err && err.message) || err) };
   }
@@ -376,11 +426,15 @@ async function loadPdfRenderDeps() {
   const pdfjsFile = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.mjs')
     : require.resolve('pdfjs-dist/legacy/build/pdf.mjs');
-  const { getDocument } = await import(pathToFileURL(pdfjsFile).href);
   if (!napiCanvas) {
-    const { createCanvas } = require('@napi-rs/canvas');
-    napiCanvas = createCanvas;
+    const napi = require('@napi-rs/canvas');
+    napiCanvas = napi.createCanvas;
+    // 与文件顶部 seedNapiCanvasCache 配合：pdfjs 仅在全局缺失时才 polyfill，
+    // 这里再把全局类显式锁定为本实例的，双保险保证 clip/setTransform 品牌一致。
+    if (napi.Path2D) globalThis.Path2D = napi.Path2D;
+    if (napi.DOMMatrix) globalThis.DOMMatrix = napi.DOMMatrix;
   }
+  const { getDocument } = await import(pathToFileURL(pdfjsFile).href);
   // 标准字体与 CMap 目录：pdfjs 在 Node 环境下按文件路径读取（须为正斜杠结尾）
   const pdfjsRoot = path.join(path.dirname(pdfjsFile), '..', '..').replace(/\\/g, '/');
   const canvasFactory = {
@@ -965,14 +1019,36 @@ ipcMain.handle('db:pdfData', async (_e, filePath) => {
   }
 });
 
+/** 材料库写入：一条记录一个 Parquet 文件 */
+ipcMain.handle('material:write', async (_e, payload) => {
+  try {
+    const { record, fileName, overwrite } = payload || {};
+    if (!record || typeof record !== 'object') return { ok: false, message: '材料记录为空' };
+    const safeName = path.basename(String(fileName || ''));
+    if (!/\.parquet$/i.test(safeName)) return { ok: false, message: '材料库文件必须为 .parquet' };
+    ensureDir(UNC_MATERIAL_LIB);
+    const filePath = path.join(UNC_MATERIAL_LIB, safeName);
+    await writeMaterialParquet(filePath, record, overwrite === true);
+    return { ok: true, filePath, targetDir: UNC_MATERIAL_LIB };
+  } catch (err) {
+    if (err && err.code === 'EEXIST') {
+      return { ok: false, exists: true, message: '同名记录已存在' };
+    }
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
 /** 归档 Excel 到 UNC 数据库目录 */
 ipcMain.handle('db:archive', async (_e, payload) => {
   try {
-    const { base64, fileName, libType } = payload || {};
+    const { base64, fileName, libType, overwrite } = payload || {};
     const targetDir = libDir(libType);
     if (!targetDir) return { ok: false, message: '未知库类型' };
     ensureDir(targetDir);
     const filePath = path.join(targetDir, fileName);
+    if (fs.existsSync(filePath) && overwrite === false) {
+      return { ok: false, exists: true, message: '同名记录已存在' };
+    }
     fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
     return { ok: true, filePath, targetDir };
   } catch (err) {
@@ -980,16 +1056,17 @@ ipcMain.handle('db:archive', async (_e, payload) => {
   }
 });
 
-/** 列出某个数据库目录下的归档文件（.xlsx + .pdf） */
+/** 列出某个数据库目录下的归档文件（材料库为 .parquet，兼容旧 .json，其余为 .xlsx + .pdf） */
 ipcMain.handle('db:list', async (_e, payload) => {
   try {
     const { libType } = payload || {};
     const targetDir = libDir(libType);
     if (!targetDir) return { ok: false, message: '未知库类型' };
     if (!fs.existsSync(targetDir)) return { ok: true, dir: targetDir, files: [] };
+    const extRe = libType === 'material' ? /\.(parquet|json)$/i : /\.(xlsx|pdf)$/i;
     const files = fs
       .readdirSync(targetDir)
-      .filter((n) => /\.(xlsx|pdf)$/i.test(n))
+      .filter((n) => extRe.test(n))
       .map((name) => {
         const st = fs.statSync(path.join(targetDir, name));
         return { name, size: st.size, mtime: st.mtime.toISOString(), fullPath: path.join(targetDir, name) };
@@ -1020,18 +1097,32 @@ ipcMain.handle('db:read', async (_e, payload) => {
   }
 });
 
+/** 读取归档：材料库 Parquet 转为 JSON 文本返回，其余读取文本文件 */
+ipcMain.handle('db:readText', async (_e, payload) => {
+  try {
+    const { fullPath } = payload || {};
+    if (!fullPath || !fs.existsSync(fullPath)) return { ok: false, message: '文件不存在' };
+    const allowedRoots = [UNC_CALC_LIB, UNC_TEST_LIB, UNC_TRUSTED, UNC_CAE_LIB, UNC_MATERIAL_LIB, KBE_THEORY, KBE_DESIGN, KBE_FMEA];
+    if (!isInAnyRoot(fullPath, allowedRoots)) return { ok: false, message: '仅允许读取数据库目录内的归档文件' };
+    if (/\.parquet$/i.test(fullPath)) {
+      const record = await readMaterialParquet(fullPath);
+      if (!record) return { ok: false, message: 'Parquet 记录为空或格式不正确' };
+      return { ok: true, text: JSON.stringify(record) };
+    }
+    if (!/\.(json|csv|txt)$/i.test(fullPath)) return { ok: false, message: '仅支持文本类归档文件' };
+    return { ok: true, text: fs.readFileSync(fullPath, 'utf8') };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
 /** 删除归档文件（仅限已知库目录内的文件，防止越权删除） */
 ipcMain.handle('db:delete', async (_e, payload) => {
   try {
     const { fullPath } = payload || {};
     if (!fullPath || !fs.existsSync(fullPath)) return { ok: false, message: '文件不存在' };
-    const allowedRoots = [UNC_CALC_LIB, UNC_TEST_LIB, UNC_TRUSTED, UNC_CAE_LIB, KBE_THEORY, KBE_DESIGN, KBE_FMEA];
-    const normalized = path.resolve(fullPath).toLowerCase();
-    const inLib = allowedRoots.some((root) => {
-      const r = path.resolve(root).toLowerCase();
-      return normalized.startsWith(r + path.sep);
-    });
-    if (!inLib) return { ok: false, message: '仅允许删除数据库目录内的归档文件' };
+    const allowedRoots = [UNC_CALC_LIB, UNC_TEST_LIB, UNC_TRUSTED, UNC_CAE_LIB, UNC_MATERIAL_LIB, KBE_THEORY, KBE_DESIGN, KBE_FMEA];
+    if (!isInAnyRoot(fullPath, allowedRoots)) return { ok: false, message: '仅允许删除数据库目录内的归档文件' };
     fs.unlinkSync(fullPath);
     return { ok: true };
   } catch (err) {
@@ -1048,6 +1139,7 @@ ipcMain.handle('db:ping', async () => {
     test: UNC_TEST_LIB,
     trusted: UNC_TRUSTED,
     cae: UNC_CAE_LIB,
+    material: UNC_MATERIAL_LIB,
     kbeRoot: KBE_ROOT,
     kbeTheory: KBE_THEORY,
     kbeDesign: KBE_DESIGN,

@@ -68,6 +68,7 @@ export function CaeSearchPage({ user: _user }: Props) {
         p.customer.toLowerCase().includes(k) ||
         p.project.toLowerCase().includes(k) ||
         p.caeItem.toLowerCase().includes(k) ||
+        `${p.flow}${p.flowUnit}`.toLowerCase().includes(k) ||
         p.product.toLowerCase().includes(k) ||
         p.version.toLowerCase().includes(k)
       );
@@ -184,10 +185,11 @@ export function CaeSearchPage({ user: _user }: Props) {
             <thead>
               <tr>
                 <th style={{ width: 64 }}>类型</th>
-                <th style={{ width: '12%' }}>客户</th>
-                <th style={{ width: '13%' }}>项目</th>
-                <th style={{ width: '15%' }}>仿真项目</th>
-                <th style={{ width: '11%' }}>产品</th>
+                <th style={{ width: '11%' }}>客户</th>
+                <th style={{ width: '12%' }}>项目</th>
+                <th style={{ width: '14%' }}>仿真项目</th>
+                <th style={{ width: '8%' }}>流量</th>
+                <th style={{ width: '10%' }}>产品</th>
                 <th style={{ width: '7%' }}>版本</th>
                 <th style={{ width: '8%' }}>日期</th>
                 <th style={{ width: '8%' }}>大小</th>
@@ -219,6 +221,7 @@ export function CaeSearchPage({ user: _user }: Props) {
                     <td>{p.customer || '—'}</td>
                     <td>{p.project || '—'}</td>
                     <td>{p.caeItem || '—'}</td>
+                    <td>{p.flow ? `${p.flow} ${p.flowUnit || ''}`.trim() : '—'}</td>
                     <td>{p.product || '—'}</td>
                     <td>{p.version || '—'}</td>
                     <td>{p.date || '—'}</td>
@@ -242,7 +245,7 @@ export function CaeSearchPage({ user: _user }: Props) {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="center settings-hint">
+                  <td colSpan={11} className="center settings-hint">
                     {files.length === 0
                       ? 'CAE 库暂无归档报告，请先在「CAE 报告导入」模块归档'
                       : '无匹配结果'}
@@ -277,6 +280,11 @@ export function CaeSearchPage({ user: _user }: Props) {
                   {selectedMeta.customer && <span className="chip">客户：{selectedMeta.customer}</span>}
                   <span className="chip">项目：{selectedMeta.project || '—'}</span>
                   {selectedMeta.caeItem && <span className="chip">仿真项目：{selectedMeta.caeItem}</span>}
+                  {selectedMeta.flow && (
+                    <span className="chip">
+                      流量：{selectedMeta.flow} {selectedMeta.flowUnit}
+                    </span>
+                  )}
                   <span className="chip">产品：{selectedMeta.product || '—'}</span>
                   <span className="chip">版本：{selectedMeta.version || '—'}</span>
                   <span className="chip">日期：{selectedMeta.date || '—'}</span>

@@ -76,6 +76,25 @@ select {
 .btn-ghost:hover {
   background: var(--blue-light);
 }
+.btn-group {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.btn-group .btn-ghost {
+  border: none;
+  border-radius: 0;
+  padding: 6px 10px;
+}
+.btn-group .btn-ghost + .btn-ghost {
+  border-left: 1px solid var(--border);
+}
+.btn-group.sm .btn-ghost {
+  padding: 3px 10px;
+  font-size: 12px;
+}
 .btn-ghost:disabled {
   color: #b8c4d6;
   border-color: #d6dfeb;
@@ -1733,6 +1752,14 @@ select {
   background: #e7f6ec;
   color: var(--ok);
 }
+.type-badge.type-conv {
+  background: #e7f6ec;
+  color: var(--ok);
+}
+.type-badge.type-hyper {
+  background: #e0eaff;
+  color: var(--blue-deep);
+}
 .preview-area {
   background: #fff;
   border: 1px solid var(--border);
@@ -1853,6 +1880,8 @@ select {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* 滚到页面边缘时阻止滚动链透传到外层，交给组件内滚轮翻页处理 */
+  overscroll-behavior: contain;
   padding: 16px;
   display: flex;
   justify-content: center;
@@ -1923,3 +1952,163 @@ select {
 .lab-form-row .field input:focus {
   border-color: var(--blue);
 }
+
+/* ---------- 材料库 ---------- */
+.mat-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin-top: 12px;
+}
+@media (max-width: 1100px) { .mat-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .mat-form-grid { grid-template-columns: 1fr; } }
+.mat-group-title {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--blue-deep);
+  border-left: 3px solid var(--blue);
+  padding-left: 8px;
+  margin-top: 4px;
+}
+.mat-required > span::after {
+  content: ' *';
+  color: var(--danger);
+}
+.mat-form-actions { display: flex; gap: 10px; margin-top: 14px; }
+.mat-curve-card {
+  grid-column: span 1;
+  border: 1px dashed #cbd8e8;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 9px 11px;
+}
+.mat-curve-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mat-curve-status { font-size: 11.5px; color: var(--muted); }
+.mat-curve-status.ok { color: var(--ok); font-weight: 600; }
+.mat-curve-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.mat-paste { margin-top: 6px; }
+.mat-paste textarea {
+  width: 100%;
+  min-height: 76px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  resize: vertical;
+  background: #fff;
+}
+.mat-paste .btn-ghost { margin-top: 6px; }
+.mat-curve-plot { width: 100%; height: auto; max-height: 170px; margin-top: 4px; background: #fff; border-radius: 6px; }
+.mat-curve-empty { padding: 14px 6px; text-align: center; color: #a3b1c2; font-size: 12px; }
+.mat-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin-top: 12px;
+}
+@media (max-width: 1100px) { .mat-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.mat-detail-item {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 11px;
+}
+.mat-detail-item span { display: block; font-size: 11.5px; color: var(--muted); }
+.mat-detail-item b { font-size: 13.5px; color: var(--text); }
+.mat-detail-curves {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+@media (max-width: 900px) { .mat-detail-curves { grid-template-columns: 1fr; } }
+
+/* ===== 检索页：三栏预览 ===== */
+.mat-preview-3col {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+  min-height: 0;
+  align-items: stretch;
+}
+.mat-preview-col {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.mat-preview-col-head {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+.mat-preview-col .mat-detail-grid {
+  margin-top: 0;
+  gap: 4px;
+  grid-auto-rows: minmax(0, auto);
+}
+.mat-preview-col-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+.mat-preview-col .mat-detail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 10px;
+}
+.mat-preview-col .mat-detail-item span { font-size: 11px; color: #7a8ea0; }
+.mat-preview-col .mat-detail-item b { font-size: 13px; color: var(--text); }
+.mat-preview-col .mat-curve-plot {
+  flex-shrink: 0;
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.mat-curve-table-wrap {
+  max-height: 200px;
+  overflow: auto;
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.mat-curve-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.mat-curve-table th,
+.mat-curve-table td {
+  padding: 3px 8px;
+  text-align: right;
+  border-bottom: 1px solid #eef2f6;
+  font-variant-numeric: tabular-nums;
+}
+.mat-curve-table th:first-child,
+.mat-curve-table td:first-child { text-align: center; color: var(--muted); }
+.mat-curve-table th {
+  background: #f5f8fb;
+  position: sticky;
+  top: 0;
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 11px;
+}
+.mat-curve-table tr:hover td { background: #fafbfc; }
+.partial-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: #43566c; }
+.partial-check select { height: 28px; border: 1px solid var(--border); border-radius: 6px; background: #fff; padding: 0 6px; }

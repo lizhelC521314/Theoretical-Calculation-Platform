@@ -37,10 +37,14 @@ const bridge = {
     /** 内置阅读器：渲染指定页为 PNG data URL */
     renderPage: (p) => ipcRenderer.invoke('pdf:renderPage', p),
   },
+  material: {
+    write: (p) => ipcRenderer.invoke('material:write', p),
+  },
   db: {
     archive: (p) => ipcRenderer.invoke('db:archive', p),
     list: (p) => ipcRenderer.invoke('db:list', p),
     read: (p) => ipcRenderer.invoke('db:read', p),
+    readText: (p) => ipcRenderer.invoke('db:readText', p),
     pdfData: (filePath) => ipcRenderer.invoke('db:pdfData', filePath),
     remove: (p) => ipcRenderer.invoke('db:delete', p),
     ping: () => ipcRenderer.invoke('db:ping'),
