@@ -16,7 +16,7 @@ export const UNC_ROOT = '\\\\10.1.1.245\\Product Database';
 export const UNC_CALC_LIB = `${UNC_ROOT}\\Theoretical Calculation Library`;
 export const UNC_TEST_LIB = `${UNC_ROOT}\\Experimental Test Database`;
 export const UNC_TRUSTED = `${UNC_ROOT}\\Trusted Data Asset Library`;
-export const UNC_CAE_LIB = `${UNC_ROOT}\\CAE Simulation Database`;
+export const UNC_CAE_LIB = `${UNC_ROOT}\\Virtual Verification Library`;
 
 /** 项目-产品-版本键：统一空格，避免因字符差异导致匹配失败 */
 export function productKey(project: string, product: string, version: string): string {

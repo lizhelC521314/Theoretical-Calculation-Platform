@@ -13,7 +13,7 @@ const UNC_ROOT = '\\\\10.1.1.245\\Product Database';
 const UNC_CALC_LIB = `${UNC_ROOT}\\Theoretical Calculation Library`;
 const UNC_TEST_LIB = `${UNC_ROOT}\\Experimental Test Database`;
 const UNC_TRUSTED = `${UNC_ROOT}\\Trusted Data Asset Library`;
-const UNC_CAE_LIB = `${UNC_ROOT}\\CAE Simulation Database`;
+const UNC_CAE_LIB = `${UNC_ROOT}\\Virtual Verification Library`;
 
 const KBE_ROOT = '\\\\10.1.1.245\\Knowledge & Experience Base';
 const KBE_THEORY = `${KBE_ROOT}\\Theoretical Knowledge Base`;

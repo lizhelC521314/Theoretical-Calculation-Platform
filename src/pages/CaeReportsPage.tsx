@@ -266,7 +266,7 @@ export function CaeReportsPage({ user, currentProject }: Props) {
             所有字段均可在下方列表中校对 / 补全，确认无误后点击「全部归档到 CAE 库」。
             PPT 中若只有图片没有文字，转换后的 PDF 同样会走系统 OCR，请重点核对识别结果。
             归档文件名统一格式为「客户+项目+仿真项目+产品+版本+日期.pdf」，库中保存的是转换后的文字版 PDF，
-            存放在 UNC 的 CAE Simulation Database 目录。
+            存放在 UNC 的 Virtual Verification Library 目录。
           </p>
         </div>
       )}
