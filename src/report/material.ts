@@ -713,7 +713,9 @@ export async function parseMaterialXlsx(
   const XLSX = await import('xlsx');
   const wb = XLSX.read(data, { type: 'array' });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, raw: false, defval: '' });
+  // raw: true 拿原始数值，避免 Excel 里被格式化成 "6.35912E-05" 这类科学计数法字符串后丢精度
+  const raw = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: '' });
+  const rows = raw.map((r) => (r || []).map((c) => (c == null ? '' : String(c).trim())));
   if (detectHeaderMode(rows)) return parseRows(rows, type);
   return parseFixedCoords(rows, type);
 }
@@ -724,7 +726,18 @@ function detectHeaderMode(rows: string[][]): boolean {
   return first.some((c) => /牌号|grade|系列|series/i.test(c));
 }
 
-/** 从固定坐标布局解析一条材料记录 */
+/** 从固定坐标布局解析一条材料记录。
+ * 坐标约定（0-based，参考 Excel 人类行列 -1）：
+ *   第 2 列（索引 1）第 2 行（索引 1）= 牌号
+ *   第 2 列 第 3 行 = 供应商；第 4 行 = 系列号；第 5 行 = 温度
+ *   第 6 行 = 密度；第 7 行 = 弹性模量；第 8 行 = 方向
+ *   第 10 行 = 硬度；第 11 行 = 泊松比
+ *   C 列（索引 2）= 应变，D 列（索引 3）= 应力，从第 2 行连续扫
+ *
+ * 如果严格坐标取不到必填值（常见于 Excel 有合并单元格、额外表头或位置偏移），
+ * 自动退回到「标签扫描」模式：逐格查找包含「牌号/系列号/温度」等关键字的单元格，
+ * 然后读其右侧相邻列（通常是 B 列）的值作为该字段。
+ */
 function parseFixedCoords(
   rows: string[][],
   type: MaterialType,
@@ -734,35 +747,98 @@ function parseFixedCoords(
     if (!row) return '';
     return String(row[colIdx] ?? '').trim();
   };
-  const num = (rowIdx: number, colIdx: number): string => {
-    const s = get(rowIdx, colIdx);
+  const num = (s: string): string => {
     if (!s) return '';
-    const m = s.match(/-?\d+(\.\d+)?/);
+    // 兼容科学计数法（如 Excel 里的 6.35912E-05），直接取数字串会丢量级
+    const m = String(s).match(/-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/);
     return m ? m[0] : '';
   };
 
-  const draft = emptyDraft(type);
-  // 第二列（索引1）的固定值行
-  draft.grade = get(1, 1); // 第2行
-  draft.supplier = get(2, 1); // 第3行
-  draft.series = get(3, 1); // 第4行
-  draft.temperature = num(4, 1); // 第5行
-  draft.density = num(5, 1); // 第6行
-  draft.elasticModulus = num(6, 1); // 第7行
-  draft.direction = num(7, 1); // 第8行
-  draft.hardness = num(9, 1); // 第10行
-  draft.poisson = num(10, 1); // 第11行
+  /** 严格坐标：第 2 列各固定行
+   *  注：牌号 / 系列号 / 供应商可能含字母（如 PA66-GF30），不能用 num() 过滤。
+   *  同时跳过 "/"、"×"、空占位符（Excel 里常用 "/" 表示"无"）。
+   */
+  const skipPh = (s: string): string => {
+    if (!s) return '';
+    if (/^[\/×\-\—\s]*$/.test(s)) return '';
+    return s;
+  };
+  const fromFixedPos = (): Record<string, string> => ({
+    grade: skipPh(get(1, 1)),
+    supplier: skipPh(get(2, 1)),
+    series: skipPh(get(3, 1)),
+    temperature: num(get(4, 1)),
+    density: num(get(5, 1)),
+    elasticModulus: num(get(6, 1)),
+    direction: num(get(7, 1)),
+    hardness: num(get(9, 1)),
+    poisson: num(get(10, 1)),
+  });
 
-  // 曲线读取：C列(索引2)=应变，D列(索引3)=应力，从第2行连续读，遇非数字即停
-  // 允许 Excel 在固定值区和曲线区之间留几行空行/标签行（曲线行号从第1行表头之后，固定值区之后）
-  // 这里放宽为：从第2行起逐行尝试两列均为数值则收集，否则跳过；遇到连续 2 次空（或文件末尾）就结束。
-  // 这样即使固定值区域在上面几行，曲线从后段开始也能正确取到。
+  /** 标签扫描：逐格查找字段名关键字，取右侧相邻列的值
+   *  关键词用「包含匹配」（去掉 ^$），兼容用户写 "温度（℃）" "密度 kg/m³" 等带单位的标签。
+   */
+  const FIELD_LABELS: Array<{ key: MaterialTextFieldKey; labels: RegExp; numOnly?: boolean }> = [
+    { key: 'grade', labels: /材料牌号|^材料$/i },     // "材料"行 → 牌号；其次才看"牌号"行
+    { key: 'grade', labels: /牌号/ },                // 兜底：如果"材料"行没值，再看"牌号"行（但值可能是 "/" 要跳过）
+    { key: 'series', labels: /系列号|系列|规格|型号/ },
+    { key: 'supplier', labels: /供应商|厂商|品牌/ },
+    { key: 'temperature', labels: /温度|温区/i, numOnly: true },
+    { key: 'density', labels: /密度/, numOnly: true },
+    { key: 'elasticModulus', labels: /弹性模量|杨氏模量|弹性模量E|E[-\s]?modulus/i, numOnly: true },
+    { key: 'direction', labels: /方向|角度|取向/, numOnly: true },
+    { key: 'hardness', labels: /硬度|HB|HV|HRC|HRB/, numOnly: true },
+    { key: 'poisson', labels: /泊松比|泊松/, numOnly: true },
+  ];
+  const fromLabelScan = (): Record<string, string> => {
+    const out: Record<string, string> = {};
+    // 按行扫描，每行内按列扫，遇到匹配就取右侧值
+    for (let r = 0; r < rows.length && Object.keys(out).length < FIELD_LABELS.length; r++) {
+      const row = rows[r];
+      if (!row) continue;
+      for (let c = 0; c < row.length; c++) {
+        const cell = String(row[c] ?? '').trim();
+        if (!cell) continue;
+        for (const { key, labels, numOnly } of FIELD_LABELS) {
+          if (out[key]) continue;
+          if (!labels.test(cell)) continue;
+          // 右侧相邻列的值
+          const right = row[c + 1] != null ? String(row[c + 1]).trim() : '';
+          // 跳过 "/", "×", 空占位符
+          if (!right || /^[\/×\-]*$/.test(right)) continue;
+          out[key] = numOnly ? num(right) : right;
+        }
+      }
+    }
+    return out;
+  };
+
+  // 先用严格坐标；如果必填项缺失，回退到标签扫描（两者取并集，固定坐标优先）
+  const fp = fromFixedPos();
+  let vals = fp;
+  if (!fp.grade || !fp.series || !fp.temperature) {
+    const sc = fromLabelScan();
+    vals = { ...sc, ...fp }; // 固定坐标值覆盖扫描值（如果两者都取到了）
+  }
+
+  const draft = emptyDraft(type);
+  draft.grade = vals.grade || '';
+  draft.supplier = vals.supplier || '';
+  draft.series = vals.series || '';
+  draft.temperature = vals.temperature || '';
+  draft.density = vals.density || '';
+  draft.elasticModulus = vals.elasticModulus || '';
+  draft.direction = vals.direction || '';
+  draft.hardness = vals.hardness || '';
+  draft.poisson = vals.poisson || '';
+
+  // 曲线读取：C列(索引2)=应变，D列(索引3)=应力，从第2行连续扫，遇非数字即停
   const curvePoints: CurvePoint[] = [];
   let trailingEmpty = 0;
   let hitAnyPoint = false;
   for (let r = 1; r < rows.length && trailingEmpty < 2; r++) {
-    const ex = num(r, 2);
-    const sy = num(r, 3);
+    const ex = num(get(r, 2));
+    const sy = num(get(r, 3));
     if (!ex || !sy) {
       if (hitAnyPoint) trailingEmpty++;
       continue;
@@ -772,40 +848,38 @@ function parseFixedCoords(
     const exN = Number(ex);
     const syN = Number(sy);
     if (!Number.isFinite(exN) || !Number.isFinite(syN)) continue;
-    // 应变：<1 视为小数（如 0.05）→ 乘 100 变 %；>=1 视为已百分数
     const strain = exN <= 1 ? exN * 100 : exN;
     curvePoints.push({ x: Math.round(strain * 10000) / 10000, y: syN });
   }
 
   if (curvePoints.length >= 2) {
-    // 校验应变递增，必要时过滤重复/回退
     const clean: CurvePoint[] = [];
     for (const p of curvePoints) {
       if (!clean.length || p.x > clean[clean.length - 1].x) clean.push(p);
       else if (clean.length && p.x === clean[clean.length - 1].x) {
-        // 同应变取最大应力
         clean[clean.length - 1].y = Math.max(clean[clean.length - 1].y, p.y);
       }
     }
     if (clean.length >= 2) {
       draft.stressStrainCurve = { sourceName: '', points: clean };
-      // 抗拉强度 = 应力最大值（破坏点附近通常也是峰值）
       const maxStress = Math.max(...clean.map((p) => p.y));
       draft.tensileStrength = String(Math.round(maxStress * 100) / 100);
-      // 破坏应变 = 曲线末端应变（已为 %）
+      // 破坏应变取曲线末端应变本身（与点位同精度），不能四舍五入到更小值，否则交叉校验会报错
       const maxStrain = Math.max(...clean.map((p) => p.x));
-      draft.failureStrain = String(Math.round(maxStrain * 100) / 100);
+      draft.failureStrain = String(Math.round(maxStrain * 10000) / 10000);
     }
   }
 
-  if (!draft.grade || !draft.series || !draft.temperature) {
+  // 只要 grade / temperature 这两个最关键的能取到（series 可能用户没写标签），就先返回 draft
+  // 让后面的 validateMaterialDraft 做必填校验——验证面板会提示缺失项，用户在验证 & 修改面板里补
+  if (!draft.grade || !draft.temperature) {
+    const diag = FIELD_LABELS.map((f) => `${f.key}=${(vals as Record<string, string>)[f.key] || '(空)'}`).join(', ');
     return {
       drafts: [],
-      error: '固定坐标布局未找到必填值（牌号/系列号/温度），请确认文件格式',
+      error: `固定坐标布局未找到关键必填值（牌号/温度）。诊断：${diag}`,
       ignoredCurves: false,
     };
   }
-  // 只有在没拿到曲线时才置 ignoredCurves=true 提示用户
   return {
     drafts: [draft],
     error: '',

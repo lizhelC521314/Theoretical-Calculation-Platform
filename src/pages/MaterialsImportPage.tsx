@@ -207,14 +207,22 @@ export function MaterialsImportPage({ user }: Props) {
     let invalid = 0;
     parsed.drafts.forEach((d) => {
       const validation = validateMaterialDraft(d);
-      if (validation.errors.length) {
-        invalid++;
-        return;
-      }
       // 批量导入统一按当前选择的 type 入库（覆盖文件里可能的类型暗示）
       d.type = type;
-      const fileName = materialFileName(d.type, d.grade.trim(), d.series.trim(), Number(d.temperature));
-      added.push({ id: uid(), draft: d, validation, fileName, conflict: conflictOf(fileName) });
+      const temp = Number(d.temperature);
+      const complete = Boolean(d.grade.trim() && d.series.trim() && Number.isFinite(temp));
+      if (validation.errors.length) invalid++;
+      // 缺必填项的行也加入待入库预览，方便操作者在详情面板里补全后归档
+      const fileName = complete
+        ? materialFileName(d.type, d.grade.trim(), d.series.trim(), temp)
+        : `（待补全）${d.grade.trim() || '材料'}`;
+      added.push({
+        id: uid(),
+        draft: d,
+        validation,
+        fileName,
+        conflict: complete ? conflictOf(fileName) : false,
+      });
     });
     setEntries((prev) => {
       const next = [...prev, ...added];
@@ -226,7 +234,7 @@ export function MaterialsImportPage({ user }: Props) {
     });
     showToast(
       `${sourceHint}：解析 ${parsed.drafts.length} 行，加入 ${added.length} 行` +
-        (invalid ? `，${invalid} 行未通过校验（请检查必填项与数值范围）` : '') +
+        (invalid ? `，其中 ${invalid} 行待补全（详情面板中标红项需填写后才能归档）` : '') +
         (parsed.ignoredCurves ? '；曲线需单独上传' : '') +
         `，按「${MATERIAL_TYPE_LABEL[type]}」入库`,
     );
