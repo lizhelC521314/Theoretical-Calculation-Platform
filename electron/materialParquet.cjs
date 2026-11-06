@@ -2,8 +2,9 @@
  * 材料库 Parquet 存储
  *
  * 每条材料记录保存为一个单行 Parquet 文件，列定义：
- *   schema / type / grade / series / supplier / temperature
- *   density / poisson / elasticModulus / tensileStrength / failureStrain
+ *   schema / type / grade / series / supplier / state / temperature
+ *   density / poisson / elasticModulus / direction / hardness
+ *   tensileStrength / failureStrain / specificHeat / thermalConductivity / expansionCoefficient
  *   stressStrainCurveJson / fatigueCurveJson（曲线以 JSON 字符串保存）
  *   createdAt / updatedAt / createdBy / createdByDisplay / updatedBy / revision
  * 数值缺失时写 null（可选列），读取时还原为 MaterialRecord JSON。
@@ -18,6 +19,7 @@ const materialSchema = new ParquetSchema({
   grade: { type: 'UTF8' },
   series: { type: 'UTF8' },
   supplier: { type: 'UTF8', optional: true },
+  state: { type: 'UTF8', optional: true },           // wet=湿态 / dry=干态（旧文件无此列→湿态）
   temperature: { type: 'DOUBLE' },
   density: { type: 'DOUBLE', optional: true },       // kg/m³
   poisson: { type: 'DOUBLE', optional: true },
@@ -26,6 +28,9 @@ const materialSchema = new ParquetSchema({
   hardness: { type: 'DOUBLE', optional: true },      // HB/HV/HRC/... 仅数值
   tensileStrength: { type: 'DOUBLE', optional: true },
   failureStrain: { type: 'DOUBLE', optional: true },  // %
+  specificHeat: { type: 'DOUBLE', optional: true },   // 比热容 Cp，J/(kg·℃)
+  thermalConductivity: { type: 'DOUBLE', optional: true }, // 热导率 K，W/(m·℃)
+  expansionCoefficient: { type: 'DOUBLE', optional: true }, // 膨胀系数，mm/(mm·K)
   stressStrainCurveJson: { type: 'UTF8', optional: true },
   fatigueCurveJson: { type: 'UTF8', optional: true },
   createdAt: { type: 'UTF8' },
@@ -47,6 +52,7 @@ function rowFromRecord(record) {
     grade: String(record.grade || ''),
     series: String(record.series || ''),
     supplier: String(record.supplier || ''),
+    state: record.state === 'dry' ? 'dry' : 'wet',
     temperature: Number(record.temperature),
     density: nullable(record.density),
     poisson: nullable(record.poisson),
@@ -55,6 +61,9 @@ function rowFromRecord(record) {
     hardness: nullable(record.hardness),
     tensileStrength: nullable(record.tensileStrength),
     failureStrain: nullable(record.failureStrain),
+    specificHeat: nullable(record.specificHeat),
+    thermalConductivity: nullable(record.thermalConductivity),
+    expansionCoefficient: nullable(record.expansionCoefficient),
     stressStrainCurveJson: record.stressStrainCurve ? JSON.stringify(record.stressStrainCurve) : null,
     fatigueCurveJson: record.fatigueCurve ? JSON.stringify(record.fatigueCurve) : null,
     createdAt: String(record.createdAt || ''),
@@ -95,6 +104,7 @@ function recordFromRow(row) {
     grade: row.grade || '',
     series: row.series || '',
     supplier: row.supplier || '',
+    state: row.state === 'dry' ? 'dry' : 'wet',
     temperature: Number(row.temperature),
     density: numberOrNull(row.density),
     poisson: numberOrNull(row.poisson),
@@ -103,6 +113,9 @@ function recordFromRow(row) {
     hardness: numberOrNull(row.hardness),
     tensileStrength: numberOrNull(row.tensileStrength),
     failureStrain: numberOrNull(row.failureStrain),
+    specificHeat: numberOrNull(row.specificHeat),
+    thermalConductivity: numberOrNull(row.thermalConductivity),
+    expansionCoefficient: numberOrNull(row.expansionCoefficient),
     stressStrainCurve: parseCurve(row.stressStrainCurveJson),
     fatigueCurve: parseCurve(row.fatigueCurveJson),
     createdAt: row.createdAt || '',

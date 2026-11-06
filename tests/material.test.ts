@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildMaterialRecord,
+  draftFromRecord,
   emptyDraft,
   materialFileName,
   materialCsvFileName,
@@ -154,23 +155,46 @@ describe('材料库：唯一键与文件名', () => {
     );
   });
 
-  it('文件名生成与反解可往返（两类材料）', () => {
-    const conv = materialFileName('conventional', 'SPCC', '冷轧钢板', 25);
-    expect(conv).toBe('常规材料+SPCC+冷轧钢板+25℃.parquet');
+  it('文件名为「牌号+系列号+温度+供应商」并可反解', () => {
+    const conv = materialFileName('SPCC', '冷轧钢板', 25);
+    expect(conv).toBe('SPCC+冷轧钢板+25℃.parquet');
     expect(parseMaterialFileName(conv)).toEqual({
       type: 'conventional',
       grade: 'SPCC',
       series: '冷轧钢板',
+      supplier: '',
       temperature: 25,
+      state: 'wet',
     });
 
-    const hyper = materialFileName('hyperelastic', 'EPDM-70', '密封橡胶', 23.5);
-    expect(hyper).toBe('超弹性+EPDM-70+密封橡胶+23.5℃.parquet');
-    expect(parseMaterialFileName(hyper)).toEqual({
+    const withSup = materialFileName('PA6-GF30', '尼龙加玻纤', 23.5, '杜邦');
+    expect(withSup).toBe('PA6-GF30+尼龙加玻纤+23.5℃+杜邦.parquet');
+    expect(parseMaterialFileName(withSup)).toEqual({
+      type: 'conventional',
+      grade: 'PA6-GF30',
+      series: '尼龙加玻纤',
+      supplier: '杜邦',
+      temperature: 23.5,
+      state: 'wet',
+    });
+  });
+
+  it('旧命名（类型前缀 + 干态后缀）仍可反解', () => {
+    expect(parseMaterialFileName('超弹性+EPDM-70+密封橡胶+23.5℃.parquet')).toEqual({
       type: 'hyperelastic',
       grade: 'EPDM-70',
       series: '密封橡胶',
+      supplier: '',
       temperature: 23.5,
+      state: 'wet',
+    });
+    expect(parseMaterialFileName('常规材料+PA6-GF30+尼龙加玻纤+23℃+干态.parquet')).toEqual({
+      type: 'conventional',
+      grade: 'PA6-GF30',
+      series: '尼龙加玻纤',
+      supplier: '',
+      temperature: 23,
+      state: 'dry',
     });
   });
 
@@ -211,21 +235,65 @@ describe('材料库：记录构建与序列化', () => {
     const parsed = parseMaterialRecord(serializeMaterialRecord(rec));
     expect(parsed).not.toBeNull();
     expect(parsed!.grade).toBe('SPCC');
+    expect(parsed!.state).toBe('wet');
     expect(parsed!.stressStrainCurve?.points).toHaveLength(5);
 
     expect(parseMaterialRecord('not json')).toBeNull();
     expect(parseMaterialRecord(JSON.stringify({ ...rec, schema: 'other' }))).toBeNull();
     expect(parseMaterialRecord(JSON.stringify({ ...rec, temperature: 'abc' }))).toBeNull();
   });
+
+  it('比热容 / 热导率 / 膨胀系数可入库、反解并回填草稿', () => {
+    const rec = buildMaterialRecord(
+      conventionalDraft({
+        specificHeat: '1350',
+        thermalConductivity: '0.28',
+        expansionCoefficient: '2.3e-5',
+      }),
+      { username: 'u1' },
+    );
+    expect(rec.specificHeat).toBe(1350);
+    expect(rec.thermalConductivity).toBe(0.28);
+    expect(rec.expansionCoefficient).toBeCloseTo(0.000023, 9);
+
+    const parsed = parseMaterialRecord(serializeMaterialRecord(rec))!;
+    expect(parsed.specificHeat).toBe(1350);
+    expect(parsed.thermalConductivity).toBe(0.28);
+    expect(parsed.expansionCoefficient).toBeCloseTo(0.000023, 9);
+
+    const draft = draftFromRecord(parsed);
+    expect(draft.specificHeat).toBe('1350');
+    expect(draft.thermalConductivity).toBe('0.28');
+    expect(draft.expansionCoefficient).toBe('0.000023');
+  });
+
+  it('比热容 / 热导率 / 膨胀系数超出合理范围时报错', () => {
+    const res = validateMaterialDraft(
+      conventionalDraft({ specificHeat: '10', thermalConductivity: '5000', expansionCoefficient: '0.5' }),
+    );
+    expect(res.errors.map((e) => e.field)).toEqual(
+      expect.arrayContaining(['specificHeat', 'thermalConductivity', 'expansionCoefficient']),
+    );
+  });
+
+  it('干态记录可往返；旧记录缺状态字段时默认湿态', () => {
+    const rec = buildMaterialRecord(conventionalDraft({ state: 'dry' }), { username: 'u1' });
+    expect(rec.state).toBe('dry');
+    expect(parseMaterialRecord(JSON.stringify(rec))!.state).toBe('dry');
+
+    const legacy = { ...rec } as Record<string, unknown>;
+    delete legacy.state;
+    expect(parseMaterialRecord(JSON.stringify(legacy))!.state).toBe('wet');
+  });
 });
 
 describe('材料库：CSV 导出', () => {
   it('文件名与 Parquet 同名，仅扩展名改为 .csv', () => {
     const rec = buildMaterialRecord(conventionalDraft(), { username: 'u1' });
-    expect(materialCsvFileName(rec)).toBe('常规材料+SPCC+冷轧钢板+25℃.csv');
+    expect(materialCsvFileName(rec)).toBe('SPCC+冷轧钢板+25℃+宝钢.csv');
   });
 
-  it('单行记录、20 列表头，曲线按 x:y 分号连接并带 BOM', () => {
+  it('单行记录、26 列表头，曲线按 x:y 分号连接并带 BOM', () => {
     const rec = buildMaterialRecord(conventionalDraft(), {
       username: 'u1',
       displayName: '张三',
@@ -237,23 +305,30 @@ describe('材料库：CSV 导出', () => {
     const lines = csv.slice(1).split('\r\n');
     expect(lines).toHaveLength(2);
     const headers = lines[0].split(',');
-    expect(headers).toHaveLength(22);
+    expect(headers).toHaveLength(26);
     expect(headers[0]).toBe('"记录格式"');
-    expect(headers[13]).toBe('"应力应变曲线来源"');
-    expect(headers[14]).toBe('"应力应变曲线(应变%:应力MPa)"');
+    expect(headers[5]).toBe('"状态"');
+    expect(headers[14]).toBe('"比热容 Cp(J/(kg·℃))"');
+    expect(headers[15]).toBe('"热导率 K(W/(m·℃))"');
+    expect(headers[16]).toBe('"膨胀系数(mm/(mm·K))"');
+    expect(headers[17]).toBe('"应力应变曲线来源"');
+    expect(headers[18]).toBe('"应力应变曲线(应变%:应力MPa)"');
 
     const cells = lines[1].split(',');
-    expect(cells).toHaveLength(22);
+    expect(cells).toHaveLength(26);
     expect(cells[0]).toBe('"ctr-material-v1"');
     expect(cells[2]).toBe('"SPCC"');
-    expect(cells[5]).toBe('"25"');
-    expect(cells[12]).toBe('"32"');
-    expect(cells[13]).toBe('""');
-    expect(cells[14]).toBe('"0:0;0.1:205;0.2:410;0.5:420;1:430"');
+    expect(cells[5]).toBe('"湿态"');
+    expect(cells[6]).toBe('"25"');
+    expect(cells[13]).toBe('"32"');
+    expect(cells[14]).toBe('""');
     expect(cells[15]).toBe('""');
-    expect(cells[19]).toBe('"张三"');
-    expect(cells[20]).toBe('"u1"');
-    expect(cells[21]).toBe('"1"');
+    expect(cells[16]).toBe('""');
+    expect(cells[18]).toBe('"0:0;0.1:205;0.2:410;0.5:420;1:430"');
+    expect(cells[20]).toBe('""');
+    expect(cells[23]).toBe('"张三"');
+    expect(cells[24]).toBe('"u1"');
+    expect(cells[25]).toBe('"1"');
   });
 
   it('曲线为空时导出空字符串，含逗号的字段整体加引号', () => {
@@ -300,6 +375,28 @@ describe('材料库：CSV 导入', () => {
     const bad = parseMaterialCsv('名称,系列\nA,B', 'conventional');
     expect(bad.error).toContain('表头缺少必填列');
     expect(bad.drafts).toHaveLength(0);
+  });
+
+  it('批量导入识别状态列，未写状态默认湿态', () => {
+    const text = ['牌号,系列号,状态,温度', 'PA6-GF30,尼龙加玻纤,干态,23', 'SPCC,冷轧钢板,,25'].join(
+      '\n',
+    );
+    const res = parseMaterialCsv(text, 'conventional');
+    expect(res.error).toBe('');
+    expect(res.drafts[0].state).toBe('dry');
+    expect(res.drafts[1].state).toBe('wet');
+  });
+
+  it('批量导入识别比热容 / 热导率 / 膨胀系数列', () => {
+    const text = [
+      '牌号,系列号,温度(°C),比热容 Cp(J/(kg·℃)),热导率 K(W/(m·℃)),膨胀系数(mm/(mm·K))',
+      'PA6-GF30,尼龙加玻纤,23,1350,0.28,2.3e-5',
+    ].join('\n');
+    const res = parseMaterialCsv(text, 'conventional');
+    expect(res.error).toBe('');
+    expect(res.drafts[0].specificHeat).toBe('1350');
+    expect(res.drafts[0].thermalConductivity).toBe('0.28');
+    expect(res.drafts[0].expansionCoefficient).toBe('2.3e-5');
   });
 
   it('模板 CSV 可被自身解析器识别表头', () => {

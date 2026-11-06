@@ -9,6 +9,7 @@ import {
   MATERIAL_CURVE_FIELDS,
   MATERIAL_FIELDS,
   MATERIAL_GROUP_ORDER,
+  MATERIAL_STATE_LABEL,
   MATERIAL_TYPE_LABEL,
   materialFileName,
   materialTemplateCsv,
@@ -21,6 +22,7 @@ import {
   type MaterialCurve,
   type MaterialCurveKey,
   type MaterialDraft,
+  type MaterialState,
   type MaterialType,
   type MaterialValidation,
 } from '../report/material';
@@ -106,6 +108,10 @@ export function MaterialsImportPage({ user }: Props) {
     setDraft((prev) => ({ ...prev, [key]: value }));
   };
 
+  const patchState = (value: MaterialState) => {
+    setDraft((prev) => ({ ...prev, state: value }));
+  };
+
   const switchType = (next: MaterialType) => {
     if (archiving) return;
     setType(next);
@@ -140,18 +146,18 @@ export function MaterialsImportPage({ user }: Props) {
       return;
     }
     const fileName = materialFileName(
-      type,
       draft.grade.trim(),
       draft.series.trim(),
       Number(draft.temperature),
+      draft.supplier.trim(),
     );
     setEntries((prev) => [
       ...prev,
       { id: uid(), draft: cloneDraft(draft), validation, fileName, conflict: conflictOf(fileName) },
     ]);
-    showToast(`${draft.grade} / ${draft.temperature} °C 已加入预览`);
-    // 保留牌号与系列号，便于继续录入其他温度
-    setDraft({ ...emptyDraft(type), grade: draft.grade, series: draft.series });
+    showToast(`${draft.grade} / ${draft.temperature} °C / ${MATERIAL_STATE_LABEL[draft.state]} 已加入预览`);
+    // 保留牌号、系列号与状态，便于继续录入其他温度
+    setDraft({ ...emptyDraft(type), grade: draft.grade, series: draft.series, state: draft.state });
     setPasteOpen({});
     setPasteText({});
   };
@@ -214,7 +220,7 @@ export function MaterialsImportPage({ user }: Props) {
       if (validation.errors.length) invalid++;
       // 缺必填项的行也加入待入库预览，方便操作者在详情面板里补全后归档
       const fileName = complete
-        ? materialFileName(d.type, d.grade.trim(), d.series.trim(), temp)
+        ? materialFileName(d.grade.trim(), d.series.trim(), temp, d.supplier.trim())
         : `（待补全）${d.grade.trim() || '材料'}`;
       added.push({
         id: uid(),
@@ -437,6 +443,18 @@ export function MaterialsImportPage({ user }: Props) {
                     />
                   </label>
                 ))}
+                {group === '标识与来源' && (
+                  <label className="field" key="state">
+                    <span>状态（必选）</span>
+                    <select
+                      value={draft.state}
+                      onChange={(e) => patchState(e.target.value as MaterialState)}
+                    >
+                      <option value="wet">{MATERIAL_STATE_LABEL.wet}</option>
+                      <option value="dry">{MATERIAL_STATE_LABEL.dry}</option>
+                    </select>
+                  </label>
+                )}
               </Fragment>
             );
           })}
@@ -671,7 +689,12 @@ export function MaterialsImportPage({ user }: Props) {
                               const next = [...prev];
                               const cur = { ...next[detailIdx], draft: { ...next[detailIdx].draft, [f.key]: v } };
                               cur.validation = validateMaterialDraft(cur.draft);
-                              cur.fileName = materialFileName(cur.draft.type, cur.draft.grade.trim(), cur.draft.series.trim(), Number(cur.draft.temperature));
+                              cur.fileName = materialFileName(
+                                cur.draft.grade.trim(),
+                                cur.draft.series.trim(),
+                                Number(cur.draft.temperature),
+                                cur.draft.supplier.trim(),
+                              );
                               cur.conflict = existing.some((f0) => f0.name.toLowerCase() === cur.fileName.toLowerCase());
                               next[detailIdx] = cur;
                               return next;
@@ -680,6 +703,34 @@ export function MaterialsImportPage({ user }: Props) {
                         />
                       </label>
                     ))}
+                    {group === '标识与来源' && (
+                      <label className="field" key="state">
+                        <span>状态（必选）</span>
+                        <select
+                          value={entries[detailIdx].draft.state}
+                          onChange={(e) => {
+                            const v = e.target.value as MaterialState;
+                            setEntries((prev) => {
+                              const next = [...prev];
+                              const cur = { ...next[detailIdx], draft: { ...next[detailIdx].draft, state: v } };
+                              cur.validation = validateMaterialDraft(cur.draft);
+                              cur.fileName = materialFileName(
+                                cur.draft.grade.trim(),
+                                cur.draft.series.trim(),
+                                Number(cur.draft.temperature),
+                                cur.draft.supplier.trim(),
+                              );
+                              cur.conflict = existing.some((f0) => f0.name.toLowerCase() === cur.fileName.toLowerCase());
+                              next[detailIdx] = cur;
+                              return next;
+                            });
+                          }}
+                        >
+                          <option value="wet">{MATERIAL_STATE_LABEL.wet}</option>
+                          <option value="dry">{MATERIAL_STATE_LABEL.dry}</option>
+                        </select>
+                      </label>
+                    )}
                   </Fragment>
                 );
               })}

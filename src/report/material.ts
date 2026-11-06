@@ -15,6 +15,14 @@ import { cleanFileName } from './db';
 
 export type MaterialType = 'conventional' | 'hyperelastic';
 
+/** 材料状态：湿态 / 干态（默认湿态） */
+export type MaterialState = 'wet' | 'dry';
+
+export const MATERIAL_STATE_LABEL: Record<MaterialState, string> = {
+  wet: '湿态',
+  dry: '干态',
+};
+
 export const MATERIAL_TYPE_LABEL: Record<MaterialType, string> = {
   conventional: '常规材料',
   hyperelastic: '超弹性材料',
@@ -40,6 +48,7 @@ export interface MaterialRecord {
   grade: string;
   series: string;
   supplier: string;
+  state: MaterialState; // 湿态 / 干态
   temperature: number;
   density: number | null; // kg/m³
   poisson: number | null;
@@ -48,6 +57,9 @@ export interface MaterialRecord {
   hardness: number | null; // 硬度（HB / HV / HRC / HRB / ...）
   tensileStrength: number | null;
   failureStrain: number | null; // %
+  specificHeat: number | null; // 比热容 Cp，J/(kg·℃)
+  thermalConductivity: number | null; // 热导率 K，W/(m·℃)
+  expansionCoefficient: number | null; // 膨胀系数，mm/(mm·K)
   stressStrainCurve: MaterialCurve | null;
   fatigueCurve: MaterialCurve | null;
   createdAt: string;
@@ -64,6 +76,7 @@ export interface MaterialDraft {
   grade: string;
   series: string;
   supplier: string;
+  state: MaterialState;
   temperature: string;
   density: string;
   poisson: string;
@@ -72,6 +85,9 @@ export interface MaterialDraft {
   hardness: string;
   tensileStrength: string;
   failureStrain: string;
+  specificHeat: string;
+  thermalConductivity: string;
+  expansionCoefficient: string;
   stressStrainCurve: MaterialCurve | null;
   fatigueCurve: MaterialCurve | null;
 }
@@ -80,6 +96,7 @@ export type MaterialTextFieldKey =
   | 'grade'
   | 'series'
   | 'supplier'
+  | 'state'
   | 'temperature'
   | 'density'
   | 'poisson'
@@ -87,7 +104,15 @@ export type MaterialTextFieldKey =
   | 'direction'
   | 'hardness'
   | 'tensileStrength'
-  | 'failureStrain';
+  | 'failureStrain'
+  | 'specificHeat'
+  | 'thermalConductivity'
+  | 'expansionCoefficient';
+
+/** 状态文本归一：含「干」判为干态，其余（含空）默认湿态 */
+export function normalizeState(text: string): MaterialState {
+  return /干/.test(String(text || '')) ? 'dry' : 'wet';
+}
 
 export type MaterialCurveKey = 'stressStrainCurve' | 'fatigueCurve';
 
@@ -112,6 +137,15 @@ export const MATERIAL_FIELDS: Record<MaterialType, MaterialFieldDef[]> = {
     { key: 'density', label: '密度', group: '基础物性', unit: 'kg/m³', placeholder: '50 ~ 30000' },
     { key: 'poisson', label: '泊松比', group: '基础物性', placeholder: '0 < v < 0.5' },
     { key: 'elasticModulus', label: '弹性模量', group: '基础物性', unit: 'MPa', placeholder: '选填' },
+    { key: 'specificHeat', label: '比热容 Cp', group: '基础物性', unit: 'J/(kg·℃)', placeholder: '选填' },
+    { key: 'thermalConductivity', label: '热导率 K', group: '基础物性', unit: 'W/(m·℃)', placeholder: '选填' },
+    {
+      key: 'expansionCoefficient',
+      label: '膨胀系数',
+      group: '基础物性',
+      unit: 'mm/(mm·K)',
+      placeholder: '如 2.3e-5',
+    },
     { key: 'hardness', label: '硬度', group: '力学性能', placeholder: '如 180 HB、500 HV、58 HRC（仅数字）' },
     { key: 'tensileStrength', label: '抗拉强度', group: '力学性能', unit: 'MPa', placeholder: '选填' },
     { key: 'failureStrain', label: '破坏应变', group: '力学性能', unit: '%', placeholder: '选填' },
@@ -121,6 +155,15 @@ export const MATERIAL_FIELDS: Record<MaterialType, MaterialFieldDef[]> = {
     { key: 'series', label: '系列号', group: '标识与来源', required: true, placeholder: '如 密封橡胶、氟橡胶系列' },
     { key: 'temperature', label: '温度', group: '工况', required: true, unit: '°C', placeholder: '-60 ~ 400' },
     { key: 'poisson', label: '泊松比', group: '基础物性', placeholder: '建议 0.45 ~ 0.5' },
+    { key: 'specificHeat', label: '比热容 Cp', group: '基础物性', unit: 'J/(kg·℃)', placeholder: '选填' },
+    { key: 'thermalConductivity', label: '热导率 K', group: '基础物性', unit: 'W/(m·℃)', placeholder: '选填' },
+    {
+      key: 'expansionCoefficient',
+      label: '膨胀系数',
+      group: '基础物性',
+      unit: 'mm/(mm·K)',
+      placeholder: '如 2.3e-4',
+    },
   ],
 };
 
@@ -185,6 +228,7 @@ export function emptyDraft(type: MaterialType): MaterialDraft {
     grade: '',
     series: '',
     supplier: '',
+    state: 'wet',
     temperature: '',
     density: '',
     poisson: '',
@@ -193,6 +237,9 @@ export function emptyDraft(type: MaterialType): MaterialDraft {
     hardness: '',
     tensileStrength: '',
     failureStrain: '',
+    specificHeat: '',
+    thermalConductivity: '',
+    expansionCoefficient: '',
     stressStrainCurve: null,
     fatigueCurve: null,
   };
@@ -276,6 +323,11 @@ export function validateMaterialDraft(draft: MaterialDraft): MaterialValidation 
   }
 
   // 选填空值不校验；非空才检查数值与范围
+  const thermalFields: Array<[MaterialTextFieldKey, string, number, number, string]> = [
+    ['specificHeat', '比热容 Cp', 100, 10000, 'J/(kg·℃)'],
+    ['thermalConductivity', '热导率 K', 0.001, 2000, 'W/(m·℃)'],
+    ['expansionCoefficient', '膨胀系数', 0.0000001, 0.01, 'mm/(mm·K)'],
+  ];
   const numericFields: Array<[MaterialTextFieldKey, string, number, number, string]> =
     draft.type === 'conventional'
       ? [
@@ -286,8 +338,9 @@ export function validateMaterialDraft(draft: MaterialDraft): MaterialValidation 
           ['hardness', '硬度', 0.01, 2000, ''],
           ['tensileStrength', '抗拉强度', 0.01, 5000, 'MPa'],
           ['failureStrain', '破坏应变', 0.01, 1000, '%'],
+          ...thermalFields,
         ]
-      : [['poisson', '泊松比', 0.001, 0.499, '']];
+      : [['poisson', '泊松比', 0.001, 0.499, ''], ...thermalFields];
 
   numericFields.forEach(([key, label, min, max, unit]) => {
     const raw = draft[key].trim();
@@ -368,6 +421,7 @@ export function buildMaterialRecord(
     grade: draft.grade.trim(),
     series: draft.series.trim(),
     supplier: draft.supplier.trim(),
+    state: draft.state === 'dry' ? 'dry' : 'wet',
     temperature: parseNum(draft.temperature),
     density: toNum(draft.density),
     poisson: toNum(draft.poisson),
@@ -376,6 +430,9 @@ export function buildMaterialRecord(
     hardness: toNum(draft.hardness),
     tensileStrength: toNum(draft.tensileStrength),
     failureStrain: toNum(draft.failureStrain),
+    specificHeat: toNum(draft.specificHeat),
+    thermalConductivity: toNum(draft.thermalConductivity),
+    expansionCoefficient: toNum(draft.expansionCoefficient),
     stressStrainCurve: draft.stressStrainCurve?.points.length ? draft.stressStrainCurve : null,
     fatigueCurve: draft.fatigueCurve?.points.length ? draft.fatigueCurve : null,
     createdAt: meta.previous?.createdAt || nowIso,
@@ -387,23 +444,28 @@ export function buildMaterialRecord(
   };
 }
 
-/** 材料归档文件名（含类型前缀，避免两类材料同名） */
+/** 材料归档文件名：牌号+系列号+温度+供应商（供应商为空时省略该段） */
 export function materialFileName(
-  type: MaterialType,
   grade: string,
   series: string,
   temperature: number,
+  supplier = '',
 ): string {
-  const prefix = type === 'hyperelastic' ? '超弹性' : '常规材料';
-  return `${prefix}+${cleanFileName(grade)}+${cleanFileName(series)}+${tempLabel(temperature)}℃.parquet`;
+  const parts = [cleanFileName(grade), cleanFileName(series), `${tempLabel(temperature)}℃`];
+  if ((supplier || '').trim()) parts.push(cleanFileName(supplier));
+  return `${parts.join('+')}.parquet`;
 }
 
-/** 反解材料文件名（检索列表快速展示用） */
+/** 反解材料文件名（检索列表在记录读回前先用它展示）
+ *  兼容旧命名：类型前缀+牌号+系列号+温度(+干态)
+ */
 export function parseMaterialFileName(name: string): {
   type: MaterialType;
   grade: string;
   series: string;
+  supplier: string;
   temperature: number | null;
+  state: MaterialState;
 } {
   const stem = (name || '').replace(/\.(parquet|json)$/i, '');
   const parts = stem.split('+');
@@ -415,13 +477,30 @@ export function parseMaterialFileName(name: string): {
     type = 'conventional';
     parts.shift();
   }
-  const tempPart = parts.length ? parts.pop() || '' : '';
-  const t = Number(tempPart.replace(/℃/g, ''));
+  let state: MaterialState = 'wet';
+  if (parts.length > 1 && /^(干态|湿态)$/.test(parts[parts.length - 1].trim())) {
+    state = parts.pop()!.trim() === '干态' ? 'dry' : 'wet';
+  }
+  // 温度段：定位带 ℃ 的片段，其后的片段归为供应商
+  let tempIdx = -1;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (/℃/.test(parts[i])) {
+      tempIdx = i;
+      break;
+    }
+  }
+  const tempPart = tempIdx >= 0 ? parts[tempIdx] : '';
+  const t = tempPart ? Number(tempPart.replace(/℃/g, '')) : NaN;
+  const grade = parts[0] || '';
+  const series = parts.slice(1, tempIdx >= 0 ? tempIdx : parts.length).join('+');
+  const supplier = tempIdx >= 0 ? parts.slice(tempIdx + 1).join('+') : '';
   return {
     type,
-    grade: parts.shift() || '',
-    series: parts.join('+'),
+    grade,
+    series,
+    supplier,
     temperature: Number.isFinite(t) ? t : null,
+    state,
   };
 }
 
@@ -456,6 +535,7 @@ export function parseMaterialRecord(text: string): MaterialRecord | null {
       grade: raw.grade,
       series: raw.series,
       supplier: typeof raw.supplier === 'string' ? raw.supplier : '',
+      state: raw.state === 'dry' ? 'dry' : 'wet', // 旧记录无此字段 → 默认湿态
       temperature,
       density: numOrNull(raw.density),
       poisson: numOrNull(raw.poisson),
@@ -464,6 +544,9 @@ export function parseMaterialRecord(text: string): MaterialRecord | null {
       hardness: numOrNull(raw.hardness),
       tensileStrength: numOrNull(raw.tensileStrength),
       failureStrain: numOrNull(raw.failureStrain),
+      specificHeat: numOrNull(raw.specificHeat),
+      thermalConductivity: numOrNull(raw.thermalConductivity),
+      expansionCoefficient: numOrNull(raw.expansionCoefficient),
       stressStrainCurve: curve(raw.stressStrainCurve),
       fatigueCurve: curve(raw.fatigueCurve),
       createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : '',
@@ -486,6 +569,7 @@ export function draftFromRecord(rec: MaterialRecord): MaterialDraft {
     grade: rec.grade,
     series: rec.series,
     supplier: rec.supplier,
+    state: rec.state === 'dry' ? 'dry' : 'wet',
     temperature: tempLabel(rec.temperature),
     direction: s(rec.direction),
     density: s(rec.density),
@@ -494,6 +578,9 @@ export function draftFromRecord(rec: MaterialRecord): MaterialDraft {
     hardness: s(rec.hardness),
     tensileStrength: s(rec.tensileStrength),
     failureStrain: s(rec.failureStrain),
+    specificHeat: s(rec.specificHeat),
+    thermalConductivity: s(rec.thermalConductivity),
+    expansionCoefficient: s(rec.expansionCoefficient),
     stressStrainCurve: rec.stressStrainCurve ? { ...rec.stressStrainCurve, points: [...rec.stressStrainCurve.points] } : null,
     fatigueCurve: rec.fatigueCurve ? { ...rec.fatigueCurve, points: [...rec.fatigueCurve.points] } : null,
   };
@@ -506,7 +593,10 @@ export function serializeMaterialRecord(rec: MaterialRecord): string {
 
 /** 检索页下载的 CSV 文件名：与 Parquet 文件同名，扩展名改为 .csv */
 export function materialCsvFileName(rec: MaterialRecord): string {
-  return materialFileName(rec.type, rec.grade, rec.series, rec.temperature).replace(/\.parquet$/i, '.csv');
+  return materialFileName(rec.grade, rec.series, rec.temperature, rec.supplier).replace(
+    /\.parquet$/i,
+    '.csv',
+  );
 }
 
 /** 材料记录 → CSV 文本（单行记录，曲线按 x:y 用分号连接，带 UTF-8 BOM） */
@@ -520,6 +610,7 @@ export function materialRecordToCsv(rec: MaterialRecord): string {
     '牌号',
     '系列号',
     '供应商',
+    '状态',
     '温度(℃)',
     '方向(°)',
     '密度(kg/m³)',
@@ -528,6 +619,9 @@ export function materialRecordToCsv(rec: MaterialRecord): string {
     '硬度',
     '抗拉强度(MPa)',
     '破坏应变(%)',
+    '比热容 Cp(J/(kg·℃))',
+    '热导率 K(W/(m·℃))',
+    '膨胀系数(mm/(mm·K))',
     '应力应变曲线来源',
     '应力应变曲线(应变%:应力MPa)',
     '疲劳曲线来源',
@@ -544,6 +638,7 @@ export function materialRecordToCsv(rec: MaterialRecord): string {
     rec.grade,
     rec.series,
     rec.supplier,
+    MATERIAL_STATE_LABEL[rec.state === 'dry' ? 'dry' : 'wet'],
     rec.temperature,
     rec.direction,
     rec.density,
@@ -552,6 +647,9 @@ export function materialRecordToCsv(rec: MaterialRecord): string {
     rec.hardness,
     rec.tensileStrength,
     rec.failureStrain,
+    rec.specificHeat,
+    rec.thermalConductivity,
+    rec.expansionCoefficient,
     rec.stressStrainCurve?.sourceName || '',
     points(rec.stressStrainCurve),
     rec.fatigueCurve?.sourceName || '',
@@ -611,6 +709,7 @@ const HEADER_ALIASES: Record<MaterialTextFieldKey | 'stressStrainCurve' | 'fatig
   grade: /牌号/,
   series: /系列号|系列|规格/,
   supplier: /供应商|厂商|品牌/,
+  state: /状态|干湿态|湿态|干态/,
   temperature: /温度/,
   direction: /方向|角度|取向/,
   density: /密度/,
@@ -619,6 +718,9 @@ const HEADER_ALIASES: Record<MaterialTextFieldKey | 'stressStrainCurve' | 'fatig
   hardness: /硬度|HB|HV|HRC|HRB/,
   tensileStrength: /抗拉强度|拉伸强度|Rm/,
   failureStrain: /破坏应变|断裂应变|延伸率|A[-\s]?50/i,
+  specificHeat: /比热容|比热|\bCp\b/i,
+  thermalConductivity: /热导率|导热系数|热传导系数|thermal\s*conductivity/i,
+  expansionCoefficient: /膨胀系数|热膨胀|线膨胀|\bCTE\b/i,
   stressStrainCurve: /应力应变曲线|应力-应变曲线|应力应变/,
   fatigueCurve: /疲劳寿命曲线|疲劳曲线|S[-\s]?N/i,
 };
@@ -656,12 +758,16 @@ function parseRows(
     draft.grade = get('grade');
     draft.series = get('series');
     draft.supplier = get('supplier');
+    draft.state = normalizeState(get('state'));
     draft.temperature = get('temperature');
     draft.density = get('density');
     draft.poisson = get('poisson');
     draft.elasticModulus = get('elasticModulus');
     draft.tensileStrength = get('tensileStrength');
     draft.failureStrain = get('failureStrain');
+    draft.specificHeat = get('specificHeat');
+    draft.thermalConductivity = get('thermalConductivity');
+    draft.expansionCoefficient = get('expansionCoefficient');
     if (draft.grade || draft.series || draft.temperature) drafts.push(draft);
   }
   return { drafts, error: '', ignoredCurves };
@@ -671,15 +777,15 @@ function parseRows(
 export function materialTemplateCsv(type: MaterialType): string {
   if (type === 'conventional') {
     return [
-      '牌号,系列号,供应商,温度(°C),方向(°),密度(kg/m³),泊松比,弹性模量(MPa),硬度,抗拉强度(MPa),破坏应变(%),应力应变曲线文件,疲劳寿命曲线文件',
-      'SPCC,冷轧钢板,宝钢,25,,7850,0.30,205000,180,370,32,,',
-      'PA66-GF30,尼龙加玻纤,巴斯夫,120,,1350,0.34,95000,90,185,3.5,,',
+      '牌号,系列号,供应商,状态,温度(°C),方向(°),密度(kg/m³),泊松比,弹性模量(MPa),硬度,抗拉强度(MPa),破坏应变(%),比热容 Cp(J/(kg·℃)),热导率 K(W/(m·℃)),膨胀系数(mm/(mm·K)),应力应变曲线文件,疲劳寿命曲线文件',
+      'SPCC,冷轧钢板,宝钢,湿态,25,,7850,0.30,205000,180,370,32,,,,,',
+      'PA66-GF30,尼龙加玻纤,巴斯夫,干态,120,,1350,0.34,95000,90,185,3.5,,,,,',
     ].join('\r\n');
   }
   return [
-    '牌号,系列号,温度(°C),泊松比,应力应变曲线文件,疲劳寿命曲线文件',
-    'EPDM-70,密封橡胶,23,0.48,,',
-    'FKM-80,氟橡胶,150,0.47,,',
+    '牌号,系列号,温度(°C),泊松比,比热容 Cp(J/(kg·℃)),热导率 K(W/(m·℃)),膨胀系数(mm/(mm·K)),应力应变曲线文件,疲劳寿命曲线文件',
+    'EPDM-70,密封橡胶,23,0.48,,,,,',
+    'FKM-80,氟橡胶,150,0.47,,,,,',
   ].join('\r\n');
 }
 
@@ -783,12 +889,16 @@ function parseFixedCoords(
     { key: 'grade', labels: /牌号/ },                // 兜底：如果"材料"行没值，再看"牌号"行（但值可能是 "/" 要跳过）
     { key: 'series', labels: /系列号|系列|规格|型号/ },
     { key: 'supplier', labels: /供应商|厂商|品牌/ },
+    { key: 'state', labels: /状态|干湿态/ },
     { key: 'temperature', labels: /温度|温区/i, numOnly: true },
     { key: 'density', labels: /密度/, numOnly: true },
     { key: 'elasticModulus', labels: /弹性模量|杨氏模量|弹性模量E|E[-\s]?modulus/i, numOnly: true },
     { key: 'direction', labels: /方向|角度|取向/, numOnly: true },
     { key: 'hardness', labels: /硬度|HB|HV|HRC|HRB/, numOnly: true },
     { key: 'poisson', labels: /泊松比|泊松/, numOnly: true },
+    { key: 'specificHeat', labels: /比热容|比热|\bCp\b/i, numOnly: true },
+    { key: 'thermalConductivity', labels: /热导率|导热系数|热传导/, numOnly: true },
+    { key: 'expansionCoefficient', labels: /膨胀系数|热膨胀|线膨胀|CTE/i, numOnly: true },
   ];
   const fromLabelScan = (): Record<string, string> => {
     const out: Record<string, string> = {};
@@ -813,24 +923,28 @@ function parseFixedCoords(
     return out;
   };
 
-  // 先用严格坐标；如果必填项缺失，回退到标签扫描（两者取并集，固定坐标优先）
+  // 先用严格坐标；再用标签扫描补齐固定坐标里没有的字段（固定坐标优先）
   const fp = fromFixedPos();
-  let vals = fp;
-  if (!fp.grade || !fp.series || !fp.temperature) {
-    const sc = fromLabelScan();
-    vals = { ...sc, ...fp }; // 固定坐标值覆盖扫描值（如果两者都取到了）
-  }
+  const sc = fromLabelScan();
+  const vals: Record<string, string> = { ...sc };
+  (Object.keys(fp) as Array<keyof typeof fp>).forEach((k) => {
+    if (fp[k]) vals[k] = fp[k];
+  });
 
   const draft = emptyDraft(type);
   draft.grade = vals.grade || '';
   draft.supplier = vals.supplier || '';
   draft.series = vals.series || '';
+  draft.state = normalizeState(vals.state || '');
   draft.temperature = vals.temperature || '';
   draft.density = vals.density || '';
   draft.elasticModulus = vals.elasticModulus || '';
   draft.direction = vals.direction || '';
   draft.hardness = vals.hardness || '';
   draft.poisson = vals.poisson || '';
+  draft.specificHeat = vals.specificHeat || '';
+  draft.thermalConductivity = vals.thermalConductivity || '';
+  draft.expansionCoefficient = vals.expansionCoefficient || '';
 
   // 曲线读取：C列(索引2)=应变，D列(索引3)=应力，从第2行连续扫，遇非数字即停
   const curvePoints: CurvePoint[] = [];

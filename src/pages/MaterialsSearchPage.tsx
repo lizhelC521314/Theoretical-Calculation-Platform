@@ -2,14 +2,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type CtrUser } from '../api';
 import { MaterialCurvePlot } from '../components/MaterialCurvePlot';
 import {
+  buildMaterialRecord,
+  draftFromRecord,
   MATERIAL_FIELDS,
+  MATERIAL_STATE_LABEL,
   MATERIAL_TYPE_LABEL,
   materialCsvFileName,
+  materialFileName,
   materialRecordToCsv,
+  parseCurveCsv,
   parseMaterialFileName,
   parseMaterialRecord,
+  validateMaterialDraft,
   type MaterialCurve,
+  type MaterialCurveKey,
+  type MaterialDraft,
   type MaterialRecord,
+  type MaterialState,
   type MaterialType,
 } from '../report/material';
 import { UNC_MATERIAL_LIB } from '../report/db';
@@ -37,12 +46,20 @@ export function MaterialsSearchPage({ user }: Props) {
   const [reachable, setReachable] = useState<boolean | null>(null);
   const [keyword, setKeyword] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | MaterialType>('all');
+  const [stateFilter, setStateFilter] = useState<'all' | MaterialState>('all');
+  const [tempFilter, setTempFilter] = useState('23'); // 温度筛选默认 23℃
+  const [modulusMin, setModulusMin] = useState(''); // 弹性模量 ≥ 输入值
   const [selected, setSelected] = useState<MaterialFile | null>(null);
   const [record, setRecord] = useState<MaterialRecord | null>(null);
   const [busy, setBusy] = useState(false);
   const [readBusy, setReadBusy] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
+
+  // 编辑已导入记录（修正导入错误）
+  const [editDraft, setEditDraft] = useState<MaterialDraft | null>(null);
+  const [editIssues, setEditIssues] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
 
   // 列表区 / 预览区 高度比例（0.15 ~ 0.85，默认 0.4，与试验报告检索一致）
   const [listRatio, setListRatio] = useState<number>(() => {
@@ -80,11 +97,79 @@ export function MaterialsSearchPage({ user }: Props) {
     refresh();
   }, [refresh]);
 
+  // 供应商列与弹性模量筛选都需要记录内容（文件名里没有），进入页面后逐批读取并缓存
+  const [recCache, setRecCache] = useState<Record<string, MaterialRecord | null>>({});
+  const [cacheBusy, setCacheBusy] = useState(false);
+
+  useEffect(() => {
+    const todo = files.filter((f) => !(f.fullPath in recCache));
+    if (!todo.length) return;
+    let cancelled = false;
+    setCacheBusy(true);
+    (async () => {
+      // 每次并发 6 个，避免 UNC 共享目录上同时打开过多文件
+      for (let i = 0; i < todo.length; i += 6) {
+        const batch = todo.slice(i, i + 6);
+        const part = await Promise.all(
+          batch.map(async (f) => {
+            try {
+              const res = await api.db.readText({ fullPath: f.fullPath });
+              return [f.fullPath, res.ok && res.text ? parseMaterialRecord(res.text) : null] as const;
+            } catch {
+              return [f.fullPath, null] as const;
+            }
+          }),
+        );
+        if (cancelled) return;
+        setRecCache((prev) => {
+          const next = { ...prev };
+          part.forEach(([k, v]) => {
+            next[k] = v;
+          });
+          return next;
+        });
+      }
+      if (!cancelled) setCacheBusy(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [files, recCache]);
+
   const filtered = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
+    const temp = tempFilter.trim() === '' ? null : Number(tempFilter);
+    const eMin = modulusMin.trim() === '' ? null : Number(modulusMin);
     return files
-      .map((f) => ({ file: f, meta: parseMaterialFileName(f.name) }))
+      .map((f) => {
+        // 记录读回后以记录为准（新命名不含类型/状态段，文件名反解仅作加载前兜底）
+        const rec = recCache[f.fullPath];
+        const meta = rec
+          ? {
+              type: rec.type,
+              grade: rec.grade,
+              series: rec.series,
+              supplier: rec.supplier,
+              temperature: rec.temperature,
+              state: rec.state,
+            }
+          : parseMaterialFileName(f.name);
+        return { file: f, meta };
+      })
       .filter((r) => (typeFilter === 'all' ? true : r.meta.type === typeFilter))
+      .filter((r) => (stateFilter === 'all' ? true : r.meta.state === stateFilter))
+      // 温度：等于操作者输入值（允许 0.01 误差），留空表示不限
+      .filter((r) =>
+        temp == null || !Number.isFinite(temp)
+          ? true
+          : r.meta.temperature != null && Math.abs(r.meta.temperature - temp) < 0.01,
+      )
+      // 弹性模量：≥ 操作者输入值，未记录模量的记录不参与
+      .filter((r) => {
+        if (eMin == null || !Number.isFinite(eMin)) return true;
+        const rec = recCache[r.file.fullPath];
+        return rec != null && rec.elasticModulus != null && rec.elasticModulus >= eMin;
+      })
       .filter((r) =>
         kw
           ? r.meta.grade.toLowerCase().includes(kw) ||
@@ -93,9 +178,11 @@ export function MaterialsSearchPage({ user }: Props) {
           : true,
       )
       .sort((a, b) => b.file.mtime.localeCompare(a.file.mtime));
-  }, [files, keyword, typeFilter]);
+  }, [files, keyword, typeFilter, stateFilter, tempFilter, modulusMin, recCache]);
 
-  const convCount = files.filter((f) => parseMaterialFileName(f.name).type === 'conventional').length;
+  const typeOf = (f: MaterialFile) =>
+    recCache[f.fullPath]?.type ?? parseMaterialFileName(f.name).type;
+  const convCount = files.filter((f) => typeOf(f) === 'conventional').length;
   const hyperCount = files.length - convCount;
 
   // 预览请求序号：防止快速切换行时，较慢的旧请求覆盖新选中的内容
@@ -106,6 +193,8 @@ export function MaterialsSearchPage({ user }: Props) {
     const seq = ++reqSeq.current;
     setSelected(f);
     setRecord(null);
+    setEditDraft(null);
+    setEditIssues([]);
     setError('');
     setReadBusy(true);
     const stale = () => seq !== reqSeq.current;
@@ -196,6 +285,17 @@ export function MaterialsSearchPage({ user }: Props) {
 
   const selectedMeta = selected ? parseMaterialFileName(selected.name) : null;
 
+  // 保存修改后（可能改名）等列表刷新完成，用新文件对象替换选中项，保证头部信息准确
+  const [pendingPath, setPendingPath] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pendingPath) return;
+    const f = files.find((x) => x.fullPath === pendingPath);
+    if (f) {
+      setSelected(f);
+      setPendingPath(null);
+    }
+  }, [files, pendingPath]);
+
   /** 检索处下载格式为 CSV（与 Parquet 同名，扩展名 .csv） */
   const downloadCsv = async () => {
     if (!record) return;
@@ -216,6 +316,86 @@ export function MaterialsSearchPage({ user }: Props) {
     },
     [],
   );
+
+  /** 进入编辑：把记录还原为草稿 */
+  const startEdit = () => {
+    if (!record) return;
+    setEditDraft(draftFromRecord(record));
+    setEditIssues([]);
+  };
+
+  const patchEdit = (key: keyof MaterialDraft, value: string) => {
+    setEditDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
+  };
+
+  const patchEditCurve = (key: MaterialCurveKey, curve: MaterialCurve | null) => {
+    setEditDraft((prev) => (prev ? { ...prev, [key]: curve } : prev));
+  };
+
+  const editCurveInputRef = useRef<HTMLInputElement | null>(null);
+  const editCurveTarget = useRef<MaterialCurveKey>('stressStrainCurve');
+
+  const pickEditCurveFile = (key: MaterialCurveKey) => {
+    editCurveTarget.current = key;
+    editCurveInputRef.current?.click();
+  };
+
+  const onEditCurveFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const res = parseCurveCsv(String(reader.result || ''));
+      if (res.error) {
+        showToast(`曲线解析失败：${res.error}`);
+        return;
+      }
+      const key = editCurveTarget.current;
+      patchEditCurve(key, { sourceName: file.name, points: res.points });
+      showToast(`已解析 ${res.points.length} 个数据点`);
+    };
+    reader.onerror = () => showToast('曲线文件读取失败');
+    reader.readAsText(file, 'utf-8');
+  };
+
+  /** 保存修改：校验 → 重算文件名 → 覆写 Parquet（改名时删除旧文件） */
+  const saveEdit = async () => {
+    if (!editDraft || !record || !selected) return;
+    const v = validateMaterialDraft(editDraft);
+    if (v.errors.length) {
+      setEditIssues(v.errors.map((i) => `${i.field}：${i.message}`));
+      showToast('存在校验错误，请先修正');
+      return;
+    }
+    setSaving(true);
+    try {
+      const next = buildMaterialRecord(editDraft, {
+        username: user.username,
+        displayName: user.displayName,
+        previous: record,
+      });
+      const newName = materialFileName(next.grade, next.series, next.temperature, next.supplier);
+      const res = await api.material.write({ record: next, fileName: newName, overwrite: true });
+      if (!res.ok) {
+        setError(`保存失败：${res.message || '未知错误'}`);
+        return;
+      }
+      const oldPath = selected.fullPath;
+      if (res.filePath && res.filePath !== oldPath) {
+        await api.db.remove({ fullPath: oldPath });
+      }
+      setRecord(next);
+      setRecCache((prev) => ({ ...prev, [(res.filePath || oldPath)]: next, [oldPath]: next }));
+      // 等列表刷新完成后按新路径重新定位选中项，刷新头部文件名/大小/时间
+      setPendingPath(res.filePath || oldPath);
+      setEditDraft(null);
+      setEditIssues([]);
+      showToast(`已保存修改（第 ${next.revision} 版）`);
+      await refresh();
+    } catch (e) {
+      setError(`保存失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="test-search">
@@ -256,12 +436,57 @@ export function MaterialsSearchPage({ user }: Props) {
             <option value="conventional">常规材料</option>
             <option value="hyperelastic">超弹性材料</option>
           </select>
-          {keyword && (
-            <button className="btn-link" onClick={() => setKeyword('')}>
-              清除
+          <select
+            className="tu-project"
+            value={stateFilter}
+            onChange={(e) => setStateFilter(e.target.value as 'all' | MaterialState)}
+            title="按湿态 / 干态筛选"
+          >
+            <option value="all">全部状态</option>
+            <option value="wet">湿态</option>
+            <option value="dry">干态</option>
+          </select>
+          <label className="mat-filter-inline" title="温度筛选，留空表示不限">
+            <span>温度</span>
+            <input
+              className="search-input sm"
+              type="number"
+              step="0.5"
+              value={tempFilter}
+              onChange={(e) => setTempFilter(e.target.value)}
+              placeholder="全部"
+            />
+            <span className="small muted">℃</span>
+          </label>
+          <label className="mat-filter-inline" title="弹性模量 ≥ 输入值，留空表示不限">
+            <span>弹性模量 ≥</span>
+            <input
+              className="search-input sm"
+              type="number"
+              step="100"
+              value={modulusMin}
+              onChange={(e) => setModulusMin(e.target.value)}
+              placeholder="不限"
+            />
+            <span className="small muted">MPa</span>
+          </label>
+          {(keyword || stateFilter !== 'all' || tempFilter !== '23' || modulusMin) && (
+            <button
+              className="btn-link"
+              onClick={() => {
+                setKeyword('');
+                setTypeFilter('all');
+                setStateFilter('all');
+                setTempFilter('23');
+                setModulusMin('');
+              }}
+            >
+              重置筛选
             </button>
           )}
-          <span className="lib-count">筛选结果 {filtered.length} 条 · 双击行可用本地软件打开</span>
+          <span className="lib-count">
+            {cacheBusy ? '正在读取材料详情… · ' : ''}筛选结果 {filtered.length} 条 · 双击行可用本地软件打开
+          </span>
         </div>
       </div>
 
@@ -278,6 +503,8 @@ export function MaterialsSearchPage({ user }: Props) {
                 <th style={{ width: 64 }}>类型</th>
                 <th style={{ width: '14%' }}>牌号</th>
                 <th style={{ width: '15%' }}>系列号</th>
+                <th style={{ width: '12%' }}>供应商</th>
+                <th style={{ width: 64 }}>状态</th>
                 <th style={{ width: 90 }}>温度</th>
                 <th style={{ width: 150 }}>归档时间</th>
                 <th style={{ width: 82 }}>大小</th>
@@ -307,6 +534,19 @@ export function MaterialsSearchPage({ user }: Props) {
                     </td>
                     <td>{meta.grade || '—'}</td>
                     <td>{meta.series || '—'}</td>
+                    <td>
+                      {meta.supplier ||
+                        (recCache[file.fullPath] === undefined ? (
+                          <span className="muted small">…</span>
+                        ) : (
+                          '—'
+                        ))}
+                    </td>
+                    <td>
+                      <span className={`state-badge state-${meta.state}`}>
+                        {MATERIAL_STATE_LABEL[meta.state]}
+                      </span>
+                    </td>
                     <td>{meta.temperature == null ? '—' : `${meta.temperature} °C`}</td>
                     <td className="small">{file.mtime}</td>
                     <td className="small">{formatSize(file.size)}</td>
@@ -329,7 +569,7 @@ export function MaterialsSearchPage({ user }: Props) {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="center settings-hint">
+                  <td colSpan={10} className="center settings-hint">
                     {files.length === 0
                       ? '材料库暂无记录，请先在「材料数据导入」模块录入'
                       : '无匹配结果'}
@@ -368,6 +608,12 @@ export function MaterialsSearchPage({ user }: Props) {
                   <span className="chip">牌号：{selectedMeta.grade || '—'}</span>
                   <span className="chip">系列号：{selectedMeta.series || '—'}</span>
                   <span className="chip">
+                    状态：
+                    {record
+                      ? MATERIAL_STATE_LABEL[record.state === 'dry' ? 'dry' : 'wet']
+                      : MATERIAL_STATE_LABEL[selectedMeta.state]}
+                  </span>
+                  <span className="chip">
                     温度：{selectedMeta.temperature == null ? '—' : `${selectedMeta.temperature} °C`}
                   </span>
                   {record && <span className="chip">版本：第 {record.revision} 版</span>}
@@ -376,6 +622,9 @@ export function MaterialsSearchPage({ user }: Props) {
                   </span>
                   <button className="btn-ghost sm" onClick={downloadCsv} disabled={!record}>
                     下载 CSV
+                  </button>
+                  <button className="btn-ghost sm" onClick={startEdit} disabled={!record || !!editDraft}>
+                    编辑
                   </button>
                   <button className="btn-ghost sm" onClick={() => openFile(selected)}>
                     打开文件
@@ -391,6 +640,98 @@ export function MaterialsSearchPage({ user }: Props) {
                   <div className="pe-title">未能解析该材料记录</div>
                   <div className="pe-sub">文件可能损坏，或不是 ctr-material-v1 格式</div>
                 </div>
+              ) : editDraft ? (
+                <div className="mat-edit-card">
+                  <input
+                    ref={editCurveInputRef}
+                    type="file"
+                    accept=".csv,.txt"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) onEditCurveFile(f);
+                      e.currentTarget.value = '';
+                    }}
+                  />
+                  <div className="mat-edit-grid">
+                    {(MATERIAL_FIELDS[editDraft.type] as Array<{ key: string; label: string; unit?: string }>).map(
+                      (f) => (
+                        <label className="field" key={f.key}>
+                          <span>
+                            {f.label}
+                            {f.unit ? `（${f.unit}）` : ''}
+                          </span>
+                          <input
+                            value={String((editDraft as unknown as Record<string, unknown>)[f.key] ?? '')}
+                            onChange={(e) => patchEdit(f.key as keyof MaterialDraft, e.target.value)}
+                          />
+                        </label>
+                      ),
+                    )}
+                    <label className="field">
+                      <span>状态（必选）</span>
+                      <select value={editDraft.state} onChange={(e) => patchEdit('state', e.target.value)}>
+                        <option value="wet">{MATERIAL_STATE_LABEL.wet}</option>
+                        <option value="dry">{MATERIAL_STATE_LABEL.dry}</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="mat-edit-curves">
+                    {(['stressStrainCurve', 'fatigueCurve'] as const).map((key) => (
+                      <div className="mat-edit-curve" key={key}>
+                        <div className="mat-edit-curve-head">
+                          <b>{key === 'stressStrainCurve' ? '应力应变曲线' : '疲劳寿命曲线'}</b>
+                          <span className="small muted">
+                            {editDraft[key]?.points.length
+                              ? `${editDraft[key]!.points.length} 个数据点`
+                              : '未提供'}
+                          </span>
+                          <button className="btn-ghost sm" onClick={() => pickEditCurveFile(key)}>
+                            上传曲线 CSV
+                          </button>
+                          <button
+                            className="btn-link danger sm"
+                            onClick={() => patchEditCurve(key, null)}
+                            disabled={!editDraft[key]?.points.length}
+                          >
+                            清空
+                          </button>
+                        </div>
+                        {editDraft[key]?.points.length ? (
+                          <MaterialCurvePlot curve={editDraft[key]} kind={key} />
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+
+                  {editIssues.length > 0 && (
+                    <div className="mat-edit-issues">
+                      {editIssues.map((m) => (
+                        <div key={m}>· {m}</div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="mat-edit-actions">
+                    <button className="btn-primary sm" onClick={saveEdit} disabled={saving}>
+                      {saving ? '保存中…' : '保存修改'}
+                    </button>
+                    <button
+                      className="btn-ghost sm"
+                      onClick={() => {
+                        setEditDraft(null);
+                        setEditIssues([]);
+                      }}
+                      disabled={saving}
+                    >
+                      取消
+                    </button>
+                    <span className="small muted">
+                      保存后覆盖原记录并升版；若牌号 / 系列号 / 温度 / 供应商变化，文件名会同步更新
+                    </span>
+                  </div>
+                </div>
               ) : (
                 <>
                   <div className="mat-preview-3col" style={{
@@ -401,6 +742,10 @@ export function MaterialsSearchPage({ user }: Props) {
                       <div className="mat-preview-col-head">基本信息</div>
                       <div className="mat-preview-col-body">
                         <div className="mat-detail-grid" style={{ gridTemplateColumns: '1fr', gap: 4 }}>
+                          <div className="mat-detail-item">
+                            <span>状态</span>
+                            <b>{MATERIAL_STATE_LABEL[record.state === 'dry' ? 'dry' : 'wet']}</b>
+                          </div>
                           {(MATERIAL_FIELDS[record.type] as Array<{ key: string; label: string; unit?: string }>).map((f) => {
                             const value = (record as unknown as Record<string, unknown>)[f.key];
                             return (
