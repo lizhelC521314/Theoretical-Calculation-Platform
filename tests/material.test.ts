@@ -101,7 +101,7 @@ describe('材料库：必填与数值校验', () => {
     expect(res.errors.some((e) => e.field === 'failureStrain')).toBe(true);
   });
 
-  it('超弹性材料不校验常规材料字段', () => {
+  it('超弹性材料与常规材料使用同一套校验规则', () => {
     const res = validateMaterialDraft({
       ...emptyDraft('hyperelastic'),
       grade: 'FKM-80',
@@ -110,7 +110,7 @@ describe('材料库：必填与数值校验', () => {
       density: '999',
       tensileStrength: '9999',
     });
-    expect(res.errors).toHaveLength(0);
+    expect(res.errors.some((e) => e.field === 'tensileStrength')).toBe(true);
   });
 });
 
@@ -163,6 +163,7 @@ describe('材料库：唯一键与文件名', () => {
       grade: 'SPCC',
       series: '冷轧钢板',
       supplier: '',
+      hardness: '',
       temperature: 25,
       state: 'wet',
     });
@@ -174,8 +175,21 @@ describe('材料库：唯一键与文件名', () => {
       grade: 'PA6-GF30',
       series: '尼龙加玻纤',
       supplier: '杜邦',
+      hardness: '',
       temperature: 23.5,
       state: 'wet',
+    });
+  });
+
+  it('超弹性文件名在供应商前包含硬度段并可反解', () => {
+    const name = materialFileName('EPDM-70', '密封橡胶', 23, '某密封件厂', '60');
+    expect(name).toBe('EPDM-70+密封橡胶+23℃+60+某密封件厂.parquet');
+    expect(parseMaterialFileName(name)).toMatchObject({
+      grade: 'EPDM-70',
+      series: '密封橡胶',
+      hardness: '60',
+      supplier: '某密封件厂',
+      temperature: 23,
     });
   });
 
@@ -185,6 +199,7 @@ describe('材料库：唯一键与文件名', () => {
       grade: 'EPDM-70',
       series: '密封橡胶',
       supplier: '',
+      hardness: '',
       temperature: 23.5,
       state: 'wet',
     });
@@ -193,6 +208,7 @@ describe('材料库：唯一键与文件名', () => {
       grade: 'PA6-GF30',
       series: '尼龙加玻纤',
       supplier: '',
+      hardness: '',
       temperature: 23,
       state: 'dry',
     });
@@ -404,6 +420,28 @@ describe('材料库：CSV 导入', () => {
     expect(res.error).toBe('');
     expect(res.drafts).toHaveLength(2);
     expect(res.ignoredCurves).toBe(true);
+  });
+
+  it('超弹性材料模板与常规材料列规则一致', () => {
+    const res = parseMaterialCsv(materialTemplateCsv('hyperelastic'), 'hyperelastic');
+    expect(res.error).toBe('');
+    expect(res.drafts).toHaveLength(2);
+    expect(res.drafts[0]).toMatchObject({
+      type: 'hyperelastic',
+      grade: 'EPDM-70',
+      series: '密封橡胶',
+      supplier: '某密封件厂',
+      state: 'wet',
+      density: '1100',
+      poisson: '0.48',
+      elasticModulus: '10',
+      hardness: '60',
+      tensileStrength: '15',
+      failureStrain: '300',
+      specificHeat: '1800',
+      thermalConductivity: '0.25',
+      expansionCoefficient: '2.3e-4',
+    });
   });
 
   it('固定坐标布局：表头无「牌号」时走固定值读取，并从 C/D 列自动构造应力应变曲线', () => {

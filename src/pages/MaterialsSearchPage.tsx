@@ -372,7 +372,15 @@ export function MaterialsSearchPage({ user }: Props) {
         displayName: user.displayName,
         previous: record,
       });
-      const newName = materialFileName(next.grade, next.series, next.temperature, next.supplier);
+      const hardness =
+        next.type === 'hyperelastic' && next.hardness !== null ? String(next.hardness) : '';
+      const newName = materialFileName(
+        next.grade,
+        next.series,
+        next.temperature,
+        next.supplier,
+        hardness,
+      );
       const res = await api.material.write({ record: next, fileName: newName, overwrite: true });
       if (!res.ok) {
         setError(`保存失败：${res.message || '未知错误'}`);
@@ -397,6 +405,68 @@ export function MaterialsSearchPage({ user }: Props) {
     }
   };
 
+  /** 批量整理已导入材料的文件名：超弹性材料补入硬度段 */
+  const normalizeFileNames = async () => {
+    if (
+      !window.confirm(
+        '将按「牌号+系列号+温度+硬度+供应商」重新命名已导入的超弹性材料文件，常规材料保持不变。\n\n文件较多时可能需要一些时间，是否继续？',
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    let renamed = 0;
+    let skipped = 0;
+    let failed = 0;
+    const cacheUpdates: Record<string, MaterialRecord | null> = {};
+    try {
+      for (const f of files) {
+        let rec = recCache[f.fullPath];
+        if (rec === undefined) {
+          const res = await api.db.readText({ fullPath: f.fullPath });
+          rec = res.ok && res.text ? parseMaterialRecord(res.text) : null;
+        }
+        if (!rec || rec.type !== 'hyperelastic') continue;
+        const hardness = rec.hardness !== null ? String(rec.hardness) : '';
+        if (!hardness) {
+          skipped++;
+          continue;
+        }
+        const expected = materialFileName(
+          rec.grade,
+          rec.series,
+          rec.temperature,
+          rec.supplier,
+          hardness,
+        );
+        if (expected === f.name) {
+          skipped++;
+          continue;
+        }
+        const res = await api.material.write({ record: rec, fileName: expected, overwrite: false });
+        if (!res.ok || !res.filePath) {
+          failed++;
+          continue;
+        }
+        await api.db.remove({ fullPath: f.fullPath });
+        cacheUpdates[res.filePath] = rec;
+        if (selected?.fullPath === f.fullPath) {
+          setSelected({ ...f, fullPath: res.filePath, name: expected });
+        }
+        renamed++;
+      }
+      if (Object.keys(cacheUpdates).length) {
+        setRecCache((prev) => ({ ...prev, ...cacheUpdates }));
+      }
+      showToast(`文件名整理完成：重命名 ${renamed} 个，跳过 ${skipped} 个，失败 ${failed} 个`);
+      await refresh();
+    } catch (e) {
+      setError(`整理文件名失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="test-search">
       <div className="settings-card">
@@ -417,6 +487,14 @@ export function MaterialsSearchPage({ user }: Props) {
             <span className="chip">超弹性 {hyperCount}</span>
             <button className="btn-ghost sm" onClick={refresh} disabled={busy}>
               {busy ? '刷新中…' : '刷新'}
+            </button>
+            <button
+              className="btn-ghost sm"
+              onClick={normalizeFileNames}
+              disabled={busy || cacheBusy}
+              title="为已导入的超弹性材料文件名补入硬度段（牌号+系列号+温度+硬度+供应商）"
+            >
+              整理文件名
             </button>
           </div>
         </div>
@@ -657,9 +735,9 @@ export function MaterialsSearchPage({ user }: Props) {
                     {(MATERIAL_FIELDS[editDraft.type] as Array<{ key: string; label: string; unit?: string }>).map(
                       (f) => (
                         <label className="field" key={f.key}>
-                          <span>
-                            {f.label}
-                            {f.unit ? `（${f.unit}）` : ''}
+                          <span className="mat-field-label">
+                            <span className="mat-field-name">{f.label}</span>
+                            <span className="mat-field-unit">{f.unit ? `（${f.unit}）` : '\u00A0'}</span>
                           </span>
                           <input
                             value={String((editDraft as unknown as Record<string, unknown>)[f.key] ?? '')}
@@ -669,7 +747,10 @@ export function MaterialsSearchPage({ user }: Props) {
                       ),
                     )}
                     <label className="field">
-                      <span>状态（必选）</span>
+                      <span className="mat-field-label">
+                        <span className="mat-field-name">状态</span>
+                        <span className="mat-field-unit">{'\u00A0'}</span>
+                      </span>
                       <select value={editDraft.state} onChange={(e) => patchEdit('state', e.target.value)}>
                         <option value="wet">{MATERIAL_STATE_LABEL.wet}</option>
                         <option value="dry">{MATERIAL_STATE_LABEL.dry}</option>
@@ -785,7 +866,7 @@ export function MaterialsSearchPage({ user }: Props) {
                         </button>
                       </div>
                       {record.stressStrainCurve?.points.length ? (
-                        <>
+                        <div className="mat-preview-col-body">
                           <MaterialCurvePlot curve={record.stressStrainCurve} kind="stressStrainCurve" />
                           <div className="mat-curve-table-wrap">
                             <table className="mat-curve-table">
@@ -803,7 +884,7 @@ export function MaterialsSearchPage({ user }: Props) {
                               </tbody>
                             </table>
                           </div>
-                        </>
+                        </div>
                       ) : (
                         <div className="preview-empty" style={{ padding: 30 }}>
                           <div className="pe-sub">该材料未提供应力应变曲线</div>
@@ -825,7 +906,7 @@ export function MaterialsSearchPage({ user }: Props) {
                             复制数据
                           </button>
                         </div>
-                        <>
+                        <div className="mat-preview-col-body">
                           <MaterialCurvePlot curve={record.fatigueCurve} kind="fatigueCurve" />
                           <div className="mat-curve-table-wrap">
                             <table className="mat-curve-table">
@@ -843,7 +924,7 @@ export function MaterialsSearchPage({ user }: Props) {
                               </tbody>
                             </table>
                           </div>
-                        </>
+                        </div>
                       </div>
                     )}
                   </div>

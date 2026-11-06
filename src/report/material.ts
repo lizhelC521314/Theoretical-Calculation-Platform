@@ -127,44 +127,33 @@ export interface MaterialFieldDef {
 
 export const MATERIAL_GROUP_ORDER = ['标识与来源', '工况', '基础物性', '力学性能', '曲线数据'] as const;
 
+/** 常规材料与超弹性材料使用同一套字段与导入读取规则 */
+const COMMON_MATERIAL_FIELDS: MaterialFieldDef[] = [
+  { key: 'grade', label: '牌号', group: '标识与来源', required: true, placeholder: '如 SPCC、PA66-GF30、EPDM-70' },
+  { key: 'series', label: '系列号', group: '标识与来源', required: true, placeholder: '如 冷轧钢板、密封橡胶' },
+  { key: 'supplier', label: '供应商', group: '标识与来源', placeholder: '如 宝钢、巴斯夫' },
+  { key: 'temperature', label: '温度', group: '工况', required: true, unit: '°C', placeholder: '-60 ~ 400' },
+  { key: 'direction', label: '方向', group: '工况', unit: '°', placeholder: '如 0 / 45 / 90' },
+  { key: 'density', label: '密度', group: '基础物性', unit: 'kg/m³', placeholder: '50 ~ 30000' },
+  { key: 'poisson', label: '泊松比', group: '基础物性', placeholder: '0 < v < 0.5' },
+  { key: 'elasticModulus', label: '弹性模量', group: '基础物性', unit: 'MPa', placeholder: '选填' },
+  { key: 'specificHeat', label: '比热容 Cp', group: '基础物性', unit: 'J/(kg·℃)', placeholder: '选填' },
+  { key: 'thermalConductivity', label: '热导率 K', group: '基础物性', unit: 'W/(m·℃)', placeholder: '选填' },
+  {
+    key: 'expansionCoefficient',
+    label: '膨胀系数',
+    group: '基础物性',
+    unit: 'mm/(mm·K)',
+    placeholder: '如 2.3e-5',
+  },
+  { key: 'hardness', label: '硬度', group: '力学性能', placeholder: '如 180 HB、500 HV、58 HRC（仅数字）' },
+  { key: 'tensileStrength', label: '抗拉强度', group: '力学性能', unit: 'MPa', placeholder: '选填' },
+  { key: 'failureStrain', label: '破坏应变', group: '力学性能', unit: '%', placeholder: '选填' },
+];
+
 export const MATERIAL_FIELDS: Record<MaterialType, MaterialFieldDef[]> = {
-  conventional: [
-    { key: 'grade', label: '牌号', group: '标识与来源', required: true, placeholder: '如 SPCC、PA66-GF30' },
-    { key: 'series', label: '系列号', group: '标识与来源', required: true, placeholder: '如 冷轧钢板、铝合金系列' },
-    { key: 'supplier', label: '供应商', group: '标识与来源', placeholder: '如 宝钢、巴斯夫' },
-    { key: 'temperature', label: '温度', group: '工况', required: true, unit: '°C', placeholder: '-60 ~ 400' },
-    { key: 'direction', label: '方向', group: '工况', unit: '°', placeholder: '如 0 / 45 / 90' },
-    { key: 'density', label: '密度', group: '基础物性', unit: 'kg/m³', placeholder: '50 ~ 30000' },
-    { key: 'poisson', label: '泊松比', group: '基础物性', placeholder: '0 < v < 0.5' },
-    { key: 'elasticModulus', label: '弹性模量', group: '基础物性', unit: 'MPa', placeholder: '选填' },
-    { key: 'specificHeat', label: '比热容 Cp', group: '基础物性', unit: 'J/(kg·℃)', placeholder: '选填' },
-    { key: 'thermalConductivity', label: '热导率 K', group: '基础物性', unit: 'W/(m·℃)', placeholder: '选填' },
-    {
-      key: 'expansionCoefficient',
-      label: '膨胀系数',
-      group: '基础物性',
-      unit: 'mm/(mm·K)',
-      placeholder: '如 2.3e-5',
-    },
-    { key: 'hardness', label: '硬度', group: '力学性能', placeholder: '如 180 HB、500 HV、58 HRC（仅数字）' },
-    { key: 'tensileStrength', label: '抗拉强度', group: '力学性能', unit: 'MPa', placeholder: '选填' },
-    { key: 'failureStrain', label: '破坏应变', group: '力学性能', unit: '%', placeholder: '选填' },
-  ],
-  hyperelastic: [
-    { key: 'grade', label: '牌号', group: '标识与来源', required: true, placeholder: '如 EPDM-70、FKM-80' },
-    { key: 'series', label: '系列号', group: '标识与来源', required: true, placeholder: '如 密封橡胶、氟橡胶系列' },
-    { key: 'temperature', label: '温度', group: '工况', required: true, unit: '°C', placeholder: '-60 ~ 400' },
-    { key: 'poisson', label: '泊松比', group: '基础物性', placeholder: '建议 0.45 ~ 0.5' },
-    { key: 'specificHeat', label: '比热容 Cp', group: '基础物性', unit: 'J/(kg·℃)', placeholder: '选填' },
-    { key: 'thermalConductivity', label: '热导率 K', group: '基础物性', unit: 'W/(m·℃)', placeholder: '选填' },
-    {
-      key: 'expansionCoefficient',
-      label: '膨胀系数',
-      group: '基础物性',
-      unit: 'mm/(mm·K)',
-      placeholder: '如 2.3e-4',
-    },
-  ],
+  conventional: COMMON_MATERIAL_FIELDS,
+  hyperelastic: COMMON_MATERIAL_FIELDS,
 };
 
 export const MATERIAL_CURVE_FIELDS: Record<
@@ -328,19 +317,16 @@ export function validateMaterialDraft(draft: MaterialDraft): MaterialValidation 
     ['thermalConductivity', '热导率 K', 0.001, 2000, 'W/(m·℃)'],
     ['expansionCoefficient', '膨胀系数', 0.0000001, 0.01, 'mm/(mm·K)'],
   ];
-  const numericFields: Array<[MaterialTextFieldKey, string, number, number, string]> =
-    draft.type === 'conventional'
-      ? [
-          ['direction', '方向', -180, 360, '°'],
-          ['density', '密度', 50, 30000, 'kg/m³'],
-          ['poisson', '泊松比', 0.001, 0.499, ''],
-          ['elasticModulus', '弹性模量', 0.01, 1000000, 'MPa'],
-          ['hardness', '硬度', 0.01, 2000, ''],
-          ['tensileStrength', '抗拉强度', 0.01, 5000, 'MPa'],
-          ['failureStrain', '破坏应变', 0.01, 1000, '%'],
-          ...thermalFields,
-        ]
-      : [['poisson', '泊松比', 0.001, 0.499, ''], ...thermalFields];
+  const numericFields: Array<[MaterialTextFieldKey, string, number, number, string]> = [
+    ['direction', '方向', -180, 360, '°'],
+    ['density', '密度', 50, 30000, 'kg/m³'],
+    ['poisson', '泊松比', 0.001, 0.499, ''],
+    ['elasticModulus', '弹性模量', 0.01, 1000000, 'MPa'],
+    ['hardness', '硬度', 0.01, 2000, ''],
+    ['tensileStrength', '抗拉强度', 0.01, 5000, 'MPa'],
+    ['failureStrain', '破坏应变', 0.01, 1000, '%'],
+    ...thermalFields,
+  ];
 
   numericFields.forEach(([key, label, min, max, unit]) => {
     const raw = draft[key].trim();
@@ -444,14 +430,16 @@ export function buildMaterialRecord(
   };
 }
 
-/** 材料归档文件名：牌号+系列号+温度+供应商（供应商为空时省略该段） */
+/** 材料归档文件名：牌号+系列号+温度+硬度(仅超弹性)+供应商（空段省略） */
 export function materialFileName(
   grade: string,
   series: string,
   temperature: number,
   supplier = '',
+  hardness = '',
 ): string {
   const parts = [cleanFileName(grade), cleanFileName(series), `${tempLabel(temperature)}℃`];
+  if ((hardness || '').trim()) parts.push(cleanFileName(hardness));
   if ((supplier || '').trim()) parts.push(cleanFileName(supplier));
   return `${parts.join('+')}.parquet`;
 }
@@ -464,6 +452,7 @@ export function parseMaterialFileName(name: string): {
   grade: string;
   series: string;
   supplier: string;
+  hardness: string;
   temperature: number | null;
   state: MaterialState;
 } {
@@ -493,12 +482,16 @@ export function parseMaterialFileName(name: string): {
   const t = tempPart ? Number(tempPart.replace(/℃/g, '')) : NaN;
   const grade = parts[0] || '';
   const series = parts.slice(1, tempIdx >= 0 ? tempIdx : parts.length).join('+');
-  const supplier = tempIdx >= 0 ? parts.slice(tempIdx + 1).join('+') : '';
+  const tail = tempIdx >= 0 ? parts.slice(tempIdx + 1) : [];
+  // 温度后的纯数字段视为硬度（超弹性命名），其余为供应商
+  const hardness = tail.length && /^\d+(\.\d+)?$/.test(tail[0].trim()) ? tail.shift()!.trim() : '';
+  const supplier = tail.join('+');
   return {
     type,
     grade,
     series,
     supplier,
+    hardness,
     temperature: Number.isFinite(t) ? t : null,
     state,
   };
@@ -593,7 +586,9 @@ export function serializeMaterialRecord(rec: MaterialRecord): string {
 
 /** 检索页下载的 CSV 文件名：与 Parquet 文件同名，扩展名改为 .csv */
 export function materialCsvFileName(rec: MaterialRecord): string {
-  return materialFileName(rec.grade, rec.series, rec.temperature, rec.supplier).replace(
+  const hardness =
+    rec.type === 'hyperelastic' && rec.hardness !== null ? String(rec.hardness) : '';
+  return materialFileName(rec.grade, rec.series, rec.temperature, rec.supplier, hardness).replace(
     /\.parquet$/i,
     '.csv',
   );
@@ -760,9 +755,11 @@ function parseRows(
     draft.supplier = get('supplier');
     draft.state = normalizeState(get('state'));
     draft.temperature = get('temperature');
+    draft.direction = get('direction');
     draft.density = get('density');
     draft.poisson = get('poisson');
     draft.elasticModulus = get('elasticModulus');
+    draft.hardness = get('hardness');
     draft.tensileStrength = get('tensileStrength');
     draft.failureStrain = get('failureStrain');
     draft.specificHeat = get('specificHeat');
@@ -783,9 +780,9 @@ export function materialTemplateCsv(type: MaterialType): string {
     ].join('\r\n');
   }
   return [
-    '牌号,系列号,温度(°C),泊松比,比热容 Cp(J/(kg·℃)),热导率 K(W/(m·℃)),膨胀系数(mm/(mm·K)),应力应变曲线文件,疲劳寿命曲线文件',
-    'EPDM-70,密封橡胶,23,0.48,,,,,',
-    'FKM-80,氟橡胶,150,0.47,,,,,',
+    '牌号,系列号,供应商,状态,温度(°C),方向(°),密度(kg/m³),泊松比,弹性模量(MPa),硬度,抗拉强度(MPa),破坏应变(%),比热容 Cp(J/(kg·℃)),热导率 K(W/(m·℃)),膨胀系数(mm/(mm·K)),应力应变曲线文件,疲劳寿命曲线文件',
+    'EPDM-70,密封橡胶,某密封件厂,湿态,23,,1100,0.48,10,60,15,300,1800,0.25,2.3e-4,,',
+    'FKM-80,氟橡胶,某密封件厂,干态,150,,1850,0.47,12,75,18,250,1200,0.2,2.0e-4,,',
   ].join('\r\n');
 }
 

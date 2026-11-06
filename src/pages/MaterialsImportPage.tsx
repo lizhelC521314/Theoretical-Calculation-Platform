@@ -63,6 +63,31 @@ function fieldLabel(key: string): string {
   return key;
 }
 
+/** 生成归档文件名：超弹性材料在供应商前加入硬度段 */
+function draftFileName(d: MaterialDraft): string {
+  const hardness = d.type === 'hyperelastic' ? d.hardness.trim() : '';
+  return materialFileName(
+    d.grade.trim(),
+    d.series.trim(),
+    Number(d.temperature),
+    d.supplier.trim(),
+    hardness,
+  );
+}
+
+/** 统一两行标签（名称 / 单位），保证同一行输入框顶端对齐 */
+function FieldLabel({ label, unit, required }: { label: string; unit?: string; required?: boolean }) {
+  return (
+    <span className="mat-field-label">
+      <span className="mat-field-name">
+        {label}
+        {required ? '（必填）' : ''}
+      </span>
+      <span className="mat-field-unit">{unit ? `（${unit}）` : '\u00A0'}</span>
+    </span>
+  );
+}
+
 /** 材料库数据导入：补齐必填 3 项 → 校验物性与曲线 → 归档为 Apache Parquet */
 export function MaterialsImportPage({ user }: Props) {
   const [type, setType] = useState<MaterialType>('conventional');
@@ -81,6 +106,43 @@ export function MaterialsImportPage({ user }: Props) {
 
   const curveInputRef = useRef<HTMLInputElement | null>(null);
   const curveTarget = useRef<MaterialCurveKey>('stressStrainCurve');
+
+  // 上下分区高度比例，支持鼠标拖动并记忆
+  const [rowRatio, setRowRatio] = useState<number>(() => {
+    const v = Number(window.localStorage.getItem('ctr.materialImportRowRatio'));
+    return Number.isFinite(v) && v >= 0.25 && v <= 0.75 ? v : 0.6;
+  });
+  useEffect(() => {
+    window.localStorage.setItem('ctr.materialImportRowRatio', String(rowRatio));
+  }, [rowRatio]);
+
+  const handleRowResize = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const container = e.currentTarget.parentElement as HTMLElement | null;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const startY = e.clientY;
+      const startRatio = rowRatio;
+      const minR = 0.25;
+      const maxR = 0.75;
+      const onMove = (ev: MouseEvent) => {
+        const next = startRatio + (ev.clientY - startY) / rect.height;
+        setRowRatio(Math.min(maxR, Math.max(minR, next)));
+      };
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      document.body.style.cursor = 'row-resize';
+      document.body.style.userSelect = 'none';
+    },
+    [rowRatio],
+  );
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -145,12 +207,7 @@ export function MaterialsImportPage({ user }: Props) {
       showToast(`存在 ${validation.errors.length} 处错误，请先修正`);
       return;
     }
-    const fileName = materialFileName(
-      draft.grade.trim(),
-      draft.series.trim(),
-      Number(draft.temperature),
-      draft.supplier.trim(),
-    );
+    const fileName = draftFileName(draft);
     setEntries((prev) => [
       ...prev,
       { id: uid(), draft: cloneDraft(draft), validation, fileName, conflict: conflictOf(fileName) },
@@ -219,9 +276,7 @@ export function MaterialsImportPage({ user }: Props) {
       const complete = Boolean(d.grade.trim() && d.series.trim() && Number.isFinite(temp));
       if (validation.errors.length) invalid++;
       // 缺必填项的行也加入待入库预览，方便操作者在详情面板里补全后归档
-      const fileName = complete
-        ? materialFileName(d.grade.trim(), d.series.trim(), temp, d.supplier.trim())
-        : `（待补全）${d.grade.trim() || '材料'}`;
+      const fileName = complete ? draftFileName(d) : `（待补全）${d.grade.trim() || '材料'}`;
       added.push({
         id: uid(),
         draft: d,
@@ -415,6 +470,11 @@ export function MaterialsImportPage({ user }: Props) {
 
       {error && <div className="login-error">{error}</div>}
 
+      <div
+        className="test-page-rows"
+        style={{ '--row-ratio': `${(rowRatio * 100).toFixed(2)}%` } as React.CSSProperties}
+      >
+        <div className="test-page-row">
       <div className="settings-card">
         <div className="pc-head">
           <h3>{MATERIAL_TYPE_LABEL[type]} · 单条录入</h3>
@@ -431,11 +491,7 @@ export function MaterialsImportPage({ user }: Props) {
                 <div className="mat-group-title">{group}</div>
                 {fields.map((f) => (
                   <label className={f.required ? 'field mat-required' : 'field'} key={f.key}>
-                    <span>
-                      {f.label}
-                      {f.unit ? `（${f.unit}）` : ''}
-                      {f.required ? '（必填）' : '（选填）'}
-                    </span>
+                    <FieldLabel label={f.label} unit={f.unit} required={f.required} />
                     <input
                       value={draft[f.key]}
                       placeholder={f.placeholder || '选填'}
@@ -445,7 +501,7 @@ export function MaterialsImportPage({ user }: Props) {
                 ))}
                 {group === '标识与来源' && (
                   <label className="field" key="state">
-                    <span>状态（必选）</span>
+                    <FieldLabel label="状态" required />
                     <select
                       value={draft.state}
                       onChange={(e) => patchState(e.target.value as MaterialState)}
@@ -540,6 +596,15 @@ export function MaterialsImportPage({ user }: Props) {
         </div>
       </div>
 
+        </div>
+
+        <div
+          className="test-page-split"
+          onMouseDown={handleRowResize}
+          title="按住上下拖动，调节上下区域高度"
+        />
+
+        <div className="test-page-row">
       <div className="settings-card">
         <div className="pc-head">
           <h3>待入库预览 ({entries.length})</h3>
@@ -675,11 +740,7 @@ export function MaterialsImportPage({ user }: Props) {
                     <div className="mat-group-title">{group}</div>
                     {fields.map((f) => (
                       <label className={f.required ? 'field mat-required' : 'field'} key={f.key}>
-                        <span>
-                          {f.label}
-                          {f.unit ? `（${f.unit}）` : ''}
-                          {f.required ? '（必填）' : '（选填）'}
-                        </span>
+                        <FieldLabel label={f.label} unit={f.unit} required={f.required} />
                         <input
                           value={entries[detailIdx].draft[f.key as keyof MaterialDraft] as string}
                           placeholder={f.placeholder || '选填'}
@@ -689,12 +750,7 @@ export function MaterialsImportPage({ user }: Props) {
                               const next = [...prev];
                               const cur = { ...next[detailIdx], draft: { ...next[detailIdx].draft, [f.key]: v } };
                               cur.validation = validateMaterialDraft(cur.draft);
-                              cur.fileName = materialFileName(
-                                cur.draft.grade.trim(),
-                                cur.draft.series.trim(),
-                                Number(cur.draft.temperature),
-                                cur.draft.supplier.trim(),
-                              );
+                              cur.fileName = draftFileName(cur.draft);
                               cur.conflict = existing.some((f0) => f0.name.toLowerCase() === cur.fileName.toLowerCase());
                               next[detailIdx] = cur;
                               return next;
@@ -705,7 +761,7 @@ export function MaterialsImportPage({ user }: Props) {
                     ))}
                     {group === '标识与来源' && (
                       <label className="field" key="state">
-                        <span>状态（必选）</span>
+                        <FieldLabel label="状态" required />
                         <select
                           value={entries[detailIdx].draft.state}
                           onChange={(e) => {
@@ -714,12 +770,7 @@ export function MaterialsImportPage({ user }: Props) {
                               const next = [...prev];
                               const cur = { ...next[detailIdx], draft: { ...next[detailIdx].draft, state: v } };
                               cur.validation = validateMaterialDraft(cur.draft);
-                              cur.fileName = materialFileName(
-                                cur.draft.grade.trim(),
-                                cur.draft.series.trim(),
-                                Number(cur.draft.temperature),
-                                cur.draft.supplier.trim(),
-                              );
+                              cur.fileName = draftFileName(cur.draft);
                               cur.conflict = existing.some((f0) => f0.name.toLowerCase() === cur.fileName.toLowerCase());
                               next[detailIdx] = cur;
                               return next;
@@ -816,6 +867,8 @@ export function MaterialsImportPage({ user }: Props) {
             </div>
           </div>
         )}
+      </div>
+        </div>
       </div>
 
       <input
