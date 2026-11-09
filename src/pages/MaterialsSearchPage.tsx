@@ -4,6 +4,9 @@ import { MaterialCurvePlot } from '../components/MaterialCurvePlot';
 import {
   buildMaterialRecord,
   draftFromRecord,
+  FLUID_TABLE_HEADER,
+  fluidFileName,
+  porousFileName,
   MATERIAL_FIELDS,
   MATERIAL_STATE_LABEL,
   MATERIAL_TYPE_LABEL,
@@ -60,6 +63,8 @@ export function MaterialsSearchPage({ user }: Props) {
   const [editDraft, setEditDraft] = useState<MaterialDraft | null>(null);
   const [editIssues, setEditIssues] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  // 流体属性表编辑：以字符串矩阵承载单元格，保存时解析为数值
+  const [editFluidCells, setEditFluidCells] = useState<string[][]>([]);
 
   // 列表区 / 预览区 高度比例（0.15 ~ 0.85，默认 0.4，与试验报告检索一致）
   const [listRatio, setListRatio] = useState<number>(() => {
@@ -100,6 +105,8 @@ export function MaterialsSearchPage({ user }: Props) {
   // 供应商列与弹性模量筛选都需要记录内容（文件名里没有），进入页面后逐批读取并缓存
   const [recCache, setRecCache] = useState<Record<string, MaterialRecord | null>>({});
   const [cacheBusy, setCacheBusy] = useState(false);
+  // 勾选的材料文件，用于导出部分明细；为空时导出当前筛选结果
+  const [checked, setChecked] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const todo = files.filter((f) => !(f.fullPath in recCache));
@@ -147,13 +154,14 @@ export function MaterialsSearchPage({ user }: Props) {
         const meta = rec
           ? {
               type: rec.type,
+              name: rec.name,
               grade: rec.grade,
               series: rec.series,
               supplier: rec.supplier,
               temperature: rec.temperature,
               state: rec.state,
             }
-          : parseMaterialFileName(f.name);
+          : { ...parseMaterialFileName(f.name), name: '' };
         return { file: f, meta };
       })
       .filter((r) => (typeFilter === 'all' ? true : r.meta.type === typeFilter))
@@ -174,6 +182,7 @@ export function MaterialsSearchPage({ user }: Props) {
         kw
           ? r.meta.grade.toLowerCase().includes(kw) ||
             r.meta.series.toLowerCase().includes(kw) ||
+            r.meta.name.toLowerCase().includes(kw) ||
             r.file.name.toLowerCase().includes(kw)
           : true,
       )
@@ -183,7 +192,10 @@ export function MaterialsSearchPage({ user }: Props) {
   const typeOf = (f: MaterialFile) =>
     recCache[f.fullPath]?.type ?? parseMaterialFileName(f.name).type;
   const convCount = files.filter((f) => typeOf(f) === 'conventional').length;
-  const hyperCount = files.length - convCount;
+  const hyperCount = files.filter((f) => typeOf(f) === 'hyperelastic').length;
+  const fluidCount = files.length - convCount - hyperCount;
+  const allFilteredChecked =
+    filtered.length > 0 && filtered.every((r) => checked.has(r.file.fullPath));
 
   // 预览请求序号：防止快速切换行时，较慢的旧请求覆盖新选中的内容
   const reqSeq = useRef(0);
@@ -307,6 +319,38 @@ export function MaterialsSearchPage({ user }: Props) {
     else if (!res.canceled) showToast('保存 CSV 失败');
   };
 
+  /** 导出材料明细（仅文件名）：优先导出勾选项，否则导出当前筛选结果 */
+  const exportDetails = async () => {
+    const rows = checked.size
+      ? files.filter((f) => checked.has(f.fullPath))
+      : filtered.map((r) => r.file);
+    if (!rows.length) {
+      showToast('没有可导出的材料');
+      return;
+    }
+    const content = [
+      '\uFEFF文件名',
+      ...rows.map((f) => `"${f.name.replace(/"/g, '""')}"`),
+    ].join('\r\n');
+    const stamp = new Date().toISOString().slice(0, 10);
+    const res = await api.file.save({
+      defaultName: `材料明细_${stamp}.csv`,
+      content,
+    });
+    if (res.ok) showToast(`已导出 ${rows.length} 条材料明细`);
+    else if (!res.canceled) showToast('导出明细失败');
+  };
+
+  const toggleChecked = (fullPath: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(fullPath)) next.delete(fullPath);
+      else next.add(fullPath);
+      return next;
+    });
+  };
+
+
   /** 复制曲线数据到剪贴板（带表头的 CSV 格式，方便粘贴进 Excel） */
   const copyCurveData = useCallback(
     (curve: MaterialCurve | null, header: string) => {
@@ -322,6 +366,55 @@ export function MaterialsSearchPage({ user }: Props) {
     if (!record) return;
     setEditDraft(draftFromRecord(record));
     setEditIssues([]);
+    setEditFluidCells(
+      (record.fluidPoints || []).map((p) =>
+        [p.temperature, p.density, p.dynamicViscosity, p.thermalConductivity, p.specificHeat].map(
+          String,
+        ),
+      ),
+    );
+  };
+
+  const FLUID_KEYS = ['temperature', 'density', 'dynamicViscosity', 'thermalConductivity', 'specificHeat'] as const;
+
+  /** 编辑流体单元格：同步字符串矩阵与草稿中的数值（非法输入记为 NaN，保存时校验拦截） */
+  const patchFluidCell = (row: number, col: number, raw: string) => {
+    setEditFluidCells((prev) => prev.map((r, i) => (i === row ? r.map((c, j) => (j === col ? raw : c)) : r)));
+    setEditDraft((prev) => {
+      if (!prev) return prev;
+      const num = raw.trim() === '' ? NaN : Number(raw);
+      const points = (prev.fluidPoints || []).map((p, i) =>
+        i === row ? { ...p, [FLUID_KEYS[col]]: num } : p,
+      );
+      return { ...prev, fluidPoints: points };
+    });
+  };
+
+  const addFluidRow = () => {
+    setEditFluidCells((prev) => [...prev, ['', '', '', '', '']]);
+    setEditDraft((prev) =>
+      prev
+        ? {
+            ...prev,
+            fluidPoints: [
+              ...(prev.fluidPoints || []),
+              { temperature: NaN, density: NaN, dynamicViscosity: NaN, thermalConductivity: NaN, specificHeat: NaN },
+            ],
+          }
+        : prev,
+    );
+  };
+
+  const removeFluidRow = (row: number) => {
+    setEditFluidCells((prev) => prev.filter((_, i) => i !== row));
+    setEditDraft((prev) =>
+      prev ? { ...prev, fluidPoints: (prev.fluidPoints || []).filter((_, i) => i !== row) } : prev,
+    );
+  };
+
+  const clearFluidRows = () => {
+    setEditFluidCells([]);
+    setEditDraft((prev) => (prev ? { ...prev, fluidPoints: null } : prev));
   };
 
   const patchEdit = (key: keyof MaterialDraft, value: string) => {
@@ -374,13 +467,12 @@ export function MaterialsSearchPage({ user }: Props) {
       });
       const hardness =
         next.type === 'hyperelastic' && next.hardness !== null ? String(next.hardness) : '';
-      const newName = materialFileName(
-        next.grade,
-        next.series,
-        next.temperature,
-        next.supplier,
-        hardness,
-      );
+      const newName =
+        next.type === 'fluid'
+          ? fluidFileName(next.name, next.grade)
+          : next.type === 'porous'
+            ? porousFileName(next.grade)
+            : materialFileName(next.grade, next.series, next.temperature ?? 0, next.supplier, hardness);
       const res = await api.material.write({ record: next, fileName: newName, overwrite: true });
       if (!res.ok) {
         setError(`保存失败：${res.message || '未知错误'}`);
@@ -435,7 +527,7 @@ export function MaterialsSearchPage({ user }: Props) {
         const expected = materialFileName(
           rec.grade,
           rec.series,
-          rec.temperature,
+          rec.temperature ?? 0,
           rec.supplier,
           hardness,
         );
@@ -485,6 +577,7 @@ export function MaterialsSearchPage({ user }: Props) {
             </span>
             <span className="chip">常规材料 {convCount}</span>
             <span className="chip">超弹性 {hyperCount}</span>
+            <span className="chip">流体 {fluidCount}</span>
             <button className="btn-ghost sm" onClick={refresh} disabled={busy}>
               {busy ? '刷新中…' : '刷新'}
             </button>
@@ -495,6 +588,14 @@ export function MaterialsSearchPage({ user }: Props) {
               title="为已导入的超弹性材料文件名补入硬度段（牌号+系列号+温度+硬度+供应商）"
             >
               整理文件名
+            </button>
+            <button
+              className="btn-ghost sm"
+              onClick={exportDetails}
+              disabled={busy || files.length === 0}
+              title="导出材料文件名明细：勾选后导出勾选项，未勾选时导出当前筛选结果"
+            >
+              导出明细{checked.size ? `（${checked.size}）` : ''}
             </button>
           </div>
         </div>
@@ -513,6 +614,8 @@ export function MaterialsSearchPage({ user }: Props) {
             <option value="all">全部类型</option>
             <option value="conventional">常规材料</option>
             <option value="hyperelastic">超弹性材料</option>
+            <option value="fluid">流体</option>
+            <option value="porous">多孔介质</option>
           </select>
           <select
             className="tu-project"
@@ -578,6 +681,24 @@ export function MaterialsSearchPage({ user }: Props) {
           <table className="ts-list">
             <thead>
               <tr>
+                <th style={{ width: 40 }} className="center">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredChecked}
+                    onChange={() => {
+                      setChecked((prev) => {
+                        const next = new Set(prev);
+                        if (allFilteredChecked) {
+                          filtered.forEach((r) => next.delete(r.file.fullPath));
+                        } else {
+                          filtered.forEach((r) => next.add(r.file.fullPath));
+                        }
+                        return next;
+                      });
+                    }}
+                    title="全选 / 取消全选当前筛选结果"
+                  />
+                </th>
                 <th style={{ width: 64 }}>类型</th>
                 <th style={{ width: '14%' }}>牌号</th>
                 <th style={{ width: '15%' }}>系列号</th>
@@ -603,15 +724,34 @@ export function MaterialsSearchPage({ user }: Props) {
                     onDoubleClick={() => openFile(file)}
                     title="单击预览，双击用本地软件打开"
                   >
+                    <td className="center">
+                      <input
+                        type="checkbox"
+                        checked={checked.has(file.fullPath)}
+                        onClick={(e) => e.stopPropagation()}
+                        onDoubleClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleChecked(file.fullPath)}
+                      />
+                    </td>
                     <td>
                       {meta.type === 'hyperelastic' ? (
                         <span className="type-badge type-hyper">超弹性</span>
+                      ) : meta.type === 'fluid' ? (
+                        <span className="type-badge type-fluid">流体</span>
+                      ) : meta.type === 'porous' ? (
+                        <span className="type-badge type-porous">多孔</span>
                       ) : (
                         <span className="type-badge type-conv">常规</span>
                       )}
                     </td>
-                    <td>{meta.grade || '—'}</td>
-                    <td>{meta.series || '—'}</td>
+                    <td>{meta.type === 'fluid' ? meta.name || '—' : meta.grade || '—'}</td>
+                    <td>
+                      {meta.type === 'fluid'
+                        ? meta.grade || '—'
+                        : meta.type === 'porous'
+                          ? '—'
+                          : meta.series || '—'}
+                    </td>
                     <td>
                       {meta.supplier ||
                         (recCache[file.fullPath] === undefined ? (
@@ -647,7 +787,7 @@ export function MaterialsSearchPage({ user }: Props) {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="center settings-hint">
+                  <td colSpan={11} className="center settings-hint">
                     {files.length === 0
                       ? '材料库暂无记录，请先在「材料数据导入」模块录入'
                       : '无匹配结果'}
@@ -683,17 +823,28 @@ export function MaterialsSearchPage({ user }: Props) {
                 <h3>{selected.name}</h3>
                 <div className="preview-meta">
                   <span className="chip">类型：{MATERIAL_TYPE_LABEL[selectedMeta.type]}</span>
-                  <span className="chip">牌号：{selectedMeta.grade || '—'}</span>
-                  <span className="chip">系列号：{selectedMeta.series || '—'}</span>
-                  <span className="chip">
-                    状态：
-                    {record
-                      ? MATERIAL_STATE_LABEL[record.state === 'dry' ? 'dry' : 'wet']
-                      : MATERIAL_STATE_LABEL[selectedMeta.state]}
-                  </span>
-                  <span className="chip">
-                    温度：{selectedMeta.temperature == null ? '—' : `${selectedMeta.temperature} °C`}
-                  </span>
+                  {record?.type === 'fluid' ? (
+                    <>
+                      <span className="chip">名称：{record.name || '—'}</span>
+                      <span className="chip">牌号：{record.grade || '—'}</span>
+                    </>
+                  ) : record?.type === 'porous' ? (
+                    <span className="chip">牌号：{record.grade || '—'}</span>
+                  ) : (
+                    <>
+                      <span className="chip">牌号：{selectedMeta.grade || '—'}</span>
+                      <span className="chip">系列号：{selectedMeta.series || '—'}</span>
+                      <span className="chip">
+                        状态：
+                        {record
+                          ? MATERIAL_STATE_LABEL[record.state === 'dry' ? 'dry' : 'wet']
+                          : MATERIAL_STATE_LABEL[selectedMeta.state]}
+                      </span>
+                      <span className="chip">
+                        温度：{selectedMeta.temperature == null ? '—' : `${selectedMeta.temperature} °C`}
+                      </span>
+                    </>
+                  )}
                   {record && <span className="chip">版本：第 {record.revision} 版</span>}
                   <span className="chip">
                     {formatSize(selected.size)} · {new Date(selected.mtime).toLocaleString('zh-CN')}
@@ -746,18 +897,92 @@ export function MaterialsSearchPage({ user }: Props) {
                         </label>
                       ),
                     )}
-                    <label className="field">
-                      <span className="mat-field-label">
-                        <span className="mat-field-name">状态</span>
-                        <span className="mat-field-unit">{'\u00A0'}</span>
-                      </span>
-                      <select value={editDraft.state} onChange={(e) => patchEdit('state', e.target.value)}>
-                        <option value="wet">{MATERIAL_STATE_LABEL.wet}</option>
-                        <option value="dry">{MATERIAL_STATE_LABEL.dry}</option>
-                      </select>
-                    </label>
+                    {(editDraft.type === 'conventional' || editDraft.type === 'hyperelastic') && (
+                      <label className="field">
+                        <span className="mat-field-label">
+                          <span className="mat-field-name">状态</span>
+                          <span className="mat-field-unit">{'\u00A0'}</span>
+                        </span>
+                        <select value={editDraft.state} onChange={(e) => patchEdit('state', e.target.value)}>
+                          <option value="wet">{MATERIAL_STATE_LABEL.wet}</option>
+                          <option value="dry">{MATERIAL_STATE_LABEL.dry}</option>
+                        </select>
+                      </label>
+                    )}
                   </div>
 
+                  {editDraft.type === 'fluid' && (
+                    <div className="mat-edit-curves">
+                      <div className="mat-edit-curve">
+                        <div className="mat-edit-curve-head">
+                          <b>流体属性表</b>
+                          <span className="small muted">
+                            {editFluidCells.length ? `${editFluidCells.length} 行` : '未提供'}
+                          </span>
+                          <button className="btn-ghost sm" onClick={addFluidRow}>
+                            添加行
+                          </button>
+                          <button
+                            className="btn-link danger sm"
+                            onClick={clearFluidRows}
+                            disabled={!editFluidCells.length}
+                          >
+                            清空
+                          </button>
+                        </div>
+                        <div className="mat-curve-table-wrap mat-table-lg">
+                          <table className="mat-curve-table">
+                            <thead>
+                              <tr>
+                                <th style={{ width: 56 }}>#</th>
+                                {FLUID_TABLE_HEADER.map((h) => (
+                                  <th key={h}>{h}</th>
+                                ))}
+                                <th style={{ width: 48 }}></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {editFluidCells.map((row, i) => (
+                                <tr key={i}>
+                                  <td>{i + 1}</td>
+                                  {row.map((cell, j) => (
+                                    <td key={j}>
+                                      <input
+                                        className="mat-cell-input"
+                                        value={cell}
+                                        onChange={(e) => patchFluidCell(i, j, e.target.value)}
+                                      />
+                                    </td>
+                                  ))}
+                                  <td>
+                                    <button
+                                      className="btn-link danger sm"
+                                      title="删除此行"
+                                      onClick={() => removeFluidRow(i)}
+                                    >
+                                      ×
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                              {!editFluidCells.length && (
+                                <tr>
+                                  <td colSpan={7} style={{ textAlign: 'center', color: '#a3b1c2' }}>
+                                    暂无数据，点击「添加行」录入
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div className="settings-hint small">
+                          直接在表格中修改数值；表格 5 列：{FLUID_TABLE_HEADER.join('、')}；保存时会逐项校验取值范围
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {(editDraft.type === 'conventional' || editDraft.type === 'hyperelastic') && (
                   <div className="mat-edit-curves">
                     {(['stressStrainCurve', 'fatigueCurve'] as const).map((key) => (
                       <div className="mat-edit-curve" key={key}>
@@ -785,6 +1010,7 @@ export function MaterialsSearchPage({ user }: Props) {
                       </div>
                     ))}
                   </div>
+                  )}
 
                   {editIssues.length > 0 && (
                     <div className="mat-edit-issues">
@@ -813,6 +1039,156 @@ export function MaterialsSearchPage({ user }: Props) {
                     </span>
                   </div>
                 </div>
+              ) : record.type === 'fluid' ? (
+                <>
+                  <div className="mat-preview-3col" style={{ gridTemplateColumns: '260px 1fr' }}>
+                    {/* 左：基本信息 */}
+                    <div className="mat-preview-col">
+                      <div className="mat-preview-col-head">基本信息</div>
+                      <div className="mat-preview-col-body">
+                        <div className="mat-detail-grid" style={{ gridTemplateColumns: '1fr', gap: 4 }}>
+                          {(MATERIAL_FIELDS.fluid as Array<{ key: string; label: string; unit?: string }>).map((f) => {
+                            const value = (record as unknown as Record<string, unknown>)[f.key];
+                            return (
+                              <div className="mat-detail-item" key={f.key}>
+                                <span>{f.label}{f.unit ? ` (${f.unit})` : ''}</span>
+                                <b>
+                                  {value == null || value === ''
+                                    ? '未提供'
+                                    : `${String(value)}${f.unit ? ` ${f.unit}` : ''}`}
+                                </b>
+                              </div>
+                            );
+                          })}
+                          <div className="mat-detail-item">
+                            <span>录入人</span>
+                            <b>{record.createdByDisplay || record.createdBy || '—'}</b>
+                          </div>
+                          <div className="mat-detail-item">
+                            <span>更新时间</span>
+                            <b>{record.updatedAt ? record.updatedAt.replace('T', ' ').slice(0, 19) : '—'}</b>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 右：流体属性表 */}
+                    <div className="mat-preview-col">
+                      <div className="mat-preview-col-head">
+                        流体属性表
+                        <button
+                          className="btn-link sm"
+                          onClick={async () => {
+                            const pts = record.fluidPoints || [];
+                            const text = [
+                              FLUID_TABLE_HEADER.join(','),
+                              ...pts.map((p) =>
+                                [p.temperature, p.density, p.dynamicViscosity, p.thermalConductivity, p.specificHeat].join(','),
+                              ),
+                            ].join('\n');
+                            try {
+                              await navigator.clipboard.writeText(text);
+                              showToast(`已复制 ${pts.length} 行属性数据`);
+                            } catch {
+                              showToast('复制失败，请检查剪贴板权限');
+                            }
+                          }}
+                          disabled={!record.fluidPoints?.length}
+                          style={{ marginLeft: 'auto', fontSize: 12 }}
+                        >
+                          复制数据
+                        </button>
+                      </div>
+                      {record.fluidPoints?.length ? (
+                        <div className="mat-preview-col-body">
+                          <div className="mat-curve-table-wrap">
+                            <table className="mat-curve-table">
+                              <thead>
+                                <tr>
+                                  <th style={{ width: 56 }}>#</th>
+                                  {FLUID_TABLE_HEADER.map((h) => (
+                                    <th key={h}>{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {record.fluidPoints.map((p, i) => (
+                                  <tr key={i}>
+                                    <td>{i + 1}</td>
+                                    <td>{p.temperature}</td>
+                                    <td>{p.density}</td>
+                                    <td>{p.dynamicViscosity}</td>
+                                    <td>{p.thermalConductivity}</td>
+                                    <td>{p.specificHeat}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="preview-empty" style={{ padding: 30 }}>
+                          <div className="pe-sub">该流体未提供属性表</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="settings-hint small" style={{ marginTop: 10 }}>
+                    记录文件：<span className="mono">{selected.fullPath}</span> · 当前登录：
+                    {user.displayName || user.username}
+                  </p>
+                </>
+              ) : record.type === 'porous' ? (
+                <>
+                  <div className="mat-preview-3col" style={{ gridTemplateColumns: 'minmax(300px, 420px)' }}>
+                    <div className="mat-preview-col">
+                      <div className="mat-preview-col-head">基本信息</div>
+                      <div className="mat-preview-col-body">
+                        <div className="mat-detail-grid" style={{ gridTemplateColumns: '1fr', gap: 4 }}>
+                          {(MATERIAL_FIELDS.porous as Array<{ key: string; label: string; unit?: string }>).map(
+                            (f) => {
+                              const value =
+                                f.key === 'grade'
+                                  ? record.grade
+                                  : f.key === 'remark'
+                                    ? record.porousProps?.remark || ''
+                                    : ((record.porousProps as unknown as Record<string, unknown> | null)?.[
+                                        f.key
+                                      ] ?? null);
+                              return (
+                                <div className="mat-detail-item" key={f.key}>
+                                  <span>
+                                    {f.label}
+                                    {f.unit ? ` (${f.unit})` : ''}
+                                  </span>
+                                  <b>
+                                    {value == null || value === ''
+                                      ? '未提供'
+                                      : `${String(value)}${f.unit ? ` ${f.unit}` : ''}`}
+                                  </b>
+                                </div>
+                              );
+                            },
+                          )}
+                          <div className="mat-detail-item">
+                            <span>录入人</span>
+                            <b>{record.createdByDisplay || record.createdBy || '—'}</b>
+                          </div>
+                          <div className="mat-detail-item">
+                            <span>更新时间</span>
+                            <b>{record.updatedAt ? record.updatedAt.replace('T', ' ').slice(0, 19) : '—'}</b>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="settings-hint small" style={{ marginTop: 10 }}>
+                    记录文件：<span className="mono">{selected.fullPath}</span> · 当前登录：
+                    {user.displayName || user.username}
+                  </p>
+                </>
               ) : (
                 <>
                   <div className="mat-preview-3col" style={{
@@ -866,12 +1242,14 @@ export function MaterialsSearchPage({ user }: Props) {
                         </button>
                       </div>
                       {record.stressStrainCurve?.points.length ? (
-                        <div className="mat-preview-col-body">
-                          <MaterialCurvePlot curve={record.stressStrainCurve} kind="stressStrainCurve" />
-                          <div className="mat-curve-table-wrap">
+                        <div className="mat-preview-col-body mat-curve-body">
+                          <div className="mat-curve-figure">
+                            <MaterialCurvePlot curve={record.stressStrainCurve} kind="stressStrainCurve" square />
+                          </div>
+                          <div className="mat-curve-table-wrap mat-curve-table-narrow">
                             <table className="mat-curve-table">
                               <thead>
-                                <tr><th style={{ width: 56 }}>#</th><th>应变 (%)</th><th>应力 (MPa)</th></tr>
+                                <tr><th style={{ width: 40 }}>#</th><th>应变 (%)</th><th>应力 (MPa)</th></tr>
                               </thead>
                               <tbody>
                                 {record.stressStrainCurve.points.map((p, i) => (
@@ -906,12 +1284,14 @@ export function MaterialsSearchPage({ user }: Props) {
                             复制数据
                           </button>
                         </div>
-                        <div className="mat-preview-col-body">
-                          <MaterialCurvePlot curve={record.fatigueCurve} kind="fatigueCurve" />
-                          <div className="mat-curve-table-wrap">
+                        <div className="mat-preview-col-body mat-curve-body">
+                          <div className="mat-curve-figure">
+                            <MaterialCurvePlot curve={record.fatigueCurve} kind="fatigueCurve" square />
+                          </div>
+                          <div className="mat-curve-table-wrap mat-curve-table-narrow">
                             <table className="mat-curve-table">
                               <thead>
-                                <tr><th style={{ width: 56 }}>#</th><th>寿命 (cycles)</th><th>应力 (MPa)</th></tr>
+                                <tr><th style={{ width: 40 }}>#</th><th>寿命 (cycles)</th><th>应力 (MPa)</th></tr>
                               </thead>
                               <tbody>
                                 {record.fatigueCurve.points.map((p, i) => (

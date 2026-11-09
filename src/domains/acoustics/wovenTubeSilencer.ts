@@ -127,7 +127,7 @@ export const wovenTubeSilencer: FormulaSpec = {
   id: 'acoustics.muffler.wovenTube',
   domain: 'acoustics',
   subsystem: '消声器',
-  title: '编织管消音器',
+  title: '★编织管消音器',
   summary: '按 PPT 的 JCA 等效流体模型计算编织管的等效密度/模量、管壁阻抗 ζw = Rw + jXw、管内复数波数 kx 与衰减系数 α，由传递矩阵法给出传递损失并绘制 TL - Frequency 曲线。★ 公式验证不充分，结果仅供参考。',
   tags: ['编织管', 'JCA', '等效流体', '消音器', '消声器', '传递损失', 'TL', 'NVH', '进气系统', '排气系统'],
   description:

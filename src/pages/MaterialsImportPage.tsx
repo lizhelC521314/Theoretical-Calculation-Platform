@@ -6,6 +6,10 @@ import {
   CURVE_LABEL,
   curveSummary,
   emptyDraft,
+  FLUID_TABLE_HEADER,
+  fluidFileName,
+  porousFileName,
+  fluidSummary,
   MATERIAL_CURVE_FIELDS,
   MATERIAL_FIELDS,
   MATERIAL_GROUP_ORDER,
@@ -14,11 +18,13 @@ import {
   materialFileName,
   materialTemplateCsv,
   parseCurveCsv,
+  parseFluidCsv,
   parseMaterialCsv,
   parseMaterialFileName,
   parseMaterialRecord,
   parseMaterialXlsx,
   validateMaterialDraft,
+  type FluidPoint,
   type MaterialCurve,
   type MaterialCurveKey,
   type MaterialDraft,
@@ -51,20 +57,24 @@ function cloneDraft(d: MaterialDraft): MaterialDraft {
     fatigueCurve: d.fatigueCurve
       ? { ...d.fatigueCurve, points: d.fatigueCurve.points.map((p) => ({ ...p })) }
       : null,
+    fluidPoints: d.fluidPoints ? d.fluidPoints.map((p) => ({ ...p })) : null,
   };
 }
 
 function fieldLabel(key: string): string {
   if (key === 'stressStrainCurve' || key === 'fatigueCurve') return CURVE_LABEL[key];
-  for (const t of ['conventional', 'hyperelastic'] as MaterialType[]) {
+  if (key === 'fluidPoints') return '流体属性表';
+  for (const t of Object.keys(MATERIAL_FIELDS) as MaterialType[]) {
     const f = MATERIAL_FIELDS[t].find((x) => x.key === key);
     if (f) return f.label;
   }
   return key;
 }
 
-/** 生成归档文件名：超弹性材料在供应商前加入硬度段 */
+/** 生成归档文件名：流体=名称+牌号；超弹性材料在供应商前加入硬度段 */
 function draftFileName(d: MaterialDraft): string {
+  if (d.type === 'fluid') return fluidFileName(d.name.trim(), d.grade.trim());
+  if (d.type === 'porous') return porousFileName(d.grade.trim());
   const hardness = d.type === 'hyperelastic' ? d.hardness.trim() : '';
   return materialFileName(
     d.grade.trim(),
@@ -88,7 +98,37 @@ function FieldLabel({ label, unit, required }: { label: string; unit?: string; r
   );
 }
 
-/** 材料库数据导入：补齐必填 3 项 → 校验物性与曲线 → 归档为 Apache Parquet */
+/** 流体属性表预览（只读表格） */
+function FluidTablePreview({ points }: { points: FluidPoint[] }) {
+  return (
+    <div className="mat-curve-table-wrap mat-table-lg">
+      <table className="mat-curve-table">
+        <thead>
+          <tr>
+            <th style={{ width: 56 }}>#</th>
+            {FLUID_TABLE_HEADER.map((h) => (
+              <th key={h}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {points.map((p, i) => (
+            <tr key={i}>
+              <td>{i + 1}</td>
+              <td>{p.temperature}</td>
+              <td>{p.density}</td>
+              <td>{p.dynamicViscosity}</td>
+              <td>{p.thermalConductivity}</td>
+              <td>{p.specificHeat}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** 材料库数据导入：补齐必填项 → 校验物性与曲线 → 归档为 Apache Parquet */
 export function MaterialsImportPage({ user }: Props) {
   const [type, setType] = useState<MaterialType>('conventional');
   const [draft, setDraft] = useState<MaterialDraft>(() => emptyDraft('conventional'));
@@ -212,9 +252,21 @@ export function MaterialsImportPage({ user }: Props) {
       ...prev,
       { id: uid(), draft: cloneDraft(draft), validation, fileName, conflict: conflictOf(fileName) },
     ]);
-    showToast(`${draft.grade} / ${draft.temperature} °C / ${MATERIAL_STATE_LABEL[draft.state]} 已加入预览`);
-    // 保留牌号、系列号与状态，便于继续录入其他温度
-    setDraft({ ...emptyDraft(type), grade: draft.grade, series: draft.series, state: draft.state });
+    showToast(
+      type === 'fluid'
+        ? `${draft.name} / ${draft.grade} 已加入预览`
+        : type === 'porous'
+          ? `${draft.grade} 已加入预览`
+          : `${draft.grade} / ${draft.temperature} °C / ${MATERIAL_STATE_LABEL[draft.state]} 已加入预览`,
+    );
+    // 保留牌号、系列号与状态（流体保留名称与牌号；多孔介质每条独立，不保留），便于继续录入下一条
+    setDraft(
+      type === 'fluid'
+        ? { ...emptyDraft(type), name: draft.name, grade: draft.grade }
+        : type === 'porous'
+          ? emptyDraft(type)
+          : { ...emptyDraft(type), grade: draft.grade, series: draft.series, state: draft.state },
+    );
     setPasteOpen({});
     setPasteText({});
   };
@@ -257,9 +309,65 @@ export function MaterialsImportPage({ user }: Props) {
     curveInputRef.current?.click();
   };
 
+  /** 流体属性表：应用解析结果（CSV / Excel / 粘贴三种入口共用） */
+  const applyFluidTable = (
+    res: { points: FluidPoint[]; warnings: string[]; error: string },
+    target: 'form' | number,
+  ) => {
+    if (res.error) {
+      showToast(`属性表解析失败：${res.error}`);
+      return;
+    }
+    if (res.warnings.length) showToast(res.warnings[0]);
+    const apply = (d: MaterialDraft): MaterialDraft => ({ ...d, fluidPoints: res.points });
+    if (target === 'form') {
+      setDraft((prev) => apply(prev));
+    } else {
+      setEntries((prev) => {
+        const next = [...prev];
+        const cur = { ...next[target], draft: apply(next[target].draft) };
+        cur.validation = validateMaterialDraft(cur.draft);
+        next[target] = cur;
+        return next;
+      });
+    }
+    showToast(`已解析 ${res.points.length} 行属性数据`);
+  };
+
+  const fluidFileRef = useRef<HTMLInputElement | null>(null);
+  const fluidFileTarget = useRef<'form' | number>('form');
+
+  const pickFluidFile = (target: 'form' | number) => {
+    fluidFileTarget.current = target;
+    fluidFileRef.current?.click();
+  };
+
+  /** 流体属性表文件：CSV 直接读文本，Excel 走 xlsx 解析 */
+  const onFluidFile = async (file: File) => {
+    const target = fluidFileTarget.current;
+    if (/\.(xlsx|xls)$/i.test(file.name)) {
+      try {
+        const parsed = await parseMaterialXlsx(file, 'fluid');
+        if (parsed.error) {
+          showToast(`属性表解析失败：${parsed.error}`);
+          return;
+        }
+        const pts = parsed.drafts[0]?.fluidPoints || [];
+        applyFluidTable({ points: pts, warnings: parsed.warnings || [], error: '' }, target);
+      } catch (e) {
+        showToast(`Excel 解析失败：${e instanceof Error ? e.message : String(e)}`);
+      }
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => applyFluidTable(parseFluidCsv(String(reader.result || '')), target);
+    reader.onerror = () => showToast('属性表文件读取失败');
+    reader.readAsText(file, 'utf-8');
+  };
+
   /** 批量导入：CSV 与 Excel 共用后续校验链 */
   const queueEntriesFromParsed = (
-    parsed: { drafts: MaterialDraft[]; error: string; ignoredCurves: boolean },
+    parsed: { drafts: MaterialDraft[]; error: string; ignoredCurves: boolean; warnings?: string[] },
     sourceHint: string,
   ) => {
     if (parsed.error) {
@@ -273,10 +381,17 @@ export function MaterialsImportPage({ user }: Props) {
       // 批量导入统一按当前选择的 type 入库（覆盖文件里可能的类型暗示）
       d.type = type;
       const temp = Number(d.temperature);
-      const complete = Boolean(d.grade.trim() && d.series.trim() && Number.isFinite(temp));
+      const complete =
+        type === 'fluid'
+          ? Boolean(d.name.trim() && d.grade.trim() && d.fluidPoints?.length)
+          : type === 'porous'
+            ? Boolean(d.grade.trim())
+            : Boolean(d.grade.trim() && d.series.trim() && Number.isFinite(temp));
       if (validation.errors.length) invalid++;
       // 缺必填项的行也加入待入库预览，方便操作者在详情面板里补全后归档
-      const fileName = complete ? draftFileName(d) : `（待补全）${d.grade.trim() || '材料'}`;
+      const fileName = complete
+        ? draftFileName(d)
+        : `（待补全）${d.grade.trim() || d.name.trim() || '材料'}`;
       added.push({
         id: uid(),
         draft: d,
@@ -297,6 +412,7 @@ export function MaterialsImportPage({ user }: Props) {
       `${sourceHint}：解析 ${parsed.drafts.length} 行，加入 ${added.length} 行` +
         (invalid ? `，其中 ${invalid} 行待补全（详情面板中标红项需填写后才能归档）` : '') +
         (parsed.ignoredCurves ? '；曲线需单独上传' : '') +
+        (parsed.warnings?.length ? `；${parsed.warnings.length} 行被跳过（${parsed.warnings[0]}）` : '') +
         `，按「${MATERIAL_TYPE_LABEL[type]}」入库`,
     );
   };
@@ -423,6 +539,20 @@ export function MaterialsImportPage({ user }: Props) {
         >
           超弹性材料
         </button>
+        <button
+          className={type === 'fluid' ? 'btn-primary sm' : 'btn-ghost sm'}
+          onClick={() => switchType('fluid')}
+          disabled={archiving}
+        >
+          流体
+        </button>
+        <button
+          className={type === 'porous' ? 'btn-primary sm' : 'btn-ghost sm'}
+          onClick={() => switchType('porous')}
+          disabled={archiving}
+        >
+          多孔介质
+        </button>
         <label className={busy || archiving ? 'btn-ghost sm disabled' : 'btn-ghost sm'}>
           批量导入 CSV
           <input
@@ -464,7 +594,11 @@ export function MaterialsImportPage({ user }: Props) {
           <span className={type === 'conventional' ? 'tag type-conv' : 'tag type-hyper'} style={{ marginLeft: 6 }}>
             {MATERIAL_TYPE_LABEL[type]}
           </span>
-          · 必填仅 3 项
+          {type === 'fluid'
+            ? ' · 必填：名称、牌号 + 属性表'
+            : type === 'porous'
+              ? ' · 必填：牌号'
+              : ' · 必填仅 3 项'}
         </span>
       </div>
 
@@ -478,8 +612,22 @@ export function MaterialsImportPage({ user }: Props) {
       <div className="settings-card">
         <div className="pc-head">
           <h3>{MATERIAL_TYPE_LABEL[type]} · 单条录入</h3>
-          <span className="tag">牌号、系列号、温度必填</span>
-          <span className="tag light">其余字段选填，留空表示无此参数</span>
+          {type === 'fluid' ? (
+            <>
+              <span className="tag">名称、牌号、属性表必填</span>
+              <span className="tag light">属性表随文件导入：5 列，从第 2 行起读</span>
+            </>
+          ) : type === 'porous' ? (
+            <>
+              <span className="tag">牌号必填</span>
+              <span className="tag light">孔径与阻力系数选填；批量导入按滤纸列表表头映射，每行一条</span>
+            </>
+          ) : (
+            <>
+              <span className="tag">牌号、系列号、温度必填</span>
+              <span className="tag light">其余字段选填，留空表示无此参数</span>
+            </>
+          )}
         </div>
 
         <div className="mat-form-grid">
@@ -499,7 +647,7 @@ export function MaterialsImportPage({ user }: Props) {
                     />
                   </label>
                 ))}
-                {group === '标识与来源' && (
+                {group === '标识与来源' && (type === 'conventional' || type === 'hyperelastic') && (
                   <label className="field" key="state">
                     <FieldLabel label="状态" required />
                     <select
@@ -515,7 +663,62 @@ export function MaterialsImportPage({ user }: Props) {
             );
           })}
 
-          <div className="mat-group-title">曲线数据</div>
+          {type === 'fluid' && (
+            <>
+              <div className="mat-group-title">流体属性表</div>
+              <div className="mat-curve-card">
+                <div className="mat-curve-head">
+                  <b>温度-物性表</b>
+                  <span className={draft.fluidPoints?.length ? 'mat-curve-status ok' : 'mat-curve-status'}>
+                    {draft.fluidPoints?.length ? `已导入 ${draft.fluidPoints.length} 行` : '未上传（必填）'}
+                  </span>
+                </div>
+                <div className="mat-curve-actions">
+                  <button className="btn-ghost sm" onClick={() => pickFluidFile('form')} disabled={archiving}>
+                    上传 CSV / Excel
+                  </button>
+                  <button
+                    className="btn-link"
+                    onClick={() => setPasteOpen((prev) => ({ ...prev, fluidTable: !prev.fluidTable }))}
+                  >
+                    {pasteOpen.fluidTable ? '收起' : '粘贴数据'}
+                  </button>
+                  {draft.fluidPoints?.length ? (
+                    <button
+                      className="btn-link danger"
+                      onClick={() => setDraft((prev) => ({ ...prev, fluidPoints: null }))}
+                    >
+                      清空
+                    </button>
+                  ) : null}
+                  <span className="small muted">{fluidSummary(draft.fluidPoints)}</span>
+                </div>
+                {pasteOpen.fluidTable && (
+                  <div className="mat-paste mat-paste-lg">
+                    <textarea
+                      value={pasteText.fluidTable || ''}
+                      onChange={(e) => setPasteText((prev) => ({ ...prev, fluidTable: e.target.value }))}
+                      placeholder={'温度(℃),密度(kg/m³),动力粘度(mPa·s),导热系数(W/(m·K)),比热(kJ/(kg·K))\n20,998.2,1.002,0.599,4.182\n40,992.2,0.653,0.631,4.179'}
+                    />
+                    <button
+                      className="btn-ghost sm"
+                      onClick={() => applyFluidTable(parseFluidCsv(pasteText.fluidTable || ''), 'form')}
+                    >
+                      解析粘贴内容
+                    </button>
+                  </div>
+                )}
+                {draft.fluidPoints?.length ? <FluidTablePreview points={draft.fluidPoints} /> : null}
+                <div className="settings-hint small">
+                  表格 5 列：{FLUID_TABLE_HEADER.join('、')}；从第 2 行起按列读取，遇到非数字行停止
+                </div>
+              </div>
+            </>
+          )}
+
+          {(type === 'conventional' || type === 'hyperelastic') && (
+            <div className="mat-group-title">曲线数据</div>
+          )}
           {MATERIAL_CURVE_FIELDS[type].map((c) => {
             const curve = draft[c.key];
             return (
@@ -633,12 +836,25 @@ export function MaterialsImportPage({ user }: Props) {
           <div className="test-empty">
             <h3>录入材料数据开始归档</h3>
             <p className="settings-hint">
-              在上方选择材料类型，填写牌号、系列号与温度（必填），其余物性、曲线可按实际情况补全。
-              曲线支持 CSV 上传或直接粘贴两列数据；也可用「批量导入 CSV」一次录入多条，
-              曲线需在加入预览后单独上传。
-              归档文件为「{MATERIAL_TYPE_LABEL[type]}+牌号+系列号+温度℃.parquet」，存放在
+              {type === 'fluid'
+                ? '选择「流体」后填写名称与牌号（必填），并上传或粘贴 5 列属性表（温度、密度、动力粘度、导热系数、比热），从第 2 行起按列读取。'
+                : type === 'porous'
+                  ? '选择「多孔介质」后填写牌号（必填），孔径与 4 项阻力系数选填；也可用「批量导入 CSV / Excel」按滤纸列表表头一次导入多条（每行一条）。'
+                  : '在上方选择材料类型，填写牌号、系列号与温度（必填），其余物性、曲线可按实际情况补全。曲线支持 CSV 上传或直接粘贴两列数据；也可用「批量导入 CSV」一次录入多条，曲线需在加入预览后单独上传。'}
+              归档文件为「
+              {type === 'fluid'
+                ? '名称+牌号'
+                : type === 'porous'
+                  ? '牌号'
+                  : `${MATERIAL_TYPE_LABEL[type]}+牌号+系列号+温度℃`}
+              .parquet」，存放在
               <span className="mono"> {UNC_MATERIAL_LIB} </span>
-              目录。同一牌号 + 系列号下的不同温度会分别保存。
+              目录。
+              {type === 'fluid'
+                ? '同一名称 + 牌号视为同一记录。'
+                : type === 'porous'
+                  ? '同一牌号视为同一记录。'
+                  : '同一牌号 + 系列号下的不同温度会分别保存。'}
             </p>
           </div>
         ) : (
@@ -666,13 +882,24 @@ export function MaterialsImportPage({ user }: Props) {
                     onClick={() => setDetailIdx(idx)}
                   >
                     <td>{MATERIAL_TYPE_LABEL[entry.draft.type]}</td>
-                    <td>{entry.draft.grade}</td>
-                    <td>{entry.draft.series}</td>
-                    <td>{entry.draft.temperature} °C</td>
-                    <td>{entry.draft.supplier || '—'}</td>
+                    <td>{entry.draft.type === 'fluid' ? entry.draft.name : entry.draft.grade}</td>
+                    <td>{entry.draft.type === 'fluid' ? entry.draft.grade : entry.draft.series || '—'}</td>
+                    <td>
+                      {entry.draft.type === 'fluid' || entry.draft.type === 'porous'
+                        ? '—'
+                        : `${entry.draft.temperature} °C`}
+                    </td>
+                    <td>
+                      {entry.draft.type === 'fluid' || entry.draft.type === 'porous'
+                        ? '—'
+                        : entry.draft.supplier || '—'}
+                    </td>
                     <td className="small">
-                      σ-ε {entry.draft.stressStrainCurve?.points.length || 0} 点 / S-N{' '}
-                      {entry.draft.fatigueCurve?.points.length || 0} 点
+                      {entry.draft.type === 'fluid'
+                        ? `属性表 ${entry.draft.fluidPoints?.length || 0} 行`
+                        : entry.draft.type === 'porous'
+                          ? '—'
+                          : `σ-ε ${entry.draft.stressStrainCurve?.points.length || 0} 点 / S-N ${entry.draft.fatigueCurve?.points.length || 0} 点`}
                     </td>
                     <td>
                       {entry.conflict ? (
@@ -714,8 +941,12 @@ export function MaterialsImportPage({ user }: Props) {
           <div className="settings-card" style={{ marginTop: 12 }}>
             <div className="pc-head">
               <h3>
-                验证 & 修改 · {entries[detailIdx].draft.grade} / {entries[detailIdx].draft.series} /{' '}
-                {entries[detailIdx].draft.temperature} °C
+                验证 & 修改 ·{' '}
+                {entries[detailIdx].draft.type === 'fluid'
+                  ? `${entries[detailIdx].draft.name} / ${entries[detailIdx].draft.grade}`
+                  : entries[detailIdx].draft.type === 'porous'
+                    ? entries[detailIdx].draft.grade
+                    : `${entries[detailIdx].draft.grade} / ${entries[detailIdx].draft.series} / ${entries[detailIdx].draft.temperature} °C`}
               </h3>
               <span className={entries[detailIdx].conflict ? 'tag tag-warn' : 'tag tag-ok'}>
                 {entries[detailIdx].conflict ? '冲突' : '可入库'}
@@ -759,7 +990,9 @@ export function MaterialsImportPage({ user }: Props) {
                         />
                       </label>
                     ))}
-                    {group === '标识与来源' && (
+                    {group === '标识与来源' &&
+                      (entries[detailIdx].draft.type === 'conventional' ||
+                        entries[detailIdx].draft.type === 'hyperelastic') && (
                       <label className="field" key="state">
                         <FieldLabel label="状态" required />
                         <select
@@ -786,7 +1019,97 @@ export function MaterialsImportPage({ user }: Props) {
                 );
               })}
 
-              <div className="mat-group-title">曲线数据</div>
+              {entries[detailIdx].draft.type === 'fluid' && (
+                <>
+                  <div className="mat-group-title">流体属性表</div>
+                  <div className="mat-curve-card">
+                    <div className="mat-curve-head">
+                      <b>温度-物性表</b>
+                      <span
+                        className={
+                          entries[detailIdx].draft.fluidPoints?.length
+                            ? 'mat-curve-status ok'
+                            : 'mat-curve-status'
+                        }
+                      >
+                        {entries[detailIdx].draft.fluidPoints?.length
+                          ? `已导入 ${entries[detailIdx].draft.fluidPoints!.length} 行`
+                          : '未上传（必填）'}
+                      </span>
+                    </div>
+                    <div className="mat-curve-actions">
+                      <button className="btn-ghost sm" onClick={() => pickFluidFile(detailIdx)} disabled={archiving}>
+                        上传 CSV / Excel
+                      </button>
+                      <button
+                        className="btn-link"
+                        onClick={() => {
+                          const pts = entries[detailIdx].draft.fluidPoints;
+                          if (!pts?.length) return;
+                          const text = pts
+                            .map((p) =>
+                              [p.temperature, p.density, p.dynamicViscosity, p.thermalConductivity, p.specificHeat].join(','),
+                            )
+                            .join('\n');
+                          setPasteText((prev) => ({ ...prev, detailFluidTable: text }));
+                          setPasteOpen((prev) => ({ ...prev, detailFluidTable: true }));
+                        }}
+                        disabled={!entries[detailIdx].draft.fluidPoints?.length}
+                      >
+                        转成粘贴
+                      </button>
+                      {entries[detailIdx].draft.fluidPoints?.length ? (
+                        <button
+                          className="btn-link danger"
+                          onClick={() => {
+                            setEntries((prev) => {
+                              const next = [...prev];
+                              const cur = { ...next[detailIdx], draft: { ...next[detailIdx].draft, fluidPoints: null } };
+                              cur.validation = validateMaterialDraft(cur.draft);
+                              next[detailIdx] = cur;
+                              return next;
+                            });
+                          }}
+                        >
+                          清空
+                        </button>
+                      ) : null}
+                      <span className="small muted">{fluidSummary(entries[detailIdx].draft.fluidPoints)}</span>
+                    </div>
+                    {pasteOpen.detailFluidTable && (
+                      <div className="mat-paste mat-paste-lg">
+                        <textarea
+                          value={pasteText.detailFluidTable || ''}
+                          onChange={(e) => setPasteText((prev) => ({ ...prev, detailFluidTable: e.target.value }))}
+                          placeholder={'温度(℃),密度(kg/m³),动力粘度(mPa·s),导热系数(W/(m·K)),比热(kJ/(kg·K))\n20,998.2,1.002,0.599,4.182'}
+                        />
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button
+                            className="btn-ghost sm"
+                            onClick={() => applyFluidTable(parseFluidCsv(pasteText.detailFluidTable || ''), detailIdx)}
+                          >
+                            应用粘贴
+                          </button>
+                          <button className="btn-link" onClick={() => setPasteOpen((prev) => ({ ...prev, detailFluidTable: false }))}>
+                            收起
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {entries[detailIdx].draft.fluidPoints?.length ? (
+                      <FluidTablePreview points={entries[detailIdx].draft.fluidPoints!} />
+                    ) : null}
+                    <div className="settings-hint small">
+                      表格 5 列：{FLUID_TABLE_HEADER.join('、')}；从第 2 行起按列读取，遇到非数字行停止
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {(entries[detailIdx].draft.type === 'conventional' ||
+                entries[detailIdx].draft.type === 'hyperelastic') && (
+                <div className="mat-group-title">曲线数据</div>
+              )}
               {MATERIAL_CURVE_FIELDS[entries[detailIdx].draft.type].map((c) => {
                 const curve = entries[detailIdx].draft[c.key];
                 return (
@@ -880,6 +1203,18 @@ export function MaterialsImportPage({ user }: Props) {
           const file = e.target.files?.[0];
           e.target.value = '';
           if (file) onCurveFile(curveTarget.current, file);
+        }}
+      />
+
+      <input
+        type="file"
+        accept=".csv,.txt,.xlsx,.xls"
+        hidden
+        ref={fluidFileRef}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (file) onFluidFile(file);
         }}
       />
 

@@ -13,7 +13,7 @@
 
 import { cleanFileName } from './db';
 
-export type MaterialType = 'conventional' | 'hyperelastic';
+export type MaterialType = 'conventional' | 'hyperelastic' | 'fluid' | 'porous';
 
 /** 材料状态：湿态 / 干态（默认湿态） */
 export type MaterialState = 'wet' | 'dry';
@@ -26,7 +26,37 @@ export const MATERIAL_STATE_LABEL: Record<MaterialState, string> = {
 export const MATERIAL_TYPE_LABEL: Record<MaterialType, string> = {
   conventional: '常规材料',
   hyperelastic: '超弹性材料',
+  fluid: '流体',
+  porous: '多孔介质',
 };
+
+/** 多孔介质参数（滤纸/滤芯等，随牌号给定，无温度维度） */
+export interface PorousProps {
+  poreSize: number | null; // 孔径，μm
+  viscousResistance: number | null; // 粘性阻力系数，m⁻²
+  inertialResistance: number | null; // 惯性阻力系数，m⁻¹
+  viscousCoefficient: number | null; // 粘性阻力系数，kg/(m³·s)
+  inertialCoefficient: number | null; // 惯性阻力系数，kg/m⁴
+  remark: string; // 备注
+}
+
+/** 流体属性表一行：温度 + 4 项物性（随温度变化） */
+export interface FluidPoint {
+  temperature: number; // ℃
+  density: number; // kg/m³
+  dynamicViscosity: number; // mPa·s
+  thermalConductivity: number; // W/(m·K)
+  specificHeat: number; // kJ/(kg·K)
+}
+
+/** 流体属性表列表头（与导入表格列顺序一致） */
+export const FLUID_TABLE_HEADER = [
+  '温度(℃)',
+  '密度(kg/m³)',
+  '动力粘度(mPa·s)',
+  '导热系数(W/(m·K))',
+  '比热(kJ/(kg·K))',
+] as const;
 
 export const MATERIAL_SCHEMA = 'ctr-material-v1';
 
@@ -45,11 +75,12 @@ export interface MaterialCurve {
 export interface MaterialRecord {
   schema: typeof MATERIAL_SCHEMA;
   type: MaterialType;
+  name: string; // 名称（流体必填，其余类型为空串）
   grade: string;
   series: string;
   supplier: string;
   state: MaterialState; // 湿态 / 干态
-  temperature: number;
+  temperature: number | null; // 流体为 null（温度在属性表内逐行给出）
   density: number | null; // kg/m³
   poisson: number | null;
   elasticModulus: number | null;
@@ -62,6 +93,8 @@ export interface MaterialRecord {
   expansionCoefficient: number | null; // 膨胀系数，mm/(mm·K)
   stressStrainCurve: MaterialCurve | null;
   fatigueCurve: MaterialCurve | null;
+  fluidPoints: FluidPoint[] | null; // 流体属性表（仅 fluid 类型）
+  porousProps: PorousProps | null; // 多孔介质参数（仅 porous 类型）
   createdAt: string;
   updatedAt: string;
   createdBy: string;
@@ -73,6 +106,7 @@ export interface MaterialRecord {
 /** 录入草稿：表单中数值/温度均以字符串保存，便于保持空值 */
 export interface MaterialDraft {
   type: MaterialType;
+  name: string; // 名称（流体必填，其余类型为空串）
   grade: string;
   series: string;
   supplier: string;
@@ -90,9 +124,18 @@ export interface MaterialDraft {
   expansionCoefficient: string;
   stressStrainCurve: MaterialCurve | null;
   fatigueCurve: MaterialCurve | null;
+  fluidPoints: FluidPoint[] | null; // 流体属性表（仅 fluid 类型）
+  // 多孔介质参数（仅 porous 类型，字符串便于保持空值）
+  poreSize: string;
+  viscousResistance: string;
+  inertialResistance: string;
+  viscousCoefficient: string;
+  inertialCoefficient: string;
+  remark: string;
 }
 
 export type MaterialTextFieldKey =
+  | 'name'
   | 'grade'
   | 'series'
   | 'supplier'
@@ -107,7 +150,13 @@ export type MaterialTextFieldKey =
   | 'failureStrain'
   | 'specificHeat'
   | 'thermalConductivity'
-  | 'expansionCoefficient';
+  | 'expansionCoefficient'
+  | 'poreSize'
+  | 'viscousResistance'
+  | 'inertialResistance'
+  | 'viscousCoefficient'
+  | 'inertialCoefficient'
+  | 'remark';
 
 /** 状态文本归一：含「干」判为干态，其余（含空）默认湿态 */
 export function normalizeState(text: string): MaterialState {
@@ -151,9 +200,28 @@ const COMMON_MATERIAL_FIELDS: MaterialFieldDef[] = [
   { key: 'failureStrain', label: '破坏应变', group: '力学性能', unit: '%', placeholder: '选填' },
 ];
 
+/** 流体字段：名称 + 牌号（属性表随文件导入，不走表单字段） */
+const FLUID_MATERIAL_FIELDS: MaterialFieldDef[] = [
+  { key: 'name', label: '名称', group: '标识与来源', required: true, placeholder: '如 水、乙二醇水溶液、液压油' },
+  { key: 'grade', label: '牌号', group: '标识与来源', required: true, placeholder: '如 DW-40、L-HM46' },
+];
+
+/** 多孔介质字段：牌号必填，参数选填（与滤纸输入列表一致） */
+const POROUS_MATERIAL_FIELDS: MaterialFieldDef[] = [
+  { key: 'grade', label: '牌号', group: '标识与来源', required: true, placeholder: '如 XH34720、AK55/66CN1' },
+  { key: 'poreSize', label: '孔径', group: '基础物性', unit: 'μm', placeholder: '(0, 10000]' },
+  { key: 'viscousResistance', label: '粘性阻力系数', group: '基础物性', unit: 'm⁻²', placeholder: '(0, 1e12]' },
+  { key: 'inertialResistance', label: '惯性阻力系数', group: '基础物性', unit: 'm⁻¹', placeholder: '(0, 1e12]' },
+  { key: 'viscousCoefficient', label: '粘性阻力系数', group: '基础物性', unit: 'kg/(m³·s)', placeholder: '(0, 1e12]' },
+  { key: 'inertialCoefficient', label: '惯性阻力系数', group: '基础物性', unit: 'kg/m⁴', placeholder: '(0, 1e12]' },
+  { key: 'remark', label: '备注', group: '基础物性', placeholder: '选填' },
+];
+
 export const MATERIAL_FIELDS: Record<MaterialType, MaterialFieldDef[]> = {
   conventional: COMMON_MATERIAL_FIELDS,
   hyperelastic: COMMON_MATERIAL_FIELDS,
+  fluid: FLUID_MATERIAL_FIELDS,
+  porous: POROUS_MATERIAL_FIELDS,
 };
 
 export const MATERIAL_CURVE_FIELDS: Record<
@@ -168,6 +236,8 @@ export const MATERIAL_CURVE_FIELDS: Record<
     { key: 'stressStrainCurve', label: '应力应变曲线（单轴）', hint: 'CSV 两列：应变(%)、应力(MPa)，至少 5 点' },
     { key: 'fatigueCurve', label: '疲劳寿命曲线', hint: 'CSV 两列：寿命(cycles)、应力(MPa)，至少 4 点' },
   ],
+  fluid: [],
+  porous: [],
 };
 
 export const CURVE_LABEL: Record<MaterialCurveKey, string> = {
@@ -214,6 +284,7 @@ export function materialKey(input: {
 export function emptyDraft(type: MaterialType): MaterialDraft {
   return {
     type,
+    name: '',
     grade: '',
     series: '',
     supplier: '',
@@ -231,6 +302,13 @@ export function emptyDraft(type: MaterialType): MaterialDraft {
     expansionCoefficient: '',
     stressStrainCurve: null,
     fatigueCurve: null,
+    fluidPoints: null,
+    poreSize: '',
+    viscousResistance: '',
+    inertialResistance: '',
+    viscousCoefficient: '',
+    inertialCoefficient: '',
+    remark: '',
   };
 }
 
@@ -243,11 +321,10 @@ export function validateCurvePoints(
   const warnings: string[] = [];
   if (key === 'stressStrainCurve') {
     if (points.length < 5) errors.push('至少 5 个数据点');
-    if (points.some((p) => p.x < 0)) errors.push('应变不能为负');
-    if (points.some((p) => p.y < 0)) errors.push('应力不能为负');
+    // 拉伸与压缩曲线均允许负应变/负应力，此处不再强制非负
     for (let i = 1; i < points.length; i++) {
       if (points[i].x <= points[i - 1].x) {
-        errors.push(`应变必须严格递增（第 ${i + 1} 行）`);
+        warnings.push(`应变存在重复或回退（第 ${i + 1} 行），已按原始顺序保留全部点`);
         break;
       }
     }
@@ -259,7 +336,7 @@ export function validateCurvePoints(
     if (points.some((p) => p.y < 0)) errors.push('应力幅不能为负');
     for (let i = 1; i < points.length; i++) {
       if (points[i].x <= points[i - 1].x) {
-        errors.push(`寿命必须递增（第 ${i + 1} 行）`);
+        warnings.push(`寿命存在重复或回退（第 ${i + 1} 行），已按原始顺序保留全部点`);
         break;
       }
     }
@@ -271,6 +348,38 @@ export function validateCurvePoints(
     }
   }
   return { errors, warnings };
+}
+
+/** 校验流体属性表：逐行检查取值范围，重复温度给警告 */
+export function validateFluidPoints(points: FluidPoint[]): MaterialIssue[] {
+  const issues: MaterialIssue[] = [];
+  const err = (message: string) => issues.push({ field: 'fluidPoints', level: 'error', message });
+  const warn = (message: string) => issues.push({ field: 'fluidPoints', level: 'warning', message });
+  // [取值函数, 标签, min, max, 单位]
+  const ranges: Array<[keyof FluidPoint, string, number, number, string]> = [
+    ['temperature', '温度', -273, 1000, '℃'],
+    ['density', '密度', 1e-9, 10000, 'kg/m³'],
+    ['dynamicViscosity', '动力粘度', 1e-7, 1e5, 'mPa·s'],
+    ['thermalConductivity', '导热系数', 1e-9, 10000, 'W/(m·K)'],
+    ['specificHeat', '比热', 1e-9, 10000, 'kJ/(kg·K)'],
+  ];
+  const seen = new Set<number>();
+  let dupWarned = false;
+  points.forEach((p, i) => {
+    ranges.forEach(([key, label, min, max, unit]) => {
+      const v = p[key];
+      if (!Number.isFinite(v)) err(`第 ${i + 1} 行${label}必须为数值`);
+      else if (v < min || v > max) err(`第 ${i + 1} 行${label}需在 ${min} ~ ${max} ${unit}（当前 ${v}）`);
+    });
+    if (!dupWarned && Number.isFinite(p.temperature)) {
+      if (seen.has(p.temperature)) {
+        warn(`第 ${i + 1} 行温度 ${p.temperature} ℃ 与前面行重复，已按原始顺序保留`);
+        dupWarned = true;
+      }
+      seen.add(p.temperature);
+    }
+  });
+  return issues;
 }
 
 /** 校验一条材料草稿 */
@@ -286,8 +395,58 @@ export function validateMaterialDraft(draft: MaterialDraft): MaterialValidation 
     missing.push('牌号');
   } else if (grade.length > 40) {
     err('grade', '牌号不能超过 40 个字符');
-  } else if (/[\\/:*?"<>|]/.test(grade)) {
+  } else if (draft.type !== 'porous' && /[\\/:*?"<>|]/.test(grade)) {
+    // 多孔介质牌号允许 / 等字符（如 AK55/66CN1），归档文件名由 cleanFileName 处理
     err('grade', '牌号不能包含 \\ / : * ? " < > |');
+  }
+
+  // 流体：名称 + 牌号 + 属性表，与其余类型走不同的校验路径
+  if (draft.type === 'fluid') {
+    const name = draft.name.trim();
+    if (!name) {
+      err('name', '名称必填');
+      missing.push('名称');
+    } else if (name.length > 40) {
+      err('name', '名称不能超过 40 个字符');
+    } else if (/[\\/:*?"<>|]/.test(name)) {
+      err('name', '名称不能包含 \\ / : * ? " < > |');
+    }
+    if (!draft.fluidPoints || !draft.fluidPoints.length) {
+      err('fluidPoints', '流体属性表至少需要 1 行数据');
+      missing.push('流体属性表');
+    } else {
+      issues.push(...validateFluidPoints(draft.fluidPoints));
+    }
+    return {
+      issues,
+      errors: issues.filter((i) => i.level === 'error'),
+      warnings: issues.filter((i) => i.level === 'warning'),
+      missing,
+    };
+  }
+
+  // 多孔介质：牌号必填，参数选填但限范围
+  if (draft.type === 'porous') {
+    const porousNums: Array<[MaterialTextFieldKey, string, number, number, string]> = [
+      ['poreSize', '孔径', 1e-9, 10000, 'μm'],
+      ['viscousResistance', '粘性阻力系数(m⁻²)', 1e-9, 1e12, 'm⁻²'],
+      ['inertialResistance', '惯性阻力系数(m⁻¹)', 1e-9, 1e12, 'm⁻¹'],
+      ['viscousCoefficient', '粘性阻力系数(kg/(m³·s))', 1e-9, 1e12, 'kg/(m³·s)'],
+      ['inertialCoefficient', '惯性阻力系数(kg/m⁴)', 1e-9, 1e12, 'kg/m⁴'],
+    ];
+    porousNums.forEach(([key, label, min, max, unit]) => {
+      const raw = draft[key].trim();
+      if (!raw) return;
+      const v = parseNum(raw);
+      if (!Number.isFinite(v)) err(key, `${label}必须为数值`);
+      else if (v < min || v > max) err(key, `${label}需在 ${min} ~ ${max} ${unit}（当前 ${v}）`);
+    });
+    return {
+      issues,
+      errors: issues.filter((i) => i.level === 'error'),
+      warnings: issues.filter((i) => i.level === 'warning'),
+      missing,
+    };
   }
 
   const series = draft.series.trim();
@@ -404,11 +563,12 @@ export function buildMaterialRecord(
   return {
     schema: MATERIAL_SCHEMA,
     type: draft.type,
+    name: draft.name.trim(),
     grade: draft.grade.trim(),
     series: draft.series.trim(),
     supplier: draft.supplier.trim(),
     state: draft.state === 'dry' ? 'dry' : 'wet',
-    temperature: parseNum(draft.temperature),
+    temperature: draft.type === 'fluid' || draft.type === 'porous' ? null : parseNum(draft.temperature),
     density: toNum(draft.density),
     poisson: toNum(draft.poisson),
     elasticModulus: toNum(draft.elasticModulus),
@@ -421,6 +581,21 @@ export function buildMaterialRecord(
     expansionCoefficient: toNum(draft.expansionCoefficient),
     stressStrainCurve: draft.stressStrainCurve?.points.length ? draft.stressStrainCurve : null,
     fatigueCurve: draft.fatigueCurve?.points.length ? draft.fatigueCurve : null,
+    fluidPoints:
+      draft.type === 'fluid' && draft.fluidPoints?.length
+        ? draft.fluidPoints.map((p) => ({ ...p }))
+        : null,
+    porousProps:
+      draft.type === 'porous'
+        ? {
+            poreSize: toNum(draft.poreSize),
+            viscousResistance: toNum(draft.viscousResistance),
+            inertialResistance: toNum(draft.inertialResistance),
+            viscousCoefficient: toNum(draft.viscousCoefficient),
+            inertialCoefficient: toNum(draft.inertialCoefficient),
+            remark: draft.remark.trim(),
+          }
+        : null,
     createdAt: meta.previous?.createdAt || nowIso,
     updatedAt: nowIso,
     createdBy: meta.previous?.createdBy || meta.username,
@@ -428,6 +603,16 @@ export function buildMaterialRecord(
     updatedBy: meta.username,
     revision: meta.previous ? meta.previous.revision + 1 : 1,
   };
+}
+
+/** 流体归档文件名：名称+牌号.parquet */
+export function fluidFileName(name: string, grade: string): string {
+  return `${[cleanFileName(name), cleanFileName(grade)].filter(Boolean).join('+')}.parquet`;
+}
+
+/** 多孔介质归档文件名：牌号.parquet（牌号唯一标识一条多孔介质） */
+export function porousFileName(grade: string): string {
+  return `${cleanFileName(grade)}.parquet`;
 }
 
 /** 材料归档文件名：牌号+系列号+温度+硬度(仅超弹性)+供应商（空段省略） */
@@ -502,10 +687,18 @@ export function parseMaterialRecord(text: string): MaterialRecord | null {
   try {
     const raw = JSON.parse(text) as Partial<MaterialRecord>;
     if (!raw || raw.schema !== MATERIAL_SCHEMA) return null;
-    if (raw.type !== 'conventional' && raw.type !== 'hyperelastic') return null;
+    if (
+      raw.type !== 'conventional' &&
+      raw.type !== 'hyperelastic' &&
+      raw.type !== 'fluid' &&
+      raw.type !== 'porous'
+    )
+      return null;
     if (typeof raw.grade !== 'string' || typeof raw.series !== 'string') return null;
+    const isFluid = raw.type === 'fluid';
     const temperature = Number(raw.temperature);
-    if (!Number.isFinite(temperature)) return null;
+    // 流体/多孔介质记录温度为空；其余类型必须为数值
+    if (!isFluid && raw.type !== 'porous' && !Number.isFinite(temperature)) return null;
 
     const numOrNull = (v: unknown): number | null => {
       const n = Number(v);
@@ -521,15 +714,51 @@ export function parseMaterialRecord(text: string): MaterialRecord | null {
       if (!points.length) return null;
       return { sourceName: typeof c.sourceName === 'string' ? c.sourceName : '', points };
     };
+    const fluidPoints = (v: unknown): FluidPoint[] | null => {
+      if (!Array.isArray(v)) return null;
+      const keys = [
+        'temperature',
+        'density',
+        'dynamicViscosity',
+        'thermalConductivity',
+        'specificHeat',
+      ] as const;
+      const points = v
+        .filter((p) => p && keys.every((k) => Number.isFinite(Number((p as FluidPoint)[k]))))
+        .map((p) => {
+          const src = p as FluidPoint;
+          return {
+            temperature: Number(src.temperature),
+            density: Number(src.density),
+            dynamicViscosity: Number(src.dynamicViscosity),
+            thermalConductivity: Number(src.thermalConductivity),
+            specificHeat: Number(src.specificHeat),
+          };
+        });
+      return points.length ? points : null;
+    };
+    const porousProps = (v: unknown): PorousProps | null => {
+      if (!v || typeof v !== 'object') return null;
+      const p = v as Partial<PorousProps>;
+      return {
+        poreSize: numOrNull(p.poreSize),
+        viscousResistance: numOrNull(p.viscousResistance),
+        inertialResistance: numOrNull(p.inertialResistance),
+        viscousCoefficient: numOrNull(p.viscousCoefficient),
+        inertialCoefficient: numOrNull(p.inertialCoefficient),
+        remark: typeof p.remark === 'string' ? p.remark : '',
+      };
+    };
 
     return {
       schema: MATERIAL_SCHEMA,
       type: raw.type,
+      name: typeof raw.name === 'string' ? raw.name : '',
       grade: raw.grade,
       series: raw.series,
       supplier: typeof raw.supplier === 'string' ? raw.supplier : '',
       state: raw.state === 'dry' ? 'dry' : 'wet', // 旧记录无此字段 → 默认湿态
-      temperature,
+      temperature: isFluid ? numOrNull(raw.temperature) : temperature,
       density: numOrNull(raw.density),
       poisson: numOrNull(raw.poisson),
       elasticModulus: numOrNull(raw.elasticModulus),
@@ -542,6 +771,8 @@ export function parseMaterialRecord(text: string): MaterialRecord | null {
       expansionCoefficient: numOrNull(raw.expansionCoefficient),
       stressStrainCurve: curve(raw.stressStrainCurve),
       fatigueCurve: curve(raw.fatigueCurve),
+      fluidPoints: fluidPoints(raw.fluidPoints),
+      porousProps: porousProps(raw.porousProps),
       createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : '',
       updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : '',
       createdBy: typeof raw.createdBy === 'string' ? raw.createdBy : '',
@@ -559,11 +790,12 @@ export function draftFromRecord(rec: MaterialRecord): MaterialDraft {
   const s = (v: number | null) => (v == null ? '' : String(v));
   return {
     type: rec.type,
+    name: rec.name || '',
     grade: rec.grade,
     series: rec.series,
     supplier: rec.supplier,
     state: rec.state === 'dry' ? 'dry' : 'wet',
-    temperature: tempLabel(rec.temperature),
+    temperature: rec.temperature == null ? '' : tempLabel(rec.temperature),
     direction: s(rec.direction),
     density: s(rec.density),
     poisson: s(rec.poisson),
@@ -576,6 +808,13 @@ export function draftFromRecord(rec: MaterialRecord): MaterialDraft {
     expansionCoefficient: s(rec.expansionCoefficient),
     stressStrainCurve: rec.stressStrainCurve ? { ...rec.stressStrainCurve, points: [...rec.stressStrainCurve.points] } : null,
     fatigueCurve: rec.fatigueCurve ? { ...rec.fatigueCurve, points: [...rec.fatigueCurve.points] } : null,
+    fluidPoints: rec.fluidPoints ? rec.fluidPoints.map((p) => ({ ...p })) : null,
+    poreSize: s(rec.porousProps?.poreSize ?? null),
+    viscousResistance: s(rec.porousProps?.viscousResistance ?? null),
+    inertialResistance: s(rec.porousProps?.inertialResistance ?? null),
+    viscousCoefficient: s(rec.porousProps?.viscousCoefficient ?? null),
+    inertialCoefficient: s(rec.porousProps?.inertialCoefficient ?? null),
+    remark: rec.porousProps?.remark || '',
   };
 }
 
@@ -586,19 +825,104 @@ export function serializeMaterialRecord(rec: MaterialRecord): string {
 
 /** 检索页下载的 CSV 文件名：与 Parquet 文件同名，扩展名改为 .csv */
 export function materialCsvFileName(rec: MaterialRecord): string {
+  if (rec.type === 'fluid') {
+    return fluidFileName(rec.name, rec.grade).replace(/\.parquet$/i, '.csv');
+  }
+  if (rec.type === 'porous') {
+    return porousFileName(rec.grade).replace(/\.parquet$/i, '.csv');
+  }
   const hardness =
     rec.type === 'hyperelastic' && rec.hardness !== null ? String(rec.hardness) : '';
-  return materialFileName(rec.grade, rec.series, rec.temperature, rec.supplier, hardness).replace(
-    /\.parquet$/i,
-    '.csv',
-  );
+  return materialFileName(
+    rec.grade,
+    rec.series,
+    rec.temperature ?? 0,
+    rec.supplier,
+    hardness,
+  ).replace(/\.parquet$/i, '.csv');
 }
 
-/** 材料记录 → CSV 文本（单行记录，曲线按 x:y 用分号连接，带 UTF-8 BOM） */
+/**
+ * 材料记录 → CSV 文本（带 UTF-8 BOM）
+ *
+ * 常规/超弹性：基础信息按行重复，应力应变曲线与疲劳曲线各占两列（x、y），
+ * 一行一个数据点、从上到下顺序导出，x 与 y 同行一一对应；两条曲线点数不同时缺项留空。
+ * 流体：单行 + 属性表；多孔介质：单行。
+ */
 export function materialRecordToCsv(rec: MaterialRecord): string {
   const quote = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const points = (curve: MaterialCurve | null) =>
-    curve ? curve.points.map((p) => `${p.x}:${p.y}`).join(';') : '';
+  // 流体：名称 + 牌号 + 属性表（五元组按 温度:密度:粘度:导热:比热 用分号连接）
+  if (rec.type === 'fluid') {
+    const table = (rec.fluidPoints || [])
+      .map((p) =>
+        [p.temperature, p.density, p.dynamicViscosity, p.thermalConductivity, p.specificHeat].join(
+          ':',
+        ),
+      )
+      .join(';');
+    const headers = [
+      '记录格式',
+      '类型',
+      '名称',
+      '牌号',
+      '流体属性表(温度℃:密度kg/m³:动力粘度mPa·s:导热系数W/(m·K):比热kJ/(kg·K))',
+      '创建时间',
+      '更新时间',
+      '创建人',
+      '更新人',
+      '版本',
+    ];
+    const values = [
+      rec.schema,
+      '流体',
+      rec.name,
+      rec.grade,
+      table,
+      rec.createdAt,
+      rec.updatedAt,
+      rec.createdByDisplay || rec.createdBy,
+      rec.updatedBy,
+      rec.revision,
+    ];
+    return `\ufeff${[headers, values].map((row) => row.map(quote).join(',')).join('\r\n')}`;
+  }
+  // 多孔介质：牌号 + 孔径 + 4 项阻力系数 + 备注
+  if (rec.type === 'porous') {
+    const p = rec.porousProps;
+    const porousHeaders = [
+      '记录格式',
+      '类型',
+      '牌号',
+      '孔径(μm)',
+      '粘性阻力系数(m⁻²)',
+      '惯性阻力系数(m⁻¹)',
+      '粘性阻力系数(kg/(m³·s))',
+      '惯性阻力系数(kg/m⁴)',
+      '备注',
+      '创建时间',
+      '更新时间',
+      '创建人',
+      '更新人',
+      '版本',
+    ];
+    const porousValues = [
+      rec.schema,
+      '多孔介质',
+      rec.grade,
+      p?.poreSize ?? '',
+      p?.viscousResistance ?? '',
+      p?.inertialResistance ?? '',
+      p?.viscousCoefficient ?? '',
+      p?.inertialCoefficient ?? '',
+      p?.remark || '',
+      rec.createdAt,
+      rec.updatedAt,
+      rec.createdByDisplay || rec.createdBy,
+      rec.updatedBy,
+      rec.revision,
+    ];
+    return `﻿${[porousHeaders, porousValues].map((row) => row.map(quote).join(',')).join('\r\n')}`;
+  }
   const headers = [
     '记录格式',
     '类型',
@@ -618,16 +942,18 @@ export function materialRecordToCsv(rec: MaterialRecord): string {
     '热导率 K(W/(m·℃))',
     '膨胀系数(mm/(mm·K))',
     '应力应变曲线来源',
-    '应力应变曲线(应变%:应力MPa)',
+    '应变(%)',
+    '应力(MPa)',
     '疲劳曲线来源',
-    '疲劳曲线(寿命cycles:应力MPa)',
+    '寿命(cycles)',
+    '应力幅(MPa)',
     '创建时间',
     '更新时间',
     '创建人',
     '更新人',
     '版本',
   ];
-  const values = [
+  const base = [
     rec.schema,
     rec.type === 'hyperelastic' ? '超弹性' : '常规材料',
     rec.grade,
@@ -645,45 +971,123 @@ export function materialRecordToCsv(rec: MaterialRecord): string {
     rec.specificHeat,
     rec.thermalConductivity,
     rec.expansionCoefficient,
-    rec.stressStrainCurve?.sourceName || '',
-    points(rec.stressStrainCurve),
-    rec.fatigueCurve?.sourceName || '',
-    points(rec.fatigueCurve),
     rec.createdAt,
     rec.updatedAt,
     rec.createdByDisplay || rec.createdBy,
     rec.updatedBy,
     rec.revision,
   ];
-  const rows: unknown[][] = [headers, values];
+  // 曲线按两列逐行导出：应变/应力（疲劳为寿命/应力幅），每行一个点，上下顺序与录入一致
+  const ss = rec.stressStrainCurve?.points || [];
+  const fc = rec.fatigueCurve?.points || [];
+  const rowCount = Math.max(ss.length, fc.length, 1);
+  const rows: unknown[][] = [headers];
+  for (let i = 0; i < rowCount; i++) {
+    const a = ss[i];
+    const b = fc[i];
+    rows.push([
+      ...base.slice(0, 17),
+      rec.stressStrainCurve?.sourceName || '',
+      a ? a.x : '',
+      a ? a.y : '',
+      rec.fatigueCurve?.sourceName || '',
+      b ? b.x : '',
+      b ? b.y : '',
+      ...base.slice(17),
+    ]);
+  }
   return `\ufeff${rows.map((row) => row.map(quote).join(',')).join('\r\n')}`;
 }
 
-/** 解析曲线 CSV：两列，首行可为表头 */
+/** 解析曲线 CSV：两列，首行可为表头；从上到下顺序读取，遇到空行或非数值行即停止 */
 export function parseCurveCsv(text: string): { points: CurvePoint[]; error: string } {
-  const lines = (text || '')
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#'));
-  if (!lines.length) return { points: [], error: '没有可解析的数据行' };
+  const lines = (text || '').split(/\r?\n/);
+  if (!lines.some((l) => l.trim())) return { points: [], error: '没有可解析的数据行' };
 
   const points: CurvePoint[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const parts = lines[i].split(/[,，;；\t ]+/).filter(Boolean);
+  for (const line of lines) {
+    const l = line.trim();
+    if (!l || l.startsWith('#')) {
+      if (points.length) break; // 数据区后的空行表示结束
+      continue; // 跳过表头前的空行/注释
+    }
+    const parts = l.split(/[,，;；\t ]+/).filter(Boolean);
     if (parts.length < 2) {
-      if (!points.length) continue; // 表头
-      return { points, error: `第 ${i + 1} 行不是两个数值` };
+      if (points.length) break;
+      continue; // 表头
     }
     const x = Number(parts[0]);
     const y = Number(parts[1]);
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      if (!points.length) continue; // 表头
-      return { points, error: `第 ${i + 1} 行包含非数值` };
+      if (points.length) break; // 非数值行表示数据结束
+      continue; // 表头
     }
     points.push({ x, y });
   }
   if (points.length < 2) return { points, error: '至少需要 2 个数据点' };
   return { points, error: '' };
+}
+
+/** 流体属性表摘要文案 */
+export function fluidSummary(points: FluidPoint[] | null): string {
+  if (!points || !points.length) return '';
+  const temps = points.map((p) => p.temperature);
+  return `${points.length} 行 · 温度 ${Math.min(...temps)}–${Math.max(...temps)} ℃`;
+}
+
+/**
+ * 解析流体属性表（CSV / Excel 共用）：
+ * 第 1~5 列依次为 温度(℃)、密度(kg/m³)、动力粘度(mPa·s)、导热系数(W/(m·K))、比热(kJ/(kg·K))。
+ * 从第 2 行起按顺序往下读，遇到温度列不是数字的行即停止（首行若是数据则一并读取）；
+ * 温度列为数字但其余列存在非数值时，跳过该行并给出警告。
+ */
+export function parseFluidRows(rows: string[][]): {
+  points: FluidPoint[];
+  warnings: string[];
+  error: string;
+} {
+  const clean = (rows || []).map((r) => (r || []).map((c) => String(c ?? '').trim()));
+  const warnings: string[] = [];
+  const points: FluidPoint[] = [];
+  // 首行第 1 列是数字 → 无表头，从第 1 行读；否则按约定从第 2 行读
+  const start = Number.isFinite(Number(clean[0]?.[0])) && clean[0][0] !== '' ? 0 : 1;
+  for (let r = start; r < clean.length; r++) {
+    const cells = clean[r];
+    const t = Number(cells[0]);
+    if (cells[0] === '' || !Number.isFinite(t)) break; // 温度列没有数字 → 数据结束
+    const nums = cells.slice(0, 5).map((c) => Number(c));
+    if (cells.length < 5 || nums.some((n) => !Number.isFinite(n))) {
+      warnings.push(`第 ${r + 1} 行存在非数值单元格，已跳过`);
+      continue;
+    }
+    points.push({
+      temperature: nums[0],
+      density: nums[1],
+      dynamicViscosity: nums[2],
+      thermalConductivity: nums[3],
+      specificHeat: nums[4],
+    });
+  }
+  if (!points.length) {
+    return {
+      points,
+      warnings,
+      error: '未从第 2 行起读到有效的流体属性数据（第 1 列温度需为数字）',
+    };
+  }
+  return { points, warnings, error: '' };
+}
+
+/** 解析流体属性表 CSV：5 列，首行可为表头 */
+export function parseFluidCsv(text: string): {
+  points: FluidPoint[];
+  warnings: string[];
+  error: string;
+} {
+  const rows = (text || '')
+    .split(/\r?\n/)
+    .map((line) => line.split(/[,，;；\t]/));
+  return parseFluidRows(rows);
 }
 
 /** 曲线摘要文案 */
@@ -701,6 +1105,7 @@ export function curveSummary(curve: MaterialCurve | null, key: MaterialCurveKey)
 
 /** 表头候选：用于 CSV / Excel 两种导入的字段识别 */
 const HEADER_ALIASES: Record<MaterialTextFieldKey | 'stressStrainCurve' | 'fatigueCurve', RegExp> = {
+  name: /名称|品名/,
   grade: /牌号/,
   series: /系列号|系列|规格/,
   supplier: /供应商|厂商|品牌/,
@@ -718,6 +1123,13 @@ const HEADER_ALIASES: Record<MaterialTextFieldKey | 'stressStrainCurve' | 'fatig
   expansionCoefficient: /膨胀系数|热膨胀|线膨胀|\bCTE\b/i,
   stressStrainCurve: /应力应变曲线|应力-应变曲线|应力应变/,
   fatigueCurve: /疲劳寿命曲线|疲劳曲线|S[-\s]?N/i,
+  // 多孔介质（滤纸输入列表）
+  poreSize: /孔径/,
+  viscousResistance: /粘性阻力系数.*m[-^]?2/i,
+  inertialResistance: /惯性阻力系数.*m[-^]?1/i,
+  viscousCoefficient: /粘性阻力系数.*kg/i,
+  inertialCoefficient: /惯性阻力系数.*kg/i,
+  remark: /备注/,
 };
 
 /** 行解析（通用：由 CSV / Excel 两种入口分别喂进二维数组） */
@@ -772,6 +1184,23 @@ function parseRows(
 
 /** 下载用模板（与批量导入解析共用表头） */
 export function materialTemplateCsv(type: MaterialType): string {
+  if (type === 'porous') {
+    // 与滤纸输入列表同构：每行一条多孔介质，序号列忽略
+    return [
+      '序号,牌号,孔径（um）,粘性阻力系数（m-2）,惯性阻力系数（m-1),粘性阻力系数(kg/m^3-s),惯性阻力系数(kg/m^4),备注',
+      '1,XH34720,74.6,4.874E+07,2.121E+03,9.066E+02,1.278E+03,',
+      '2,AK55/66CN1,51,1.043E+08,3.103E+03,1.940E+03,1.870E+03,常用数据',
+    ].join('\r\n');
+  }
+  if (type === 'fluid') {
+    // 示例为水的物性（近似值），名称与牌号在导入表单中填写
+    return [
+      FLUID_TABLE_HEADER.join(','),
+      '20,998.2,1.002,0.599,4.182',
+      '40,992.2,0.653,0.631,4.179',
+      '60,983.2,0.467,0.654,4.185',
+    ].join('\r\n');
+  }
   if (type === 'conventional') {
     return [
       '牌号,系列号,供应商,状态,温度(°C),方向(°),密度(kg/m³),泊松比,弹性模量(MPa),硬度,抗拉强度(MPa),破坏应变(%),比热容 Cp(J/(kg·℃)),热导率 K(W/(m·℃)),膨胀系数(mm/(mm·K)),应力应变曲线文件,疲劳寿命曲线文件',
@@ -786,6 +1215,73 @@ export function materialTemplateCsv(type: MaterialType): string {
   ].join('\r\n');
 }
 
+/** 流体批量导入：整张表即一条流体的属性表，名称/牌号在预览面板中补填 */
+function fluidDraftFromRows(
+  rows: string[][],
+): { drafts: MaterialDraft[]; error: string; ignoredCurves: boolean; warnings: string[] } {
+  const res = parseFluidRows(rows);
+  if (res.error) return { drafts: [], error: res.error, ignoredCurves: false, warnings: res.warnings };
+  const draft = emptyDraft('fluid');
+  draft.fluidPoints = res.points;
+  return { drafts: [draft], error: '', ignoredCurves: false, warnings: res.warnings };
+}
+
+/** 多孔介质批量导入：表头映射（滤纸输入列表），每行一条记录，牌号必填 */
+function parsePorousRows(rows: string[][]): {
+  drafts: MaterialDraft[];
+  error: string;
+  ignoredCurves: boolean;
+  warnings: string[];
+} {
+  const clean = rows
+    .map((r) => r.map((c) => String(c ?? '').trim()))
+    .filter((r) => r.length && r.some((c) => c && !c.startsWith('#')));
+  if (clean.length < 2) return { drafts: [], error: '文件至少需要表头与 1 行数据', ignoredCurves: false, warnings: [] };
+  const keys: MaterialTextFieldKey[] = [
+    'grade',
+    'poreSize',
+    'viscousResistance',
+    'inertialResistance',
+    'viscousCoefficient',
+    'inertialCoefficient',
+    'remark',
+  ];
+  const map: Partial<Record<MaterialTextFieldKey, number>> = {};
+  clean[0].forEach((h, i) => {
+    if (!h) return;
+    keys.forEach((k) => {
+      if (HEADER_ALIASES[k].test(h) && map[k] == null) map[k] = i;
+    });
+  });
+  if (map.grade == null) {
+    return { drafts: [], error: '表头缺少必填列：牌号', ignoredCurves: false, warnings: [] };
+  }
+  const drafts: MaterialDraft[] = [];
+  const warnings: string[] = [];
+  for (let i = 1; i < clean.length; i++) {
+    const cells = clean[i];
+    const get = (k: MaterialTextFieldKey): string => {
+      const idx = map[k];
+      return idx == null ? '' : cells[idx] || '';
+    };
+    if (!get('grade')) {
+      warnings.push(`第 ${i + 1} 行牌号为空，已跳过`);
+      continue;
+    }
+    const d = emptyDraft('porous');
+    d.grade = get('grade');
+    d.poreSize = get('poreSize');
+    d.viscousResistance = get('viscousResistance');
+    d.inertialResistance = get('inertialResistance');
+    d.viscousCoefficient = get('viscousCoefficient');
+    d.inertialCoefficient = get('inertialCoefficient');
+    d.remark = get('remark');
+    drafts.push(d);
+  }
+  if (!drafts.length) return { drafts: [], error: '未读到有效的牌号行', ignoredCurves: false, warnings };
+  return { drafts, error: '', ignoredCurves: false, warnings };
+}
+
 /**
  * 解析批量导入 CSV。
  * 自动判断：有「牌号」表头关键字 → 表头映射；否则 → 固定坐标布局。
@@ -793,11 +1289,12 @@ export function materialTemplateCsv(type: MaterialType): string {
 export function parseMaterialCsv(
   text: string,
   type: MaterialType,
-): { drafts: MaterialDraft[]; error: string; ignoredCurves: boolean } {
+): { drafts: MaterialDraft[]; error: string; ignoredCurves: boolean; warnings?: string[] } {
   const rows = (text || '')
     .split(/\r?\n/)
-    .map((line) => line.split(/[,，;；\t]/))
-    .filter((r) => r.length && r.some((c) => String(c ?? '').trim()));
+    .map((line) => line.split(/[,，;；\t]/));
+  if (type === 'fluid') return fluidDraftFromRows(rows);
+  if (type === 'porous') return parsePorousRows(rows);
   if (detectHeaderMode(rows)) return parseRows(rows, type);
   return parseFixedCoords(rows, type);
 }
@@ -809,7 +1306,7 @@ export function parseMaterialCsv(
 export async function parseMaterialXlsx(
   file: File | ArrayBuffer,
   type: MaterialType,
-): Promise<{ drafts: MaterialDraft[]; error: string; ignoredCurves: boolean }> {
+): Promise<{ drafts: MaterialDraft[]; error: string; ignoredCurves: boolean; warnings?: string[] }> {
   let data: ArrayBuffer;
   if (file instanceof File) data = await file.arrayBuffer();
   else data = file;
@@ -819,6 +1316,8 @@ export async function parseMaterialXlsx(
   // raw: true 拿原始数值，避免 Excel 里被格式化成 "6.35912E-05" 这类科学计数法字符串后丢精度
   const raw = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: '' });
   const rows = raw.map((r) => (r || []).map((c) => (c == null ? '' : String(c).trim())));
+  if (type === 'fluid') return fluidDraftFromRows(rows);
+  if (type === 'porous') return parsePorousRows(rows);
   if (detectHeaderMode(rows)) return parseRows(rows, type);
   return parseFixedCoords(rows, type);
 }
@@ -943,42 +1442,46 @@ function parseFixedCoords(
   draft.thermalConductivity = vals.thermalConductivity || '';
   draft.expansionCoefficient = vals.expansionCoefficient || '';
 
-  // 曲线读取：C列(索引2)=应变，D列(索引3)=应力，从第2行连续扫，遇非数字即停
-  const curvePoints: CurvePoint[] = [];
-  let trailingEmpty = 0;
-  let hitAnyPoint = false;
-  for (let r = 1; r < rows.length && trailingEmpty < 2; r++) {
+  // 曲线读取：C列(索引2)=应变，D列(索引3)=应力，从第2行起自上而下顺序读取，遇到空行/非数字即停止
+  // 应变的单位按整列统一判断，不能逐点判断（否则 0.93 会被单独放大成 93，导致点位顺序错乱）
+  const rawPoints: Array<{ x: number; y: number }> = [];
+  for (let r = 1; r < rows.length; r++) {
     const ex = num(get(r, 2));
     const sy = num(get(r, 3));
-    if (!ex || !sy) {
-      if (hitAnyPoint) trailingEmpty++;
-      continue;
-    }
-    trailingEmpty = 0;
-    hitAnyPoint = true;
+    if (!ex || !sy) break;
     const exN = Number(ex);
     const syN = Number(sy);
-    if (!Number.isFinite(exN) || !Number.isFinite(syN)) continue;
-    const strain = exN <= 1 ? exN * 100 : exN;
-    curvePoints.push({ x: Math.round(strain * 10000) / 10000, y: syN });
+    if (!Number.isFinite(exN) || !Number.isFinite(syN)) break;
+    rawPoints.push({ x: exN, y: syN });
   }
 
+  const headerX = String(get(0, 2) ?? '').trim();
+  const headerIsPercent = /%|％|百分/.test(headerX);
+  const headerIsFraction = /小数|比例|fraction/i.test(headerX);
+  const maxRawX = rawPoints.length ? Math.max(...rawPoints.map((p) => p.x)) : 0;
+  // 超弹性材料：应变按小数存储（0.01 = 1%），统一 ×100；常规材料按表头/整列数值判断单位
+  const strainScale =
+    type === 'hyperelastic'
+      ? 100
+      : headerIsFraction
+        ? 100
+        : headerIsPercent
+          ? 1
+          : maxRawX <= 1
+            ? 100
+            : 1;
+  const curvePoints: CurvePoint[] = rawPoints.map((p) => ({
+    x: Math.round(p.x * strainScale * 10000) / 10000,
+    y: p.y,
+  }));
+
   if (curvePoints.length >= 2) {
-    const clean: CurvePoint[] = [];
-    for (const p of curvePoints) {
-      if (!clean.length || p.x > clean[clean.length - 1].x) clean.push(p);
-      else if (clean.length && p.x === clean[clean.length - 1].x) {
-        clean[clean.length - 1].y = Math.max(clean[clean.length - 1].y, p.y);
-      }
-    }
-    if (clean.length >= 2) {
-      draft.stressStrainCurve = { sourceName: '', points: clean };
-      const maxStress = Math.max(...clean.map((p) => p.y));
-      draft.tensileStrength = String(Math.round(maxStress * 100) / 100);
-      // 破坏应变取曲线末端应变本身（与点位同精度），不能四舍五入到更小值，否则交叉校验会报错
-      const maxStrain = Math.max(...clean.map((p) => p.x));
-      draft.failureStrain = String(Math.round(maxStrain * 10000) / 10000);
-    }
+    draft.stressStrainCurve = { sourceName: '', points: curvePoints };
+    const maxStress = Math.max(...curvePoints.map((p) => p.y));
+    draft.tensileStrength = String(Math.round(maxStress * 100) / 100);
+    // 破坏应变取曲线末端应变本身（与点位同精度），不能四舍五入到更小值，否则交叉校验会报错
+    const maxStrain = Math.max(...curvePoints.map((p) => p.x));
+    draft.failureStrain = String(Math.round(maxStrain * 10000) / 10000);
   }
 
   // 只要 grade / temperature 这两个最关键的能取到（series 可能用户没写标签），就先返回 draft

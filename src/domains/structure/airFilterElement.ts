@@ -21,7 +21,7 @@ export const airFilterElement: FormulaSpec = {
   id: 'structure.airFilter.element',
   domain: 'structure',
   subsystem: '空气滤清器',
-  title: '空气滤清器滤芯设计',
+  title: '★空气滤清器滤芯设计',
   summary: '按「流量 → 面积 → 褶皱 → 压降 → 寿命」五参数闭环设计圆柱折叠式 / 面板式滤芯：由发动机需求算 Q，按面速度定面积，用褶皱几何实现，计入气流均匀度折减，校核 Darcy+Forchheimer 压降，最后估算容尘寿命与溃破要求。',
   tags: ['空气滤清器', '滤芯', '圆柱式', '面板式', '褶皱', '均匀度', 'Darcy', '压降', '容尘量', 'DHC', '寿命', 'ISO 5011', '进气系统', '结构设计'],
   description:

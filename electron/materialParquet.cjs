@@ -16,11 +16,12 @@ const { ParquetSchema, ParquetWriter, ParquetReader } = require('parquetjs-lite'
 const materialSchema = new ParquetSchema({
   schema: { type: 'UTF8' },
   type: { type: 'UTF8' },
+  name: { type: 'UTF8', optional: true },             // 名称（流体必填，其余类型为空串）
   grade: { type: 'UTF8' },
   series: { type: 'UTF8' },
   supplier: { type: 'UTF8', optional: true },
   state: { type: 'UTF8', optional: true },           // wet=湿态 / dry=干态（旧文件无此列→湿态）
-  temperature: { type: 'DOUBLE' },
+  temperature: { type: 'DOUBLE', optional: true },   // 流体为 null（温度在属性表内）
   density: { type: 'DOUBLE', optional: true },       // kg/m³
   poisson: { type: 'DOUBLE', optional: true },
   elasticModulus: { type: 'DOUBLE', optional: true },
@@ -33,6 +34,8 @@ const materialSchema = new ParquetSchema({
   expansionCoefficient: { type: 'DOUBLE', optional: true }, // 膨胀系数，mm/(mm·K)
   stressStrainCurveJson: { type: 'UTF8', optional: true },
   fatigueCurveJson: { type: 'UTF8', optional: true },
+  fluidTableJson: { type: 'UTF8', optional: true },   // 流体属性表（仅 fluid 类型）
+  porousJson: { type: 'UTF8', optional: true },       // 多孔介质参数（仅 porous 类型）
   createdAt: { type: 'UTF8' },
   updatedAt: { type: 'UTF8' },
   createdBy: { type: 'UTF8' },
@@ -49,11 +52,12 @@ function rowFromRecord(record) {
   return {
     schema: String(record.schema || ''),
     type: String(record.type || ''),
+    name: String(record.name || ''),
     grade: String(record.grade || ''),
     series: String(record.series || ''),
     supplier: String(record.supplier || ''),
     state: record.state === 'dry' ? 'dry' : 'wet',
-    temperature: Number(record.temperature),
+    temperature: nullable(record.temperature),
     density: nullable(record.density),
     poisson: nullable(record.poisson),
     elasticModulus: nullable(record.elasticModulus),
@@ -66,6 +70,12 @@ function rowFromRecord(record) {
     expansionCoefficient: nullable(record.expansionCoefficient),
     stressStrainCurveJson: record.stressStrainCurve ? JSON.stringify(record.stressStrainCurve) : null,
     fatigueCurveJson: record.fatigueCurve ? JSON.stringify(record.fatigueCurve) : null,
+    fluidTableJson:
+      Array.isArray(record.fluidPoints) && record.fluidPoints.length
+        ? JSON.stringify(record.fluidPoints)
+        : null,
+    porousJson:
+      record.type === 'porous' && record.porousProps ? JSON.stringify(record.porousProps) : null,
     createdAt: String(record.createdAt || ''),
     updatedAt: String(record.updatedAt || ''),
     createdBy: String(record.createdBy || ''),
@@ -96,16 +106,56 @@ function parseCurve(value) {
   }
 }
 
+function parseFluidTable(value) {
+  if (!value || typeof value !== 'string') return null;
+  try {
+    const arr = JSON.parse(value);
+    if (!Array.isArray(arr) || !arr.length) return null;
+    const keys = ['temperature', 'density', 'dynamicViscosity', 'thermalConductivity', 'specificHeat'];
+    const points = arr
+      .filter((p) => p && keys.every((k) => Number.isFinite(Number(p[k]))))
+      .map((p) => ({
+        temperature: Number(p.temperature),
+        density: Number(p.density),
+        dynamicViscosity: Number(p.dynamicViscosity),
+        thermalConductivity: Number(p.thermalConductivity),
+        specificHeat: Number(p.specificHeat),
+      }));
+    return points.length ? points : null;
+  } catch {
+    return null;
+  }
+}
+
+function parsePorous(value) {
+  if (!value || typeof value !== 'string') return null;
+  try {
+    const p = JSON.parse(value);
+    if (!p || typeof p !== 'object') return null;
+    return {
+      poreSize: numberOrNull(p.poreSize),
+      viscousResistance: numberOrNull(p.viscousResistance),
+      inertialResistance: numberOrNull(p.inertialResistance),
+      viscousCoefficient: numberOrNull(p.viscousCoefficient),
+      inertialCoefficient: numberOrNull(p.inertialCoefficient),
+      remark: typeof p.remark === 'string' ? p.remark : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
 function recordFromRow(row) {
   if (!row) return null;
   return {
     schema: row.schema,
     type: row.type,
+    name: row.name || '',
     grade: row.grade || '',
     series: row.series || '',
     supplier: row.supplier || '',
     state: row.state === 'dry' ? 'dry' : 'wet',
-    temperature: Number(row.temperature),
+    temperature: numberOrNull(row.temperature),
     density: numberOrNull(row.density),
     poisson: numberOrNull(row.poisson),
     elasticModulus: numberOrNull(row.elasticModulus),
@@ -118,6 +168,8 @@ function recordFromRow(row) {
     expansionCoefficient: numberOrNull(row.expansionCoefficient),
     stressStrainCurve: parseCurve(row.stressStrainCurveJson),
     fatigueCurve: parseCurve(row.fatigueCurveJson),
+    fluidPoints: parseFluidTable(row.fluidTableJson),
+    porousProps: parsePorous(row.porousJson),
     createdAt: row.createdAt || '',
     updatedAt: row.updatedAt || '',
     createdBy: row.createdBy || '',

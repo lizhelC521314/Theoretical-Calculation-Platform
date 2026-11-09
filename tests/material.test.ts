@@ -3,18 +3,23 @@ import {
   buildMaterialRecord,
   draftFromRecord,
   emptyDraft,
+  fluidFileName,
+  fluidSummary,
   materialFileName,
   materialCsvFileName,
   materialKey,
   materialRecordToCsv,
   materialTemplateCsv,
   parseCurveCsv,
+  parseFluidCsv,
   parseMaterialCsv,
   parseMaterialFileName,
   parseMaterialRecord,
+  porousFileName,
   serializeMaterialRecord,
   validateCurvePoints,
   validateMaterialDraft,
+  type FluidPoint,
   type MaterialDraft,
 } from '../src/report/material';
 
@@ -115,7 +120,7 @@ describe('材料库：必填与数值校验', () => {
 });
 
 describe('材料库：曲线校验', () => {
-  it('应力应变曲线需 ≥5 点且应变严格递增、非负', () => {
+  it('应力应变曲线需 ≥5 点，负应变/负应力（压缩）允许，重复/回退点保留并给出警告', () => {
     const res = validateCurvePoints(
       [
         { x: 0, y: 0 },
@@ -126,11 +131,11 @@ describe('材料库：曲线校验', () => {
       'stressStrainCurve',
     );
     expect(res.errors.some((m) => m.includes('至少 5'))).toBe(true);
-    expect(res.errors.some((m) => m.includes('严格递增'))).toBe(true);
-    expect(res.errors.some((m) => m.includes('应变不能为负'))).toBe(true);
+    expect(res.warnings.some((m) => m.includes('重复或回退'))).toBe(true);
+    expect(res.errors.some((m) => m.includes('不能为负'))).toBe(false);
   });
 
-  it('疲劳曲线需 ≥4 点、寿命为正且递增，应力上升给出警告', () => {
+  it('疲劳曲线需 ≥4 点、寿命为正，回退点给出警告、应力上升给出警告', () => {
     const res = validateCurvePoints(
       [
         { x: 1e4, y: 300 },
@@ -141,6 +146,7 @@ describe('材料库：曲线校验', () => {
     );
     expect(res.errors.some((m) => m.includes('至少 4'))).toBe(true);
     expect(res.errors.some((m) => m.includes('寿命必须为正数'))).toBe(true);
+    expect(res.warnings.some((m) => m.includes('重复或回退'))).toBe(true);
     expect(res.warnings.some((m) => m.includes('S-N'))).toBe(true);
   });
 });
@@ -309,7 +315,7 @@ describe('材料库：CSV 导出', () => {
     expect(materialCsvFileName(rec)).toBe('SPCC+冷轧钢板+25℃+宝钢.csv');
   });
 
-  it('单行记录、26 列表头，曲线按 x:y 分号连接并带 BOM', () => {
+  it('28 列表头，曲线按应变/应力两列逐行导出并带 BOM', () => {
     const rec = buildMaterialRecord(conventionalDraft(), {
       username: 'u1',
       displayName: '张三',
@@ -319,42 +325,66 @@ describe('材料库：CSV 导出', () => {
     expect(csv.startsWith('\ufeff')).toBe(true);
 
     const lines = csv.slice(1).split('\r\n');
-    expect(lines).toHaveLength(2);
+    // 表头 + 5 个应力应变点（疲劳曲线为空，行数取较大值 5）
+    expect(lines).toHaveLength(6);
     const headers = lines[0].split(',');
-    expect(headers).toHaveLength(26);
+    expect(headers).toHaveLength(28);
     expect(headers[0]).toBe('"记录格式"');
     expect(headers[5]).toBe('"状态"');
-    expect(headers[14]).toBe('"比热容 Cp(J/(kg·℃))"');
-    expect(headers[15]).toBe('"热导率 K(W/(m·℃))"');
-    expect(headers[16]).toBe('"膨胀系数(mm/(mm·K))"');
     expect(headers[17]).toBe('"应力应变曲线来源"');
-    expect(headers[18]).toBe('"应力应变曲线(应变%:应力MPa)"');
+    expect(headers[18]).toBe('"应变(%)"');
+    expect(headers[19]).toBe('"应力(MPa)"');
+    expect(headers[20]).toBe('"疲劳曲线来源"');
+    expect(headers[21]).toBe('"寿命(cycles)"');
+    expect(headers[22]).toBe('"应力幅(MPa)"');
 
-    const cells = lines[1].split(',');
-    expect(cells).toHaveLength(26);
-    expect(cells[0]).toBe('"ctr-material-v1"');
-    expect(cells[2]).toBe('"SPCC"');
-    expect(cells[5]).toBe('"湿态"');
-    expect(cells[6]).toBe('"25"');
-    expect(cells[13]).toBe('"32"');
-    expect(cells[14]).toBe('""');
-    expect(cells[15]).toBe('""');
-    expect(cells[16]).toBe('""');
-    expect(cells[18]).toBe('"0:0;0.1:205;0.2:410;0.5:420;1:430"');
-    expect(cells[20]).toBe('""');
-    expect(cells[23]).toBe('"张三"');
-    expect(cells[24]).toBe('"u1"');
-    expect(cells[25]).toBe('"1"');
+    // 每行一个数据点，应变与应力同行一一对应
+    const rows = lines.slice(1).map((l) => l.split(','));
+    expect(rows.map((r) => r[18])).toEqual(['"0"', '"0.1"', '"0.2"', '"0.5"', '"1"']);
+    expect(rows.map((r) => r[19])).toEqual(['"0"', '"205"', '"410"', '"420"', '"430"']);
+    // 基础信息逐行重复，便于筛选
+    expect(rows[0][2]).toBe('"SPCC"');
+    expect(rows[4][2]).toBe('"SPCC"');
+    expect(rows[0][25]).toBe('"张三"');
+    expect(rows[0][27]).toBe('"1"');
+    // 疲劳曲线为空则留空
+    expect(rows.every((r) => r[21] === '""' && r[22] === '""')).toBe(true);
+  });
+
+  it('疲劳曲线同样逐行导出；两条曲线行数不同时缺项留空', () => {
+    const rec = buildMaterialRecord(
+      conventionalDraft({
+        supplier: '宝钢',
+        fatigueCurve: {
+          points: [
+            { x: 1e4, y: 300 },
+            { x: 1e5, y: 250 },
+          ],
+        },
+      }),
+      { username: 'u1' },
+    );
+    const csv = materialRecordToCsv(rec);
+    const rows = csv.slice(1).split('\r\n').slice(1).map((l) => l.split(','));
+    expect(rows).toHaveLength(5);
+    expect(rows[0][21]).toBe('"10000"');
+    expect(rows[0][22]).toBe('"300"');
+    expect(rows[1][21]).toBe('"100000"');
+    expect(rows[1][22]).toBe('"250"');
+    expect(rows[2][21]).toBe('""');
+    expect(rows[2][22]).toBe('""');
   });
 
   it('曲线为空时导出空字符串，含逗号的字段整体加引号', () => {
     const rec = buildMaterialRecord(
-      conventionalDraft({ fatigueCurve: null, supplier: '宝钢, 上海' }),
+      conventionalDraft({ stressStrainCurve: null, fatigueCurve: null, supplier: '宝钢, 上海' }),
       { username: 'u1' },
     );
     const csv = materialRecordToCsv(rec);
     expect(csv).toContain('"宝钢, 上海"');
-    expect(csv.split('\r\n')[1]).toContain('"","","');
+    const rows = csv.slice(1).split('\r\n');
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toContain('"","","","","",""');
   });
 });
 
@@ -369,10 +399,13 @@ describe('材料库：CSV 导入', () => {
     ]);
   });
 
-  it('曲线 CSV 行内非数值时返回错误并保留已解析点', () => {
-    const res = parseCurveCsv('0,0\n0.2,10\nabc,20');
-    expect(res.points).toHaveLength(2);
-    expect(res.error).toContain('第 3 行');
+  it('曲线 CSV 从上到下顺序读取，遇到非数值行即停止', () => {
+    const res = parseCurveCsv('0,0\n0.2,10\nabc,20\n0.4,30');
+    expect(res.error).toBe('');
+    expect(res.points).toEqual([
+      { x: 0, y: 0 },
+      { x: 0.2, y: 10 },
+    ]);
   });
 
   it('批量导入按表头映射字段，缺必填列时拒绝', () => {
@@ -486,7 +519,7 @@ describe('材料库：CSV 导入', () => {
     expect(d.failureStrain).toBe('60');
   });
 
-  it('固定坐标布局：曲线点应变回退时自动过滤重复/递减点', () => {
+  it('固定坐标布局：曲线点全部保留（含重复与回退点）', () => {
     // 最小可用固定坐标布局：第2列的第2/4/5行必须非空
     const csv = [
       'Row#,B,C,D',
@@ -501,7 +534,333 @@ describe('材料库：CSV 导入', () => {
     expect(res.drafts).toHaveLength(1);
     const pts = res.drafts[0].stressStrainCurve?.points;
     expect(pts).toBeDefined();
-    expect(pts!.map((p) => p.x)).toEqual([0, 2, 5]);
-    expect(pts![1].y).toBe(250);
+    expect(pts!.map((p) => p.x)).toEqual([0, 2, 2, 1, 5]);
+    expect(pts!.map((p) => p.y)).toEqual([0, 200, 250, 100, 420]);
+  });
+
+  it('超弹性材料应变按小数换算成百分比（0.01 → 1%）', () => {
+    const csv = [
+      '类别,值_4,应变,应力（MPa）_4',
+      '材料,FKM,0,0',
+      '供应商,鼎玺,0.540944672,0.826103455',
+      '牌号,-,0.740306778,0.969849707',
+      '温度（℃）,20,0.931267929,1.116517467',
+      '密度（kg/m³）,1300,1.112939606,1.277339746',
+      '弹性模量（MPa）,-,1.285585632,1.441746417',
+      '方向（°）,0,1.450778961,1.621670231',
+      '抗拉强度（MPa）,13.7,1.609139557,1.813632112',
+      '硬度_HA,70,1.761848907,2.015363623',
+    ].join('\n');
+    const res = parseMaterialCsv(csv, 'hyperelastic');
+    expect(res.error).toBe('');
+    const pts = res.drafts[0].stressStrainCurve!.points;
+    expect(pts.map((p) => p.x)).toEqual([
+      0, 54.0945, 74.0307, 93.1268, 111.294, 128.5586, 145.0779, 160.914, 176.1849,
+    ]);
+    expect(res.drafts[0].failureStrain).toBe('176.1849');
+  });
+
+  it('固定坐标布局：遇到空行即停止，不读取下方零散数字', () => {
+    const csv = [
+      'Row#,B,C,D',
+      '1,SPCC,0,0',
+      '2,,0.1,10',
+      '3,冷轧,0.2,20',
+      '4,25°C,0.3,30',
+      '5,,0.4,40',
+      '',
+      '7,备注,0.9,999',
+    ].join('\n');
+    const res = parseMaterialCsv(csv, 'conventional');
+    expect(res.error).toBe('');
+    const pts = res.drafts[0].stressStrainCurve?.points;
+    expect(pts).toHaveLength(5);
+    expect(pts![pts!.length - 1]).toEqual({ x: 40, y: 40 });
+  });
+
+});
+
+/** 一条合法流体属性表 */
+const FLUID_POINTS: FluidPoint[] = [
+  { temperature: 20, density: 998.2, dynamicViscosity: 1.002, thermalConductivity: 0.599, specificHeat: 4.182 },
+  { temperature: 40, density: 992.2, dynamicViscosity: 0.653, thermalConductivity: 0.631, specificHeat: 4.179 },
+  { temperature: 60, density: 983.2, dynamicViscosity: 0.467, thermalConductivity: 0.654, specificHeat: 4.185 },
+];
+
+function fluidDraft(patch: Partial<MaterialDraft> = {}): MaterialDraft {
+  return {
+    ...emptyDraft('fluid'),
+    name: '水',
+    grade: 'DW-40',
+    fluidPoints: FLUID_POINTS.map((p) => ({ ...p })),
+    ...patch,
+  };
+}
+
+describe('流体材料：属性表解析', () => {
+  it('从第 2 行起按列读取 5 列，温度列非数字即停止', () => {
+    const csv = [
+      '温度(℃),密度(kg/m³),动力粘度(mPa·s),导热系数(W/(m·K)),比热(kJ/(kg·K))',
+      '20,998.2,1.002,0.599,4.182',
+      '40,992.2,0.653,0.631,4.179',
+      '备注,,,,,',
+      '60,983.2,0.467,0.654,4.185',
+    ].join('\n');
+    const res = parseFluidCsv(csv);
+    expect(res.error).toBe('');
+    expect(res.points).toHaveLength(2); // 第 4 行温度列非数字 → 停止，不再读第 5 行
+    expect(res.points[0]).toEqual(FLUID_POINTS[0]);
+    expect(res.points[1]).toEqual(FLUID_POINTS[1]);
+  });
+
+  it('首行即为数据（无表头）时也能读取', () => {
+    const res = parseFluidCsv('20,998.2,1.002,0.599,4.182\n40,992.2,0.653,0.631,4.179');
+    expect(res.error).toBe('');
+    expect(res.points).toHaveLength(2);
+  });
+
+  it('温度列为数字但其余列有非数值时跳过该行并告警', () => {
+    const csv = [
+      '温度,密度,粘度,导热,比热',
+      '20,998.2,1.002,0.599,4.182',
+      '30,abc,0.8,0.61,4.18',
+      '40,992.2,0.653,0.631,4.179',
+    ].join('\n');
+    const res = parseFluidCsv(csv);
+    expect(res.error).toBe('');
+    expect(res.points.map((p) => p.temperature)).toEqual([20, 40]);
+    expect(res.warnings).toHaveLength(1);
+    expect(res.warnings[0]).toContain('第 3 行');
+  });
+
+  it('读不到数据时报错', () => {
+    const res = parseFluidCsv('温度,密度\n备注,无数据');
+    expect(res.points).toHaveLength(0);
+    expect(res.error).toContain('未从第 2 行起');
+  });
+
+  it('parseMaterialCsv 分流：流体返回一条草稿，属性表已填入', () => {
+    const csv = [
+      '温度(℃),密度(kg/m³),动力粘度(mPa·s),导热系数(W/(m·K)),比热(kJ/(kg·K))',
+      '20,998.2,1.002,0.599,4.182',
+    ].join('\n');
+    const res = parseMaterialCsv(csv, 'fluid');
+    expect(res.error).toBe('');
+    expect(res.drafts).toHaveLength(1);
+    expect(res.drafts[0].type).toBe('fluid');
+    expect(res.drafts[0].fluidPoints).toHaveLength(1);
+    expect(res.drafts[0].name).toBe(''); // 名称/牌号在预览面板中补填
+  });
+
+  it('流体模板可被自身解析', () => {
+    const res = parseMaterialCsv(materialTemplateCsv('fluid'), 'fluid');
+    expect(res.error).toBe('');
+    expect(res.drafts[0].fluidPoints).toHaveLength(3);
+  });
+});
+
+describe('流体材料：校验', () => {
+  it('必填为名称、牌号与属性表', () => {
+    const res = validateMaterialDraft(emptyDraft('fluid'));
+    expect(res.missing).toEqual(['牌号', '名称', '流体属性表']);
+    expect(res.errors.map((e) => e.field)).toEqual(['grade', 'name', 'fluidPoints']);
+  });
+
+  it('合法草稿无错误', () => {
+    const res = validateMaterialDraft(fluidDraft());
+    expect(res.errors).toHaveLength(0);
+  });
+
+  it('逐项范围越界时报错并带行号', () => {
+    const res = validateMaterialDraft(
+      fluidDraft({
+        fluidPoints: [
+          { temperature: -300, density: 0, dynamicViscosity: 0, thermalConductivity: 0, specificHeat: 0 },
+        ],
+      }),
+    );
+    expect(res.errors.length).toBe(5);
+    expect(res.errors[0].message).toContain('第 1 行');
+    expect(res.errors.map((e) => e.field)).toEqual([
+      'fluidPoints',
+      'fluidPoints',
+      'fluidPoints',
+      'fluidPoints',
+      'fluidPoints',
+    ]);
+  });
+
+  it('重复温度只给警告，不拦截归档', () => {
+    const res = validateMaterialDraft(
+      fluidDraft({
+        fluidPoints: [FLUID_POINTS[0], { ...FLUID_POINTS[1], temperature: 20 }],
+      }),
+    );
+    expect(res.errors).toHaveLength(0);
+    expect(res.warnings).toHaveLength(1);
+    expect(res.warnings[0].message).toContain('重复');
+  });
+
+  it('流体不校验常规材料的系列号 / 温度字段', () => {
+    const res = validateMaterialDraft(fluidDraft({ series: '', temperature: '' }));
+    expect(res.errors).toHaveLength(0);
+  });
+});
+
+describe('流体材料：命名 / 序列化 / CSV', () => {
+  it('归档文件名为 名称+牌号.parquet', () => {
+    expect(fluidFileName('水', 'DW-40')).toBe('水+DW-40.parquet');
+    expect(fluidFileName('乙二醇 50%', 'EG-50')).toBe('乙二醇 50%+EG-50.parquet');
+  });
+
+  it('buildMaterialRecord 流体：temperature 为 null，属性表保留', () => {
+    const rec = buildMaterialRecord(fluidDraft(), { username: 'u1', displayName: '张三' });
+    expect(rec.type).toBe('fluid');
+    expect(rec.name).toBe('水');
+    expect(rec.temperature).toBeNull();
+    expect(rec.fluidPoints).toHaveLength(3);
+    expect(rec.stressStrainCurve).toBeNull();
+  });
+
+  it('记录 JSON 往返不丢字段', () => {
+    const rec = buildMaterialRecord(fluidDraft(), { username: 'u1', displayName: '张三' });
+    const json = serializeMaterialRecord(rec);
+    const parsed = parseMaterialRecord(json);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.type).toBe('fluid');
+    expect(parsed!.name).toBe('水');
+    expect(parsed!.temperature).toBeNull();
+    expect(parsed!.fluidPoints).toEqual(rec.fluidPoints);
+  });
+
+  it('CSV 导出：流体用属性表列', () => {
+    const rec = buildMaterialRecord(fluidDraft(), { username: 'u1', displayName: '张三' });
+    const csv = materialRecordToCsv(rec);
+    expect(csv).toContain('流体');
+    expect(csv).toContain('流体属性表');
+    expect(csv).toContain('20:998.2:1.002:0.599:4.182;40:992.2:0.653:0.631:4.179');
+    // CSV 文件名与归档同名
+    expect(materialCsvFileName(rec)).toBe('水+DW-40.csv');
+  });
+
+  it('draftFromRecord 流体：可还原为草稿继续编辑', () => {
+    const rec = buildMaterialRecord(fluidDraft(), { username: 'u1', displayName: '张三' });
+    const d = draftFromRecord(rec);
+    expect(d.type).toBe('fluid');
+    expect(d.name).toBe('水');
+    expect(d.grade).toBe('DW-40');
+    expect(d.temperature).toBe('');
+    expect(d.fluidPoints).toEqual(rec.fluidPoints);
+  });
+
+  it('fluidSummary 给出行数与温度范围', () => {
+    expect(fluidSummary(FLUID_POINTS)).toBe('3 行 · 温度 20–60 ℃');
+    expect(fluidSummary(null)).toBe('');
+  });
+});
+
+/* ---------------- 多孔介质（滤纸输入列表） ---------------- */
+
+const POROUS_CSV = [
+  '序号,牌号,孔径（um）,粘性阻力系数（m-2）,惯性阻力系数（m-1),粘性阻力系数(kg/m^3-s),惯性阻力系数(kg/m^4),备注',
+  '1,XH34720,74.6,4.874E+07,2.121E+03,9.066E+02,1.278E+03,',
+  '2,AK55/66CN1,51,1.043E+08,3.103E+03,1.940E+03,1.870E+03,常用数据',
+].join('\n');
+
+describe('多孔介质：解析', () => {
+  it('按滤纸列表表头映射，每行一条，序号列忽略', () => {
+    const res = parseMaterialCsv(POROUS_CSV, 'porous');
+    expect(res.error).toBe('');
+    expect(res.drafts).toHaveLength(2);
+    const a = res.drafts[0];
+    expect(a.type).toBe('porous');
+    expect(a.grade).toBe('XH34720');
+    expect(a.poreSize).toBe('74.6');
+    expect(a.viscousResistance).toBe('4.874E+07');
+    expect(a.inertialResistance).toBe('2.121E+03');
+    expect(a.viscousCoefficient).toBe('9.066E+02');
+    expect(a.inertialCoefficient).toBe('1.278E+03');
+    const b = res.drafts[1];
+    expect(b.grade).toBe('AK55/66CN1');
+    expect(b.remark).toBe('常用数据');
+  });
+
+  it('表头缺少牌号列时报错', () => {
+    const res = parseMaterialCsv('孔径（um）,备注\n74.6,x', 'porous');
+    expect(res.error).toContain('牌号');
+  });
+
+  it('牌号为空的行跳过并告警', () => {
+    const csv = POROUS_CSV + '\n3,,,,,,,';
+    const res = parseMaterialCsv(csv, 'porous');
+    expect(res.drafts).toHaveLength(2);
+    expect(res.warnings?.some((w) => w.includes('牌号为空'))).toBe(true);
+  });
+});
+
+describe('多孔介质：校验与命名', () => {
+  it('空草稿仅缺牌号，牌号允许 / 字符', () => {
+    const empty = validateMaterialDraft(emptyDraft('porous'));
+    expect(empty.missing).toEqual(['牌号']);
+    expect(empty.errors).toHaveLength(1);
+
+    const d = { ...emptyDraft('porous'), grade: 'AK55/66CN1' };
+    expect(validateMaterialDraft(d).errors).toHaveLength(0);
+  });
+
+  it('参数选填但限范围：非数值与越界报错', () => {
+    const d = { ...emptyDraft('porous'), grade: 'XH34720', poreSize: '0' };
+    expect(validateMaterialDraft(d).errors.some((e) => e.field === 'poreSize')).toBe(true);
+    const d2 = { ...emptyDraft('porous'), grade: 'XH34720', viscousResistance: 'abc' };
+    expect(validateMaterialDraft(d2).errors.some((e) => e.field === 'viscousResistance')).toBe(true);
+  });
+
+  it('porousFileName 用牌号，非法字符被清理', () => {
+    expect(porousFileName('XH34720')).toBe('XH34720.parquet');
+    expect(porousFileName('AK55/66CN1')).not.toContain('/');
+  });
+
+  it('模板可被自身解析', () => {
+    const res = parseMaterialCsv(materialTemplateCsv('porous'), 'porous');
+    expect(res.error).toBe('');
+    expect(res.drafts).toHaveLength(2);
+    expect(res.drafts[1].grade).toBe('AK55/66CN1');
+  });
+});
+
+describe('多孔介质：记录往返', () => {
+  it('buildMaterialRecord → JSON 往返保留多孔参数，温度为空', () => {
+    const d = emptyDraft('porous');
+    d.grade = 'XH34720';
+    d.poreSize = '74.6';
+    d.viscousResistance = '4.874E+07';
+    d.inertialResistance = '2.121E+03';
+    d.viscousCoefficient = '9.066E+02';
+    d.inertialCoefficient = '1.278E+03';
+    d.remark = '常用数据';
+    const rec = buildMaterialRecord(d, { username: 'tester', displayName: '测试员' });
+    expect(rec.temperature).toBeNull();
+    expect(rec.porousProps?.poreSize).toBeCloseTo(74.6);
+    expect(rec.porousProps?.viscousResistance).toBeCloseTo(4.874e7);
+
+    const parsed = parseMaterialRecord(serializeMaterialRecord(rec));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.porousProps).toEqual(rec.porousProps);
+
+    const back = draftFromRecord(parsed!);
+    expect(back.grade).toBe('XH34720');
+    expect(back.remark).toBe('常用数据');
+  });
+
+  it('materialRecordToCsv 输出多孔列，文件名与归档同名', () => {
+    const d = emptyDraft('porous');
+    d.grade = 'XH34720';
+    d.poreSize = '74.6';
+    const rec = buildMaterialRecord(d, { username: 'tester' });
+    const csv = materialRecordToCsv(rec);
+    expect(csv).toContain('多孔介质');
+    expect(csv).toContain('孔径(μm)');
+    expect(csv).toContain('74.6');
+    expect(materialCsvFileName(rec)).toBe('XH34720.csv');
   });
 });

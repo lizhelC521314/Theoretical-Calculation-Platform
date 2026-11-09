@@ -1754,12 +1754,37 @@ select {
 .ts-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 8px;
 }
 .ts-toolbar .search-input {
   flex: 1;
   max-width: none;
+}
+/* 检索工具栏内联筛选（产品 / 日期） */
+.ts-filter-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ts-filter-inline select,
+.ts-filter-inline input[type='date'] {
+  height: 32px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+}
+.ts-filter-inline select:focus,
+.ts-filter-inline input[type='date']:focus {
+  border-color: var(--blue);
 }
 .ts-body {
   display: grid;
@@ -1885,6 +1910,14 @@ select {
 .type-badge.type-hyper {
   background: #e0eaff;
   color: var(--blue-deep);
+}
+.type-badge.type-fluid {
+  background: #f0f9ff;
+  color: #0369a1;
+}
+.type-badge.type-porous {
+  background: #f5f3ff;
+  color: #6d28d9;
 }
 /* 材料状态徽章：湿态 / 干态 */
 .state-badge {
@@ -2216,6 +2249,32 @@ select {
   background: #fff;
 }
 .mat-paste .btn-ghost { margin-top: 6px; }
+/* 大数据量编辑：编辑框尽量大，且可用鼠标拖拽下边继续调高 */
+.mat-paste-lg textarea {
+  min-height: 280px;
+  max-height: none;
+}
+/* 大数据量表格：更高的可视区，内部滚动 */
+.mat-curve-table-wrap.mat-table-lg {
+  max-height: 420px;
+}
+/* 可直接编辑的表格单元格输入框 */
+.mat-curve-table .mat-cell-input {
+  width: 100%;
+  min-width: 72px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  background: transparent;
+}
+.mat-curve-table .mat-cell-input:hover { border-color: var(--border); }
+.mat-curve-table .mat-cell-input:focus {
+  border-color: var(--blue);
+  background: #fff;
+  outline: none;
+}
 .mat-curve-plot { width: 100%; height: auto; max-height: 170px; margin-top: 4px; background: #fff; border-radius: 6px; }
 .mat-curve-empty { padding: 14px 6px; text-align: center; color: #a3b1c2; font-size: 12px; }
 .mat-detail-grid {
@@ -2250,9 +2309,10 @@ select {
   align-items: stretch;
 }
 .preview-area > .mat-preview-3col {
-  flex: 1 1 0;
+  flex: 1 0 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
+  align-items: start;
 }
 .mat-preview-col {
   background: #fff;
@@ -2295,16 +2355,41 @@ select {
 }
 .mat-preview-col .mat-detail-item span { font-size: 11px; color: #7a8ea0; }
 .mat-preview-col .mat-detail-item b { font-size: 13px; color: var(--text); }
-.mat-preview-col .mat-curve-plot {
-  flex-shrink: 0;
-  width: 100%;
-  height: auto;
-  display: block;
-}
-.mat-preview-col .mat-curve-table-wrap {
-  max-height: none;
+.mat-preview-col .mat-curve-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
   overflow: visible;
 }
+/* 曲线图：正方形（高:宽 = 1:1） */
+.mat-curve-figure {
+  flex: 0 0 auto;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mat-curve-figure .mat-curve-plot.is-square {
+  width: 380px;
+  height: 380px;
+  max-width: 100%;
+  aspect-ratio: 1 / 1;
+  display: block;
+  background: #fff;
+  border-radius: 8px;
+}
+/* 曲线数据表：收窄居中，全部展开（滚动交给整个浏览区） */
+.mat-preview-col .mat-curve-table-wrap.mat-curve-table-narrow {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 380px;
+  max-height: none;
+  overflow: visible;
+  margin-top: 0;
+}
+.mat-curve-table-narrow .mat-curve-table th,
+.mat-curve-table-narrow .mat-curve-table td { padding: 4px 12px; }
 .mat-curve-table-wrap {
   max-height: 200px;
   overflow: auto;

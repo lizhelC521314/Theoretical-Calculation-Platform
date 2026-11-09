@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type CtrUser } from '../api';
 import { PdfViewer } from '../components/PdfViewer';
-import { parseCaeArchiveName } from '../report/db';
+import { archiveDateInRange, parseCaeArchiveName } from '../report/db';
 
 interface Props {
   user: CtrUser;
@@ -23,6 +23,9 @@ export function CaeSearchPage({ user: _user }: Props) {
   const [files, setFiles] = useState<DbFile[]>([]);
   const [reachable, setReachable] = useState<boolean | null>(null);
   const [keyword, setKeyword] = useState('');
+  const [productFilter, setProductFilter] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [selected, setSelected] = useState<DbFile | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -58,11 +61,25 @@ export function CaeSearchPage({ user: _user }: Props) {
     refresh();
   }, [refresh]);
 
+  const productOptions = useMemo(() => {
+    const set = new Set<string>();
+    files.forEach((f) => {
+      const p = parseCaeArchiveName(f.name).product.trim();
+      if (p) set.add(p);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  }, [files]);
+
   const filtered = useMemo(() => {
     const k = keyword.trim().toLowerCase();
-    if (!k) return files;
+    // 只填一侧日期时按单日处理（某一天）；填两侧则按时间段筛选
+    const from = dateFrom || dateTo;
+    const to = dateTo || dateFrom;
     return files.filter((f) => {
       const p = parseCaeArchiveName(f.name);
+      if (productFilter !== 'all' && p.product.trim() !== productFilter) return false;
+      if ((from || to) && !archiveDateInRange(p.date, from, to)) return false;
+      if (!k) return true;
       return (
         f.name.toLowerCase().includes(k) ||
         p.customer.toLowerCase().includes(k) ||
@@ -73,7 +90,7 @@ export function CaeSearchPage({ user: _user }: Props) {
         p.version.toLowerCase().includes(k)
       );
     });
-  }, [files, keyword]);
+  }, [files, keyword, productFilter, dateFrom, dateTo]);
 
   const pdfCount = files.filter((f) => isPdf(f)).length;
 
@@ -165,9 +182,34 @@ export function CaeSearchPage({ user: _user }: Props) {
             onChange={(e) => setKeyword(e.target.value)}
             placeholder="输入客户 / 项目 / 仿真项目 / 产品 / 版本 / 文件名 关键字过滤"
           />
-          {keyword && (
-            <button className="btn-link" onClick={() => setKeyword('')}>
-              清除
+          <label className="ts-filter-inline" title="按产品筛选">
+            <span>产品</span>
+            <select value={productFilter} onChange={(e) => setProductFilter(e.target.value)}>
+              <option value="all">全部产品</option>
+              {productOptions.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="ts-filter-inline" title="只填开始或结束日期表示某一天，两侧都填表示时间段">
+            <span>日期</span>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            <span>至</span>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          </label>
+          {(keyword || productFilter !== 'all' || dateFrom || dateTo) && (
+            <button
+              className="btn-link"
+              onClick={() => {
+                setKeyword('');
+                setProductFilter('all');
+                setDateFrom('');
+                setDateTo('');
+              }}
+            >
+              重置筛选
             </button>
           )}
           <span className="lib-count">筛选结果 {filtered.length} 份 · 双击行可用本地软件打开</span>

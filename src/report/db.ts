@@ -201,6 +201,36 @@ export function parseCaeArchiveName(name: string): {
 }
 
 /**
+ * 归档文件名中的日期段（YYYYMMDD / YYYYMM）→ 该日期覆盖的 [起始日, 结束日]（YYYY-MM-DD）。
+ * 无法识别时返回 null。
+ */
+export function archiveDateSpan(dateSeg: string): { start: string; end: string } | null {
+  if (/^\d{8}$/.test(dateSeg)) {
+    const iso = `${dateSeg.slice(0, 4)}-${dateSeg.slice(4, 6)}-${dateSeg.slice(6, 8)}`;
+    return { start: iso, end: iso };
+  }
+  if (/^\d{6}$/.test(dateSeg)) {
+    const y = dateSeg.slice(0, 4);
+    const m = dateSeg.slice(4, 6);
+    const lastDay = new Date(Number(y), Number(m), 0).getDate();
+    return { start: `${y}-${m}-01`, end: `${y}-${m}-${String(lastDay).padStart(2, '0')}` };
+  }
+  return null;
+}
+
+/**
+ * 归档日期段是否落在 [from, to]（YYYY-MM-DD）内。
+ * from / to 任一为空表示该端不限；日期缺失或无法识别的记录不参与日期筛选。
+ */
+export function archiveDateInRange(dateSeg: string, from: string, to: string): boolean {
+  const span = archiveDateSpan(dateSeg);
+  if (!span) return false;
+  if (from && span.end < from) return false;
+  if (to && span.start > to) return false;
+  return true;
+}
+
+/**
  * 从计算书附表中抽出每条"计算题目 → 输入/结果"记录。
  * 这是可信资产 Excel 中的左半部分。
  */
