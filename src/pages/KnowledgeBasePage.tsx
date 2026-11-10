@@ -85,7 +85,17 @@ export function KnowledgeBasePage({ user }: Props) {
         </div>
       )}
 
-      <div className="file-list">
+      {tab === 'fmea' && (
+        <div className="settings-card" style={{ marginTop: 12 }}>
+          <h3>FMEA 已改为知识卡片检索</h3>
+          <p className="settings-hint">
+            每条 FMEA 存为一张独立卡片（FM-年份-序号.parquet），请在左侧「FMEA 案例库 → FMEA 检索」中按机种、部件、失效模式、材料检索，
+            一屏查看「失效起因 → 失效模式 → 失效后果 → 建议措施」；管理员在「FMEA 导入」中批量导入《FMEA 案例收集》Excel。
+          </p>
+        </div>
+      )}
+
+      {tab !== 'fmea' && <div className="file-list">
         {files.length === 0 && (
           <div className="settings-card">
             <h3>暂无归档文件</h3>
@@ -116,7 +126,7 @@ export function KnowledgeBasePage({ user }: Props) {
             </div>
           );
         })}
-      </div>
+      </div>}
 
       {toast && <div className="toast">{toast}</div>}
     </div>
