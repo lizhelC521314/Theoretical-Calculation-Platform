@@ -277,7 +277,7 @@ export function splitCsvLine(line: string): string[] {
       }
     } else if (ch === '"') {
       quoted = true;
-    } else if (ch === ',' || ch === '，' || ch === ';' || ch === '；' || ch === '\t') {
+    } else if (ch === ',' || ch === '\t') {
       cells.push(cur);
       cur = '';
     } else {
@@ -559,8 +559,30 @@ export function fmeaSearchText(rec: FmeaRecord): string {
 
 /** CSV 模板：表头 + 一行明确标注「请删除本行」的示例，避免误入库 */
 export function fmeaTemplateCsv(): string {
-  return [
-    '机种名称,部件名称,本体使用材料,潜在的失效模式,潜在的失效后果,潜在的失效起因/机理,建议的措施,备注,责任人,记录时间',
-    '示例-车型A（请删除本行）,空气滤清器壳体,PP-T20,壳体卡扣根部断裂,装配后松脱、密封失效,卡扣根部壁厚不足且位于熔接痕处,根部壁厚 1.5→2.0 mm，浇口移至非受力侧,示例行，导入前请删除,张三,2026-01-15',
-  ].join('\r\n');
+  const header = [
+    '机种名称',
+    '部件名称',
+    '本体使用材料',
+    '潜在的失效模式',
+    '潜在的失效后果',
+    '潜在的失效起因/机理',
+    '建议的措施',
+    '备注',
+    '责任人',
+    '记录时间',
+  ];
+  const example = [
+    '示例-车型A（请删除本行）',
+    '空气滤清器壳体',
+    'PP-T20',
+    '壳体卡扣根部断裂',
+    '装配后松脱、密封失效',
+    '卡扣根部壁厚不足且位于熔接痕处',
+    '根部壁厚 1.5→2.0 mm，浇口移至非受力侧',
+    '示例行，导入前请删除',
+    '张三',
+    '2026-01-15',
+  ];
+  const quote = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  return [header.map(quote).join(','), example.map(quote).join(',')].join('\r\n');
 }
