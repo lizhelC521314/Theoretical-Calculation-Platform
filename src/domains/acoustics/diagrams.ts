@@ -205,3 +205,171 @@ export const MULTI_CAVITY_DIAGRAM = `
   <!-- 主公式 -->
   <text x="260" y="286" text-anchor="middle" font-size="12" fill="#c0392b" font-weight="600">Φ = exp(A·L_c)，T_cav = Φ11 − Φ12[:,1]·Φ21[2,:]/Φ22[2,1]，TL = 20lg(|T11+T12+T21+T22|/2)</text>
 </svg>`;
+
+/**
+ * 进气系统传递损失（TL）构成示意：
+ * 上部为「入射声 → 进气管 → 波纹管 → 编织管 → 空滤器（含滤芯） → 出气管 → 多腔穿孔消音器 → 透射声」
+ * 的链路及各段长度；中部为各部件传递矩阵逐级串联；下部为总传递矩阵与 TL 计算式。
+ */
+export const INTAKE_TL_DIAGRAM = `
+<svg class="diagram-wide" viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="进气系统传递损失设计示意">
+  <defs>
+    <marker id="tlsArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5b6f8a"/>
+    </marker>
+    <marker id="tlsRed" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#c0392b"/>
+    </marker>
+    <marker id="tlsGreen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#1e8449"/>
+    </marker>
+    <marker id="tlsDim" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse">
+      <path d="M0,0 L8,4 L0,8 z" fill="#8496b3"/>
+    </marker>
+    <pattern id="tlsBraid" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="7" stroke="#dbae74" stroke-width="1.6"/>
+    </pattern>
+    <pattern id="tlsFilter" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="5" stroke="#7f96b3" stroke-width="1.4"/>
+    </pattern>
+  </defs>
+
+  <text x="380" y="20" text-anchor="middle" font-size="14" fill="#0b3a72" font-weight="600">进气系统传递损失设计示意</text>
+
+  <!-- 入射声 -->
+  <text x="14" y="86" font-size="11" fill="#c0392b">入射声 W_in</text>
+  <line x1="16" y1="118" x2="50" y2="118" stroke="#c0392b" stroke-width="2" marker-end="url(#tlsRed)"/>
+
+  <!-- 进气喇叭口 -->
+  <polygon points="55,88 88,102 88,134 55,148" fill="#e6ecf4" stroke="#5b6f8a" stroke-width="1.8"/>
+  <!-- 进气管 -->
+  <rect x="88" y="102" width="70" height="32" fill="#e6ecf4" stroke="#5b6f8a" stroke-width="1.8"/>
+
+  <!-- 波纹管 -->
+  <rect x="158" y="98" width="76" height="40" fill="#f3f6fa" stroke="#5b6f8a" stroke-width="1.8"/>
+  <g stroke="#5b6f8a" stroke-width="1.2">
+    <line x1="163" y1="98" x2="163" y2="138"/>
+    <line x1="170" y1="98" x2="170" y2="138"/>
+    <line x1="177" y1="98" x2="177" y2="138"/>
+    <line x1="184" y1="98" x2="184" y2="138"/>
+    <line x1="191" y1="98" x2="191" y2="138"/>
+    <line x1="198" y1="98" x2="198" y2="138"/>
+    <line x1="205" y1="98" x2="205" y2="138"/>
+    <line x1="212" y1="98" x2="212" y2="138"/>
+    <line x1="219" y1="98" x2="219" y2="138"/>
+    <line x1="226" y1="98" x2="226" y2="138"/>
+  </g>
+
+  <!-- 编织管 -->
+  <rect x="234" y="102" width="66" height="32" fill="url(#tlsBraid)" stroke="#c08a4a" stroke-width="1.8"/>
+
+  <!-- 空滤器（含滤芯） -->
+  <rect x="300" y="72" width="104" height="92" fill="#f7f9fc" stroke="#5b6f8a" stroke-width="2"/>
+  <rect x="336" y="84" width="18" height="68" fill="url(#tlsFilter)" stroke="#5b6f8a" stroke-width="1.4"/>
+  <text x="362" y="122" font-size="10" fill="#5a6b85">滤芯</text>
+
+  <!-- 出气管 -->
+  <rect x="404" y="102" width="76" height="32" fill="#e6ecf4" stroke="#5b6f8a" stroke-width="1.8"/>
+
+  <!-- 多腔穿孔消音器 -->
+  <rect x="480" y="76" width="134" height="84" fill="#f7f9fc" stroke="#5b6f8a" stroke-width="2"/>
+  <rect x="480" y="106" width="134" height="24" fill="#e6ecf4" stroke="#5b6f8a" stroke-width="1.2"/>
+  <g stroke="#5b6f8a" stroke-width="1.2">
+    <line x1="513.5" y1="76" x2="513.5" y2="106"/>
+    <line x1="547" y1="76" x2="547" y2="106"/>
+    <line x1="580.5" y1="76" x2="580.5" y2="106"/>
+    <line x1="513.5" y1="130" x2="513.5" y2="160"/>
+    <line x1="547" y1="130" x2="547" y2="160"/>
+    <line x1="580.5" y1="130" x2="580.5" y2="160"/>
+  </g>
+  <g fill="#1a5fb4">
+    <circle cx="490" cy="110" r="1.5"/><circle cx="504" cy="110" r="1.5"/><circle cx="518" cy="110" r="1.5"/>
+    <circle cx="532" cy="110" r="1.5"/><circle cx="546" cy="110" r="1.5"/><circle cx="560" cy="110" r="1.5"/>
+    <circle cx="574" cy="110" r="1.5"/><circle cx="588" cy="110" r="1.5"/><circle cx="602" cy="110" r="1.5"/>
+    <circle cx="490" cy="126" r="1.5"/><circle cx="504" cy="126" r="1.5"/><circle cx="518" cy="126" r="1.5"/>
+    <circle cx="532" cy="126" r="1.5"/><circle cx="546" cy="126" r="1.5"/><circle cx="560" cy="126" r="1.5"/>
+    <circle cx="574" cy="126" r="1.5"/><circle cx="588" cy="126" r="1.5"/><circle cx="602" cy="126" r="1.5"/>
+  </g>
+  <rect x="614" y="106" width="26" height="24" fill="#e6ecf4" stroke="#5b6f8a" stroke-width="1.8"/>
+
+  <!-- 透射声 -->
+  <text x="746" y="86" text-anchor="end" font-size="11" fill="#1e8449">透射声 W_out</text>
+  <line x1="642" y1="118" x2="704" y2="118" stroke="#1e8449" stroke-width="2" marker-end="url(#tlsGreen)"/>
+
+  <!-- 部件名称与引线 -->
+  <g font-size="11" fill="#1f2937" text-anchor="middle">
+    <text x="123" y="54">进气管</text>
+    <text x="196" y="54">波纹管</text>
+    <text x="267" y="54">编织管</text>
+    <text x="352" y="54">空滤器（含滤芯）</text>
+    <text x="442" y="54">出气管</text>
+    <text x="547" y="54">多腔穿孔消音器</text>
+  </g>
+  <g stroke="#9fb0c7" stroke-width="1">
+    <line x1="123" y1="58" x2="123" y2="100"/>
+    <line x1="196" y1="58" x2="196" y2="96"/>
+    <line x1="267" y1="58" x2="267" y2="100"/>
+    <line x1="352" y1="58" x2="352" y2="70"/>
+    <line x1="442" y1="58" x2="442" y2="100"/>
+    <line x1="547" y1="58" x2="547" y2="74"/>
+  </g>
+
+  <!-- 各段长度 -->
+  <g stroke="#8496b3" stroke-width="1.2" marker-start="url(#tlsDim)" marker-end="url(#tlsDim)">
+    <line x1="88" y1="182" x2="158" y2="182"/>
+    <line x1="158" y1="182" x2="234" y2="182"/>
+    <line x1="234" y1="182" x2="300" y2="182"/>
+    <line x1="300" y1="182" x2="404" y2="182"/>
+    <line x1="404" y1="182" x2="480" y2="182"/>
+    <line x1="480" y1="182" x2="614" y2="182"/>
+  </g>
+  <g font-size="10.5" fill="#5a6b85" text-anchor="middle">
+    <text x="123" y="175">L_in</text>
+    <text x="196" y="175">L_D</text>
+    <text x="267" y="175">L_br</text>
+    <text x="352" y="175">L_air</text>
+    <text x="442" y="175">L_out</text>
+    <text x="547" y="175">L_m</text>
+  </g>
+
+  <!-- 传递矩阵逐级串联 -->
+  <g fill="#eef4ff" stroke="#1a5fb4" stroke-width="1.6">
+    <rect x="26" y="236" width="84" height="44" rx="4"/>
+    <rect x="132" y="236" width="84" height="44" rx="4"/>
+    <rect x="238" y="236" width="84" height="44" rx="4"/>
+    <rect x="344" y="236" width="84" height="44" rx="4"/>
+    <rect x="450" y="236" width="84" height="44" rx="4"/>
+    <rect x="556" y="236" width="84" height="44" rx="4"/>
+  </g>
+  <g font-size="12.5" font-style="italic" fill="#0b3a72" text-anchor="middle">
+    <text x="68" y="262">T_in</text>
+    <text x="174" y="262">T_D</text>
+    <text x="280" y="262">T_br</text>
+    <text x="386" y="262">T_air</text>
+    <text x="492" y="262">T_out</text>
+    <text x="598" y="262">T_m</text>
+  </g>
+  <g font-size="10" fill="#5a6b85" text-anchor="middle">
+    <text x="68" y="300">进气管</text>
+    <text x="174" y="300">波纹管</text>
+    <text x="280" y="300">编织管</text>
+    <text x="386" y="300">空滤器</text>
+    <text x="492" y="300">出气管</text>
+    <text x="598" y="300">消音器</text>
+  </g>
+
+  <!-- 串联箭头 -->
+  <g stroke="#8496b3" stroke-width="1.5" marker-end="url(#tlsArrow)">
+    <line x1="110" y1="258" x2="128" y2="258"/>
+    <line x1="216" y1="258" x2="234" y2="258"/>
+    <line x1="322" y1="258" x2="340" y2="258"/>
+    <line x1="428" y1="258" x2="446" y2="258"/>
+    <line x1="534" y1="258" x2="552" y2="258"/>
+    <line x1="640" y1="258" x2="684" y2="258"/>
+  </g>
+  <text x="692" y="263" font-size="13" fill="#c0392b" font-weight="600">TL</text>
+
+  <!-- 汇总公式 -->
+  <text x="380" y="338" text-anchor="middle" font-size="11.5" fill="#1f2937">T_sys = T_in · T_D · T_br · T_air · T_out · T_m</text>
+  <text x="380" y="362" text-anchor="middle" font-size="11.5" fill="#c0392b" font-weight="600">TL = 20 lg[(T11 + T12 + T21 + T22) / 2]</text>
+</svg>`;

@@ -19,6 +19,10 @@ export const UNC_TRUSTED = `${UNC_ROOT}\\Trusted Data Asset Library`;
 export const UNC_CAE_LIB = `${UNC_ROOT}\\Virtual Verification Library`;
 export const UNC_MATERIAL_LIB = '\\\\10.1.1.245\\materials library';
 
+/** 知识经验库根目录（FMEA 案例库在其下） */
+export const KBE_ROOT = '\\\\10.1.1.245\\Knowledge & Experience Base';
+export const KBE_FMEA = `${KBE_ROOT}\\FMEA Library`;
+
 /** 项目-产品-版本键：统一空格，避免因字符差异导致匹配失败 */
 export function productKey(project: string, product: string, version: string): string {
   return [project, product, version].map((s) => (s || '').trim().replace(/\s+/g, ' ')).join(' | ');

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type CtrUser } from '../api';
+import { IS_STANDARD } from '../edition';
 import { PdfViewer } from '../components/PdfViewer';
 import { archiveDateInRange, parseCaeArchiveName } from '../report/db';
 
@@ -29,6 +30,7 @@ export function CaeSearchPage({ user: _user }: Props) {
   const [selected, setSelected] = useState<DbFile | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [toast, setToast] = useState('');
 
   // 列表区 / 预览区 高度比例（0.15 ~ 0.85，默认 0.4）
   const [listRatio, setListRatio] = useState<number>(() => {
@@ -98,6 +100,22 @@ export function CaeSearchPage({ user: _user }: Props) {
   const openFile = useCallback(async (f: DbFile) => {
     const res = await api.app.openPath(f.fullPath);
     if (!res.ok) setError(`无法用本地程序打开：${res.message || '未知错误'}`);
+  }, []);
+
+  /** 导出报告原件副本：另存归档文件到用户指定位置 */
+  const exportFile = useCallback(async (f: DbFile) => {
+    setError('');
+    try {
+      const res = await api.file.copyOut({ srcPath: f.fullPath, defaultName: f.name });
+      if (res.ok) {
+        setToast(`已导出到 ${res.filePath}`);
+        window.setTimeout(() => setToast(''), 4000);
+      } else if (!res.canceled) {
+        setError(`导出失败：${res.message || '未知错误'}`);
+      }
+    } catch (e) {
+      setError(`导出失败：${e instanceof Error ? e.message : String(e)}`);
+    }
   }, []);
 
   /** 删除归档报告：二次确认 → 主进程删除 → 刷新列表并清理选中态 */
@@ -217,6 +235,7 @@ export function CaeSearchPage({ user: _user }: Props) {
       </div>
 
       {error && <div className="login-error">{error}</div>}
+      {toast && <div className="toast">{toast}</div>}
 
       <div
         className="ts-body"
@@ -236,7 +255,7 @@ export function CaeSearchPage({ user: _user }: Props) {
                 <th style={{ width: '8%' }}>日期</th>
                 <th style={{ width: '8%' }}>大小</th>
                 <th>完整文件名</th>
-                <th style={{ width: 56 }}>操作</th>
+                <th style={{ width: 96 }}>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -271,6 +290,17 @@ export function CaeSearchPage({ user: _user }: Props) {
                     <td className="mono">{f.name}</td>
                     <td className="center">
                       <button
+                        className="btn-link"
+                        title="导出报告副本"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          exportFile(f);
+                        }}
+                        onDoubleClick={(e) => e.stopPropagation()}
+                      >
+                        导出
+                      </button>
+                      <button
                         className="btn-link danger"
                         title="删除该报告"
                         onClick={(e) => {
@@ -289,7 +319,9 @@ export function CaeSearchPage({ user: _user }: Props) {
                 <tr>
                   <td colSpan={11} className="center settings-hint">
                     {files.length === 0
-                      ? 'CAE 库暂无归档报告，请先在「CAE 报告导入」模块归档'
+                      ? IS_STANDARD
+                        ? 'CAE 库暂无归档报告，请联系管理员导入'
+                        : 'CAE 库暂无归档报告，请先在「CAE 报告导入」模块归档'
                       : '无匹配结果'}
                   </td>
                 </tr>

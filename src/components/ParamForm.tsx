@@ -2,6 +2,7 @@ import { Fragment } from 'react';
 import type { FormulaSpec, ParamSpec } from '../formula/types';
 import { showIfMatches } from '../formula/types';
 import { UNIT_GROUPS } from '../formula/units';
+import { IS_STANDARD } from '../edition';
 
 interface Props {
   formula: FormulaSpec;
@@ -117,6 +118,15 @@ export function ParamForm({ formula, values, units, onValuesChange, onUnitsChang
     );
   };
 
+  /** 参考范围文案（标准版只展示这一条提示，无范围则不显示任何说明） */
+  const rangeText = (p: ParamSpec) => {
+    if (p.min === undefined && p.max === undefined) return '';
+    const unitLabel = p.unitGroup ? units[p.key] ?? p.unit : p.unit;
+    const lo = p.min !== undefined ? p.min : '不限';
+    const hi = p.max !== undefined ? p.max : '不限';
+    return `参考范围：[${lo}, ${hi}]${unitLabel ? ` ${unitLabel}` : ''}`;
+  };
+
   return (
     <div className="param-form">
       <h3 className="panel-title">输入参数</h3>
@@ -125,12 +135,17 @@ export function ParamForm({ formula, values, units, onValuesChange, onUnitsChang
           <Fragment key={b.param.key}>
             {b.section && <div className="param-section-title">{b.section}</div>}
             <div className="param-row">
-              <label className="param-label" title={b.param.description}>
+              <label
+                className="param-label"
+                title={IS_STANDARD ? undefined : b.param.description}
+              >
                 <span className="param-symbol">{b.param.symbol}</span>
                 <span className="param-name">{b.param.label}</span>
               </label>
               {control(b.param)}
-              {b.param.description && <div className="param-desc">{b.param.description}</div>}
+              {IS_STANDARD
+                ? rangeText(b.param) && <div className="param-range">{rangeText(b.param)}</div>
+                : b.param.description && <div className="param-desc">{b.param.description}</div>}
               {outOfRange(b.param) && (
                 <div className="param-warn">
                   取值超出建议范围
@@ -146,10 +161,14 @@ export function ParamForm({ formula, values, units, onValuesChange, onUnitsChang
             <div className="flow-row">
               {b.params.map((p) => (
                 <div className="flow-cell" key={p.key}>
-                  <div className="flow-cell-title" title={p.description}>
+                  <div
+                    className="flow-cell-title"
+                    title={IS_STANDARD ? undefined : p.description}
+                  >
                     {p.cellTitle ?? p.label}
                   </div>
                   {control(p)}
+                  {IS_STANDARD && rangeText(p) && <div className="param-range">{rangeText(p)}</div>}
                 </div>
               ))}
             </div>

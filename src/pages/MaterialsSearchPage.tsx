@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type CtrUser } from '../api';
+import { IS_STANDARD } from '../edition';
 import { MaterialCurvePlot } from '../components/MaterialCurvePlot';
 import {
   buildMaterialRecord,
@@ -578,17 +579,23 @@ export function MaterialsSearchPage({ user }: Props) {
             <span className="chip">常规材料 {convCount}</span>
             <span className="chip">超弹性 {hyperCount}</span>
             <span className="chip">流体 {fluidCount}</span>
-            <button className="btn-ghost sm" onClick={refresh} disabled={busy}>
-              {busy ? '刷新中…' : '刷新'}
-            </button>
             <button
               className="btn-ghost sm"
-              onClick={normalizeFileNames}
-              disabled={busy || cacheBusy}
-              title="为已导入的超弹性材料文件名补入硬度段（牌号+系列号+温度+硬度+供应商）"
+              onClick={refresh}
+              disabled={busy}
             >
-              整理文件名
+              {busy ? '刷新中…' : '刷新'}
             </button>
+            {!IS_STANDARD && (
+              <button
+                className="btn-ghost sm"
+                onClick={normalizeFileNames}
+                disabled={busy || cacheBusy}
+                title="为已导入的超弹性材料文件名补入硬度段（牌号+系列号+温度+硬度+供应商）"
+              >
+                整理文件名
+              </button>
+            )}
             <button
               className="btn-ghost sm"
               onClick={exportDetails}
@@ -789,7 +796,9 @@ export function MaterialsSearchPage({ user }: Props) {
                 <tr>
                   <td colSpan={11} className="center settings-hint">
                     {files.length === 0
-                      ? '材料库暂无记录，请先在「材料数据导入」模块录入'
+                      ? IS_STANDARD
+                        ? '材料库暂无记录，请联系管理员导入'
+                        : '材料库暂无记录，请先在「材料数据导入」模块录入'
                       : '无匹配结果'}
                   </td>
                 </tr>
@@ -852,9 +861,11 @@ export function MaterialsSearchPage({ user }: Props) {
                   <button className="btn-ghost sm" onClick={downloadCsv} disabled={!record}>
                     下载 CSV
                   </button>
-                  <button className="btn-ghost sm" onClick={startEdit} disabled={!record || !!editDraft}>
-                    编辑
-                  </button>
+                  {!IS_STANDARD && (
+                    <button className="btn-ghost sm" onClick={startEdit} disabled={!record || !!editDraft}>
+                      编辑
+                    </button>
+                  )}
                   <button className="btn-ghost sm" onClick={() => openFile(selected)}>
                     打开文件
                   </button>

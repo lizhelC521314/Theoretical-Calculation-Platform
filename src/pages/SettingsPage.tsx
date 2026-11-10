@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, type CtrUser, type LicenseInfo } from '../api';
 import { BRAND } from '../branding';
+import { EDITION_LABEL } from '../edition';
 
 export function SettingsPage({ user }: { user: CtrUser }) {
   const [lic, setLic] = useState<LicenseInfo | null>(null);
@@ -68,6 +69,10 @@ export function SettingsPage({ user }: { user: CtrUser }) {
         <div className="kv">
           <span>产品名称</span>
           <b>{BRAND.productName}</b>
+        </div>
+        <div className="kv">
+          <span>版本类型</span>
+          <b>{EDITION_LABEL}</b>
         </div>
         <div className="kv">
           <span>版本</span>

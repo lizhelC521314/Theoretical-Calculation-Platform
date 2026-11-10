@@ -88,6 +88,8 @@ interface CtrApi {
     saveDocx(p: { defaultName: string; base64: string }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string }>;
     savePdf(p: { defaultName: string; html: string }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string }>;
     saveXlsx(p: { defaultName: string; base64: string }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string }>;
+    /** 桌面版：把归档报告原件另存到用户指定位置 */
+    copyOut(p: { srcPath: string; defaultName: string }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string; message?: string }>;
     /** 桌面版：取用户选择文件的真实路径（浏览器返回空串） */
     getPath(file: File): string;
   };
@@ -121,6 +123,16 @@ interface CtrApi {
   };
   material: {
     /** 材料库：以 Apache Parquet 写入一条记录 */
+    write(p: { record: unknown; fileName: string; overwrite?: boolean }): Promise<{
+      ok: boolean;
+      exists?: boolean;
+      filePath?: string;
+      targetDir?: string;
+      message?: string;
+    }>;
+  };
+  fmea: {
+    /** FMEA 案例库：一张知识卡片写入一个 Parquet 文件 */
     write(p: { record: unknown; fileName: string; overwrite?: boolean }): Promise<{
       ok: boolean;
       exists?: boolean;
@@ -224,6 +236,7 @@ const fallback: CtrApi = {
     saveDocx: async () => ({ ok: false, canceled: true }),
     savePdf: async () => ({ ok: false, canceled: true }),
     saveXlsx: async () => ({ ok: false, canceled: true }),
+    copyOut: async () => ({ ok: false, message: '浏览器调试模式不支持导出本地文件' }),
     getPath: () => '',
   },
   pdf: {
@@ -242,6 +255,9 @@ const fallback: CtrApi = {
     ping: async () => ({ reachable: false, root: '', calc: '', test: '', trusted: '', cae: '', material: '', kbeRoot: '', kbeTheory: '', kbeDesign: '', kbeFmea: '' }),
   },
   material: {
+    write: async () => ({ ok: false, message: '浏览器调试模式无法写入 UNC 路径' }),
+  },
+  fmea: {
     write: async () => ({ ok: false, message: '浏览器调试模式无法写入 UNC 路径' }),
   },
   ppt: {

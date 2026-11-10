@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormulaSpec } from '../formula/types';
 import { DOMAIN_LABEL } from '../formula/types';
 import { groupByDomain, searchFormulas, stats } from '../formula/registry';
+import { briefOf } from '../formula/briefs';
+import { IS_STANDARD } from '../edition';
 
 interface Props {
   onOpen: (f: FormulaSpec) => void;
@@ -102,7 +104,7 @@ export function LibraryPage({ onOpen, initialDomain }: Props) {
                 <h4>{f.title}</h4>
                 <span className="tag domain">{DOMAIN_LABEL[f.domain]}</span>
               </header>
-              <p className="card-summary">{f.summary}</p>
+              <p className="card-summary">{IS_STANDARD ? briefOf(f) : f.summary}</p>
               <div className="card-tags">
                 <span className="tag light">{f.subsystem}</span>
                 {f.tags.slice(0, 3).map((t) => (

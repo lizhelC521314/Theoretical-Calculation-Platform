@@ -9,6 +9,7 @@ const bcrypt = require('bcryptjs');
 const store = require('./store.cjs');
 const license = require('./license.cjs');
 const { writeMaterialParquet, readMaterialParquet } = require('./materialParquet.cjs');
+const { writeFmeaParquet, readFmeaParquet } = require('./fmeaParquet.cjs');
 
 // 打包后 @napi-rs/canvas 会被加载两次：主进程 require 解析到 app.asar 虚拟路径，
 // pdfjs 的 node_utils 用 createRequire 解析到 app.asar.unpacked 真实路径。
@@ -81,6 +82,11 @@ function isInAnyRoot(target, roots) {
 
 const isDev = !app.isPackaged;
 const PRODUCT_TITLE = '汽车零部件理论计算平台';
+/** 标准版按可执行文件名识别（打包时 productName 含「标准版」），与渲染层开关独立 */
+const WINDOW_TITLE =
+  app.isPackaged && /标准版/.test(path.basename(process.execPath))
+    ? `${PRODUCT_TITLE}（标准版）`
+    : PRODUCT_TITLE;
 
 let mainWindow = null;
 
@@ -90,7 +96,7 @@ function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 680,
-    title: PRODUCT_TITLE,
+    title: WINDOW_TITLE,
     backgroundColor: '#f5f7fa',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -294,6 +300,30 @@ ipcMain.handle('export:save', async (_e, payload) => {
   if (data == null) return { ok: false, message: '无内容可写' };
   fs.writeFileSync(res.filePath, data, encoding === 'base64' ? 'base64' : undefined);
   return { ok: true, filePath: res.filePath };
+});
+
+/** 导出报告原件副本：把归档文件另存到用户指定位置（不改变原文） */
+ipcMain.handle('file:copyOut', async (_e, payload) => {
+  const { srcPath, defaultName } = payload || {};
+  if (!srcPath || !fs.existsSync(srcPath)) return { ok: false, message: '源文件不存在' };
+  const ext = path.extname(srcPath).replace('.', '');
+  const res = await dialog.showSaveDialog(mainWindow, {
+    title: '导出报告副本',
+    defaultPath: defaultName || path.basename(srcPath),
+    filters: ext
+      ? [
+          { name: '报告文件', extensions: [ext] },
+          { name: '所有文件', extensions: ['*'] },
+        ]
+      : [{ name: '所有文件', extensions: ['*'] }],
+  });
+  if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+  try {
+    fs.copyFileSync(srcPath, res.filePath);
+    return { ok: true, filePath: res.filePath };
+  } catch (err) {
+    return { ok: false, message: err && err.message ? err.message : String(err) };
+  }
 });
 
 /** 导出 Word 计算书：渲染进程用 docx 库生成 base64，此处仅负责保存对话框与写盘 */
@@ -1038,6 +1068,25 @@ ipcMain.handle('material:write', async (_e, payload) => {
   }
 });
 
+/** FMEA 案例库写入：一条知识卡片一个 Parquet 文件（文件名即编号） */
+ipcMain.handle('fmea:write', async (_e, payload) => {
+  try {
+    const { record, fileName, overwrite } = payload || {};
+    if (!record || typeof record !== 'object') return { ok: false, message: 'FMEA 记录为空' };
+    const safeName = path.basename(String(fileName || ''));
+    if (!/\.parquet$/i.test(safeName)) return { ok: false, message: 'FMEA 库文件必须为 .parquet' };
+    ensureDir(KBE_FMEA);
+    const filePath = path.join(KBE_FMEA, safeName);
+    await writeFmeaParquet(filePath, record, overwrite === true);
+    return { ok: true, filePath, targetDir: KBE_FMEA };
+  } catch (err) {
+    if (err && err.code === 'EEXIST') {
+      return { ok: false, exists: true, message: '同名 FMEA 记录已存在' };
+    }
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
 /** 归档 Excel 到 UNC 数据库目录 */
 ipcMain.handle('db:archive', async (_e, payload) => {
   try {
@@ -1063,7 +1112,12 @@ ipcMain.handle('db:list', async (_e, payload) => {
     const targetDir = libDir(libType);
     if (!targetDir) return { ok: false, message: '未知库类型' };
     if (!fs.existsSync(targetDir)) return { ok: true, dir: targetDir, files: [] };
-    const extRe = libType === 'material' ? /\.(parquet|json)$/i : /\.(xlsx|pdf)$/i;
+    const extRe =
+      libType === 'material'
+        ? /\.(parquet|json)$/i
+        : libType === 'fmea'
+          ? /^FM-\d{4}-\d{3,}\.parquet$/i
+          : /\.(xlsx|pdf)$/i;
     const files = fs
       .readdirSync(targetDir)
       .filter((n) => extRe.test(n))
@@ -1105,7 +1159,11 @@ ipcMain.handle('db:readText', async (_e, payload) => {
     const allowedRoots = [UNC_CALC_LIB, UNC_TEST_LIB, UNC_TRUSTED, UNC_CAE_LIB, UNC_MATERIAL_LIB, KBE_THEORY, KBE_DESIGN, KBE_FMEA];
     if (!isInAnyRoot(fullPath, allowedRoots)) return { ok: false, message: '仅允许读取数据库目录内的归档文件' };
     if (/\.parquet$/i.test(fullPath)) {
-      const record = await readMaterialParquet(fullPath);
+      // FMEA 库与材料库共用 Parquet 扩展名，按所在目录选择对应的读取器
+      const record =
+        path.resolve(fullPath).toLowerCase().startsWith(path.resolve(KBE_FMEA).toLowerCase())
+          ? await readFmeaParquet(fullPath)
+          : await readMaterialParquet(fullPath);
       if (!record) return { ok: false, message: 'Parquet 记录为空或格式不正确' };
       return { ok: true, text: JSON.stringify(record) };
     }

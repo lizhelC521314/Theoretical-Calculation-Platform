@@ -27,6 +27,8 @@ const bridge = {
     saveDocx: (payload) => ipcRenderer.invoke('export:docx', payload),
     savePdf: (payload) => ipcRenderer.invoke('export:pdf', payload),
     saveXlsx: (payload) => ipcRenderer.invoke('export:xlsx', payload),
+    /** 导出报告原件副本（另存归档文件） */
+    copyOut: (payload) => ipcRenderer.invoke('file:copyOut', payload),
     getPath: (file) => webUtils.getPathForFile(file),
   },
   pdf: {
@@ -39,6 +41,9 @@ const bridge = {
   },
   material: {
     write: (p) => ipcRenderer.invoke('material:write', p),
+  },
+  fmea: {
+    write: (p) => ipcRenderer.invoke('fmea:write', p),
   },
   db: {
     archive: (p) => ipcRenderer.invoke('db:archive', p),

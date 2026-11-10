@@ -8,6 +8,7 @@ import { ResultPanel } from '../components/ResultPanel';
 import { SensitivityChart } from '../components/SensitivityChart';
 import { CurveChart } from '../components/CurveChart';
 import { api, type CtrUser, type Project } from '../api';
+import { IS_STANDARD } from '../edition';
 
 interface Props {
   formula: FormulaSpec;
@@ -217,7 +218,11 @@ export function CalculatorPage({ formula, user, project, onBack }: Props) {
 
       <div
         className="calc-body"
-        style={{ gridTemplateColumns: `${leftW}px 4px minmax(0, 1fr) 4px ${rightW}px` }}
+        style={{
+          gridTemplateColumns: IS_STANDARD
+            ? `${leftW}px 4px minmax(0, 1fr)`
+            : `${leftW}px 4px minmax(0, 1fr) 4px ${rightW}px`,
+        }}
       >
         <div className="calc-col left">
           <ParamForm
@@ -231,21 +236,32 @@ export function CalculatorPage({ formula, user, project, onBack }: Props) {
 
         <div className="sidebar-resizer" onMouseDown={handleLeftResize} />
 
-        <div className="calc-col middle">
-          <FormulaView formula={formula} values={values} />
-        </div>
+        {/* 标准版不展示公式说明栏，保留「参数输入 — 计算结果」两栏 */}
+        {!IS_STANDARD && (
+          <>
+            <div className="calc-col middle">
+              <FormulaView formula={formula} values={values} />
+            </div>
 
-        <div className="sidebar-resizer" onMouseDown={handleRightResize} />
+            <div className="sidebar-resizer" onMouseDown={handleRightResize} />
+          </>
+        )}
 
         <div className="calc-col right">
+          {IS_STANDARD && formula.diagram && (
+            <div className="result-block calc-diagram">
+              <h3 className="panel-title">计算简图</h3>
+              <div className="diagram-box" dangerouslySetInnerHTML={{ __html: formula.diagram }} />
+            </div>
+          )}
           <ResultPanel
             formula={formula}
             outputsSI={computed ? computed.outputsSI : null}
             inputsSI={computed ? computed.inputsSI : null}
           />
-          {/* 结果 → 结果曲线 → 参数敏感性分析（敏感性分析固定放最后） */}
+          {/* 结果 → 结果曲线 → 参数敏感性分析（敏感性分析固定放最后，标准版不展示） */}
           {formula.curve && computed && <CurveChart spec={formula.curve} inputsSI={computed.inputsSI} />}
-          <SensitivityChart formula={formula} inputsSI={computed ? computed.inputsSI : null} />
+          {!IS_STANDARD && <SensitivityChart formula={formula} inputsSI={computed ? computed.inputsSI : null} />}
         </div>
       </div>
 

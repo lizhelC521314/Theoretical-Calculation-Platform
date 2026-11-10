@@ -3,6 +3,7 @@ import { api, type CtrUser, type HistoryEntry, type Project } from './api';
 import { getFormula } from './formula/registry';
 import type { FormulaSpec } from './formula/types';
 import { BRAND } from './branding';
+import { IS_STANDARD } from './edition';
 import { LoginPage } from './pages/LoginPage';
 import { HomePage } from './pages/HomePage';
 import { LibraryPage } from './pages/LibraryPage';
@@ -18,9 +19,11 @@ import { DatabasePage } from './pages/DatabasePage';
 import { MaterialsImportPage } from './pages/MaterialsImportPage';
 import { MaterialsSearchPage } from './pages/MaterialsSearchPage';
 import { KnowledgeBasePage } from './pages/KnowledgeBasePage';
+import { FmeaImportPage } from './pages/FmeaImportPage';
+import { FmeaSearchPage } from './pages/FmeaSearchPage';
 import { SettingsPage } from './pages/SettingsPage';
 
-type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'materialImport' | 'materialSearch' | 'db' | 'kbe' | 'compare' | 'settings';
+type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'materialImport' | 'materialSearch' | 'fmeaImport' | 'fmeaSearch' | 'db' | 'kbe' | 'compare' | 'settings';
 
 interface NavLeaf { key: Page; label: string; icon?: string }
 /** 分组可嵌套：如「产品验证」下的「试验报告」子分组 */
@@ -73,8 +76,42 @@ const NAV: NavItem[] = [
     ],
   },
   { key: 'kbe', label: '知识经验库', icon: '📚' },
+  {
+    key: 'fmea',
+    label: 'FMEA 案例库',
+    icon: '◈',
+    children: [
+      { key: 'fmeaImport', label: 'FMEA 导入', icon: '⇪' },
+      { key: 'fmeaSearch', label: 'FMEA 检索', icon: '🔍' },
+    ],
+  },
   { key: 'settings', label: '设置', icon: '⚙' },
 ];
+
+/** 标准版不提供的导入 / 校准类页面 */
+const STANDARD_HIDDEN_PAGES = new Set<Page>(['testsImport', 'lab', 'caeImport', 'materialImport', 'fmeaImport']);
+
+/** 标准版导航：剔除导入类页面，并把只剩检索项的子分组上提为直接的检索入口 */
+function standardNav(items: NavItem[]): NavItem[] {
+  const out: NavItem[] = [];
+  for (const item of items) {
+    if (!('children' in item)) {
+      if (!STANDARD_HIDDEN_PAGES.has(item.key)) out.push(item);
+      continue;
+    }
+    const children = standardNav(item.children);
+    if (children.length === 0) continue;
+    const allLeaves = children.every((c) => !('children' in c));
+    if (allLeaves && (item.key === 'reports' || item.key === 'virtualValidation')) {
+      out.push(...children);
+    } else {
+      out.push({ ...item, children });
+    }
+  }
+  return out;
+}
+
+const APP_NAV: NavItem[] = IS_STANDARD ? standardNav(NAV) : NAV;
 
 /** 某页面是否属于某个父组（决定组级高亮，支持多级嵌套） */
 function groupContains(group: NavGroup, p: Page): boolean {
@@ -100,7 +137,12 @@ export function App() {
   const [libDomain, setLibDomain] = useState<string | undefined>(undefined);
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(['theory', 'validation', 'virtualValidation', 'material']));
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(['theory', 'validation', 'virtualValidation', 'material', 'fmea']));
+
+  // 标准版兜底：隐藏页面（如旧状态残留）统一回到工作台
+  useEffect(() => {
+    if (IS_STANDARD && STANDARD_HIDDEN_PAGES.has(page)) setPage('home');
+  }, [page]);
 
   // 侧边栏可拖动宽度
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -194,6 +236,8 @@ export function App() {
     caeSearch: 'CAE报告检索',
     materialImport: '材料数据导入',
     materialSearch: '材料检索',
+    fmeaImport: 'FMEA 导入',
+    fmeaSearch: 'FMEA 检索',
     db: '产品数据库',
     kbe: '知识经验库',
     compare: '方案对比',
@@ -253,10 +297,11 @@ export function App() {
             <div className="sb-product">{BRAND.productShort}</div>
           </div>
         </div>
-        <nav className="sidebar-nav">{renderNavItems(NAV, 0)}</nav>
+        <nav className="sidebar-nav">{renderNavItems(APP_NAV, 0)}</nav>
         <div className="sidebar-footer">
           <div className="sf-version">
-            v{BRAND.version} · {__BUILD_TIME__.slice(0, 16).replace('T', ' ')}
+            v{BRAND.version}
+            {IS_STANDARD ? ' · 标准版' : ''} · {__BUILD_TIME__.slice(0, 16).replace('T', ' ')}
           </div>
           <div className="sf-copy">{BRAND.companyName}</div>
         </div>
@@ -335,6 +380,8 @@ export function App() {
           {page === 'caeSearch' && <CaeSearchPage user={user} />}
           {page === 'materialImport' && <MaterialsImportPage user={user} />}
           {page === 'materialSearch' && <MaterialsSearchPage user={user} />}
+          {page === 'fmeaImport' && <FmeaImportPage user={user} />}
+          {page === 'fmeaSearch' && <FmeaSearchPage user={user} onOpenImport={() => setPage('fmeaImport')} />}
           {page === 'db' && <DatabasePage user={user} />}
           {page === 'kbe' && <KnowledgeBasePage user={user} />}
           {page === 'compare' && compare && (

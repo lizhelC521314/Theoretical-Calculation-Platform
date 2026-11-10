@@ -1,4 +1,5 @@
 import type { FormulaSpec, OutputSpec, ParamSpec, ShowIf } from '../../formula/types';
+import { INTAKE_RESISTANCE_DIAGRAM } from './diagrams';
 
 /**
  * 进气系统分部件阻力设计（进气管 1~5 段 + 空滤器 + 出气管 1~5 段）
@@ -283,6 +284,7 @@ export const intakeSystemResistance: FormulaSpec = {
     { key: 'dpComp', label: '可压缩修正后总阻力', symbol: 'Δp_comp', unit: 'Pa', unitGroup: 'pressurePa', digits: 3, group: '汇总', description: 'Δp_comp ≈ Δp_sys·(1 + M_max²/4)，M > 0.5 时误差变大，应逐段迭代 p、ρ、v' },
     { key: 'S', label: '系统阻力系数', symbol: 'S', unit: 'Pa·s²/m³', digits: 3, group: '汇总', description: 'S = Δp_sys/Q²，用于绘制 Δp = S·Q² 曲线并与发动机需求曲线匹配' },
   ],
+  diagram: INTAKE_RESISTANCE_DIAGRAM,
   latex: [
     { label: '系统总阻力（各段串联求和）', tex: '\\Delta p_{sys} = \\Delta p_{entrance} + \\sum_{i=1}^{N_{in}}\\Delta p_{in,i} + \\Delta p_{airbox} + \\sum_{i=1}^{N_{out}}\\Delta p_{out,i}' },
     { label: '流速与流通面积', tex: 'v = \\frac{Q}{A},\\qquad A = \\frac{\\pi D^{2}}{4}' },

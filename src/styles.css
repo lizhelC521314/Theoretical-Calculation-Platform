@@ -1000,6 +1000,13 @@ select {
   margin-top: 4px;
   line-height: 1.6;
 }
+/* 标准版参数参考范围：仅此一行提示，不展开参数说明 */
+.param-range {
+  font-size: 11.5px;
+  color: #7d8ca3;
+  margin-top: 3px;
+  line-height: 1.5;
+}
 .param-warn {
   font-size: 11.5px;
   color: var(--warn);
@@ -1049,6 +1056,10 @@ select {
   height: auto;
   display: block;
   margin: 0 auto;
+}
+/* 系统级链路示意图（进气系统阻力等）需要更大画幅，避免文字过小 */
+.diagram-box svg.diagram-wide {
+  max-width: 760px;
 }
 .fv-latex-list {
   display: flex;
@@ -2371,9 +2382,10 @@ select {
   justify-content: center;
 }
 .mat-curve-figure .mat-curve-plot.is-square {
-  width: 380px;
-  height: 380px;
-  max-width: 100%;
+  width: 100%;
+  max-width: 380px;
+  height: auto;
+  max-height: none;
   aspect-ratio: 1 / 1;
   display: block;
   background: #fff;
@@ -2422,3 +2434,260 @@ select {
 .mat-curve-table tr:hover td { background: #fafbfc; }
 .partial-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: #43566c; }
 .partial-check select { height: 28px; border: 1px solid var(--border); border-radius: 6px; background: #fff; padding: 0 6px; }
+
+/* ---------- FMEA 案例库 ---------- */
+.fmea-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+.fmea-page > .settings-card {
+  flex-shrink: 0;
+}
+.fmea-body {
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  gap: 10px;
+  flex: 1;
+  min-height: 420px;
+}
+.fmea-list {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: auto;
+  min-height: 0;
+}
+.fmea-item {
+  padding: 9px 12px 10px;
+  border-bottom: 1px solid #eef2f7;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+}
+.fmea-item:last-child {
+  border-bottom: none;
+}
+.fmea-item:hover {
+  background: #f4f8fe;
+}
+.fmea-item.active {
+  background: #e8f1fd;
+  border-left-color: var(--blue);
+}
+.fmea-item-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.fmea-item-id {
+  font-family: Consolas, monospace;
+  color: #6b7f96;
+  letter-spacing: 0.2px;
+}
+.fmea-year {
+  margin-left: auto;
+  background: #eef3fa;
+  color: #4d657f;
+  border-radius: 9px;
+  padding: 0 7px;
+  line-height: 16px;
+  font-size: 10.5px;
+}
+.fmea-use {
+  background: #fff4e5;
+  color: #a86400;
+  border-radius: 9px;
+  padding: 0 7px;
+  line-height: 16px;
+  font-size: 10.5px;
+}
+.fmea-item-part {
+  margin: 3px 0 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--blue-deep);
+}
+.fmea-item-mode {
+  font-size: 12.5px;
+  color: #b03030;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.fmea-item-action {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fmea-list-empty {
+  padding: 26px 18px;
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.7;
+  text-align: center;
+}
+.fmea-detail {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow: auto;
+  min-height: 0;
+}
+.fmea-detail-head {
+  border-bottom: 1px solid #eef2f7;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+}
+.fmea-detail-head h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: var(--blue-deep);
+}
+.fmea-detail-head .preview-meta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.fmea-detail-head .btn-ghost,
+.fmea-detail-head .btn-link {
+  font-size: 12px;
+  padding: 4px 9px;
+}
+.fmea-chain {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr) 20px minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
+}
+.fmea-chain-cell {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: #fbfcfe;
+}
+.fmea-chain-cell.cause {
+  border-top: 3px solid #e8a33d;
+}
+.fmea-chain-cell.mode {
+  border-top: 3px solid var(--danger);
+  background: #fff9f9;
+}
+.fmea-chain-cell.effect {
+  border-top: 3px solid #7b61d8;
+}
+.fmea-chain-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 5px;
+}
+.fmea-chain-text {
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #26374a;
+}
+.fmea-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #a9bbcf;
+  font-size: 16px;
+}
+.fmea-block {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+}
+.fmea-block.ok {
+  background: #f6fbf7;
+  border-left: 4px solid var(--ok);
+}
+.fmea-block h4 {
+  margin: 0 0 5px;
+  font-size: 12.5px;
+  color: var(--blue-deep);
+}
+.fmea-block p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.fmea-image-note {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #8a6d3b;
+  background: #fff7e6;
+  border: 1px dashed #e6c88a;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.fmea-detail-foot {
+  margin-top: 12px;
+  padding-top: 9px;
+  border-top: 1px dashed #e6edf6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 11.5px;
+  color: var(--muted);
+  word-break: break-all;
+}
+.fmea-edit-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.fmea-edit-head h3 {
+  margin: 0;
+}
+.fmea-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin-top: 6px;
+}
+.fmea-form-grid .field {
+  margin-bottom: 0;
+}
+.fmea-form-grid .field.full {
+  grid-column: 1 / -1;
+}
+.fmea-form-grid .field textarea {
+  width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  resize: vertical;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.fmea-form-grid .field textarea:focus {
+  border-color: var(--blue);
+}
+.tag-danger {
+  background: #fdecea;
+  color: var(--danger);
+  font-weight: 600;
+}
