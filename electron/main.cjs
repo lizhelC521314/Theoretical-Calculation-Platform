@@ -49,6 +49,13 @@ const KBE_THEORY = `${KBE_ROOT}\\Theoretical Knowledge Base`;
 const KBE_DESIGN = `${KBE_ROOT}\\Product Design Library`;
 const KBE_FMEA = `${KBE_ROOT}\\FMEA Library`;
 const KBE_TRAINING = `${KBE_ROOT}\\Training`;
+/** 知识经验库中「按目录浏览」的分类（白名单，避免前端传任意路径） */
+const KBE_BROWSE_DIRS = {
+  standards: `${KBE_ROOT}\\Standards & Specifications`,
+  guidelines: `${KBE_ROOT}\\Design Guidelines`,
+  lessons: `${KBE_ROOT}\\Lessons Learned`,
+  papers: `${KBE_ROOT}\\Papers Patents`,
+};
 
 function libDir(libType) {
   switch (libType) {
@@ -183,6 +190,8 @@ ipcMain.handle('history:save', (_e, record) => {
     projectId: record.projectId || null,
     formulaId: record.formulaId,
     formulaTitle: record.formulaTitle,
+    formulaVersion: record.formulaVersion || '',
+    formulaStatus: record.formulaStatus || '',
     domain: record.domain,
     inputs: record.inputs,
     outputs: record.outputs,
@@ -257,6 +266,19 @@ ipcMain.handle('lab:get', () => store.get().lab ?? null);
 ipcMain.handle('lab:set', (_e, snapshot) => {
   try {
     store.get().lab = snapshot ?? null;
+    store.persist();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+});
+
+// ---------- 产品定义库（产品族 / 型号 / 需求 / 参数 / 基线） ----------
+ipcMain.handle('product:get', () => store.get().product ?? null);
+
+ipcMain.handle('product:set', (_e, snapshot) => {
+  try {
+    store.get().product = snapshot ?? null;
     store.persist();
     return { ok: true };
   } catch (err) {
@@ -1145,7 +1167,8 @@ ipcMain.handle('db:list', async (_e, payload) => {
       libType === 'material'
         ? /\.(parquet|json)$/i
         : libType === 'fmea'
-          ? /^FM-\d{4}-\d{3,}\.parquet$/i
+          ? // 新格式 FM-A-A03-001-V01 与旧格式 FM-2026-001 都要能列出（与 parseFmeaFileName 对齐）
+            /^(?:FM-[A-JU]-(?:[A-J]\d{2}|U|UXX|XX)-\d{3,}-V\d{2}|FM-\d{4}-\d{3,})\.parquet$/i
           : /\.(xlsx|pdf)$/i;
     const files = fs
       .readdirSync(targetDir)
@@ -1156,6 +1179,187 @@ ipcMain.handle('db:list', async (_e, payload) => {
       })
       .sort((a, b) => b.mtime.localeCompare(a.mtime));
     return { ok: true, dir: targetDir, files };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 知识经验库：按分类浏览目录（标准&规范 / 设计指南 / 经验教训 / 论文专利） */
+ipcMain.handle('kbe:browse', async (_e, payload) => {
+  try {
+    const key = (payload && payload.category) || '';
+    const targetDir = KBE_BROWSE_DIRS[key];
+    if (!targetDir) return { ok: false, message: '未知分类' };
+    if (!fs.existsSync(targetDir)) {
+      return { ok: true, dir: targetDir, exists: false, files: [], message: '目录尚未创建' };
+    }
+    const files = fs
+      .readdirSync(targetDir, { withFileTypes: true })
+      .filter((d) => d.isFile() && !d.name.startsWith('~$'))
+      .map((d) => {
+        const fullPath = path.join(targetDir, d.name);
+        const st = fs.statSync(fullPath);
+        return { name: d.name, size: st.size, mtime: st.mtime.toISOString(), fullPath };
+      })
+      .sort((a, b) => b.mtime.localeCompare(a.mtime));
+    return { ok: true, dir: targetDir, exists: true, files };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 知识经验库四类资料的目录与编号前缀（STD / GDL / LL / PT） */
+const KBE_DOC_META = {
+  standards: { dir: KBE_BROWSE_DIRS.standards, prefix: 'STD' },
+  guidelines: { dir: KBE_BROWSE_DIRS.guidelines, prefix: 'GDL' },
+  lessons: { dir: KBE_BROWSE_DIRS.lessons, prefix: 'LL' },
+  papers: { dir: KBE_BROWSE_DIRS.papers, prefix: 'PT' },
+};
+
+function kbeDocMeta(category) {
+  return KBE_DOC_META[String(category || '')] || null;
+}
+
+/** 编号：<前缀>-年份-序号，按目录内现有 JSON 递增 */
+function nextKbeDocId(meta) {
+  ensureDir(meta.dir);
+  const year = new Date().getFullYear();
+  const re = new RegExp(`^${meta.prefix}-${year}-(\\d{3,})\\.json$`, 'i');
+  let max = 0;
+  for (const n of fs.readdirSync(meta.dir)) {
+    const m = n.match(re);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `${meta.prefix}-${year}-${String(max + 1).padStart(3, '0')}`;
+}
+
+/** 分类专属字段统一转成「字符串 → 字符串」，避免写入非预期结构 */
+function sanitizeExtras(extras) {
+  const out = {};
+  if (!extras || typeof extras !== 'object') return out;
+  for (const [k, v] of Object.entries(extras)) {
+    out[String(k)] = String(v == null ? '' : v).trim();
+  }
+  return out;
+}
+
+/** 知识经验库资料导入：PPT / Word / PDF 统一转 PDF，并写入同名元数据 JSON */
+ipcMain.handle('kbe:docImport', async (_e, payload) => {
+  let pdfPath = '';
+  try {
+    const { category, srcPath, title, author, publishedAt, docCategory, extras, createdBy, createdByDisplay } =
+      payload || {};
+    const meta = kbeDocMeta(category);
+    if (!meta) return { ok: false, message: '未知分类' };
+    const src = String(srcPath || '');
+    if (!src || !fs.existsSync(src)) return { ok: false, message: '文件不存在或无法访问' };
+    const titleText = String(title || '').trim();
+    if (!titleText) return { ok: false, message: '资料名不能为空' };
+    ensureDir(meta.dir);
+    const id = nextKbeDocId(meta);
+    const pdfName = `${id}.pdf`;
+    pdfPath = path.join(meta.dir, pdfName);
+
+    const conv = await convertToPdf(src, pdfPath);
+    if (!conv.ok) return { ok: false, message: conv.message || '转换失败' };
+
+    const record = {
+      schema: 'ctr-kbe-doc-v1',
+      id,
+      category: String(category),
+      title: titleText,
+      author: String(author || '').trim(),
+      publishedAt: String(publishedAt || '').trim(),
+      docCategory: String(docCategory || '').trim(),
+      extras: sanitizeExtras(extras),
+      sourceName: path.basename(src),
+      sourceFormat: path.extname(src).toLowerCase().slice(1),
+      pdfName,
+      createdAt: new Date().toISOString(),
+      createdBy: String(createdBy || ''),
+      createdByDisplay: String(createdByDisplay || ''),
+    };
+    fs.writeFileSync(path.join(meta.dir, `${id}.json`), JSON.stringify(record, null, 2), 'utf8');
+    return { ok: true, record, pdfPath, dir: meta.dir };
+  } catch (err) {
+    try {
+      if (pdfPath && fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
+    } catch {}
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 知识经验库资料列表：读取该分类目录下的 JSON，并补 PDF 路径 */
+ipcMain.handle('kbe:docList', async (_e, payload) => {
+  try {
+    const meta = kbeDocMeta((payload || {}).category);
+    if (!meta) return { ok: false, message: '未知分类' };
+    if (!fs.existsSync(meta.dir)) return { ok: true, dir: meta.dir, exists: false, records: [] };
+    const re = new RegExp(`^${meta.prefix}-\\d{4}-\\d{3,}\\.json$`, 'i');
+    const records = [];
+    for (const n of fs.readdirSync(meta.dir)) {
+      if (!re.test(n)) continue;
+      try {
+        const rec = JSON.parse(fs.readFileSync(path.join(meta.dir, n), 'utf8'));
+        if (!rec || !rec.id) continue;
+        const pdfPath = path.join(meta.dir, rec.pdfName || `${rec.id}.pdf`);
+        records.push({ ...rec, pdfPath, pdfExists: fs.existsSync(pdfPath) });
+      } catch {}
+    }
+    records.sort(
+      (a, b) =>
+        String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')) ||
+        String(b.id).localeCompare(String(a.id)),
+    );
+    return { ok: true, dir: meta.dir, exists: true, records };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 知识经验库资料删除：连同归档 PDF 一并移除 */
+ipcMain.handle('kbe:docDelete', async (_e, payload) => {
+  try {
+    const { category, id } = payload || {};
+    const meta = kbeDocMeta(category);
+    if (!meta) return { ok: false, message: '未知分类' };
+    if (!id) return { ok: false, message: '缺少记录编号' };
+    const file = path.join(meta.dir, `${id}.json`);
+    if (!fs.existsSync(file)) return { ok: false, message: `找不到记录 ${id}` };
+    const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const pdfPath = path.join(meta.dir, rec.pdfName || `${rec.id}.pdf`);
+    fs.unlinkSync(file);
+    if (fs.existsSync(pdfPath)) {
+      try { fs.unlinkSync(pdfPath); } catch {}
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 知识经验库资料元数据更新：补录标准号、发布机构、状态等分类专属字段 */
+ipcMain.handle('kbe:docUpdate', async (_e, payload) => {
+  try {
+    const { category, id, title, author, publishedAt, docCategory, extras } = payload || {};
+    const meta = kbeDocMeta(category);
+    if (!meta) return { ok: false, message: '未知分类' };
+    if (!id) return { ok: false, message: '缺少记录编号' };
+    const file = path.join(meta.dir, `${id}.json`);
+    if (!fs.existsSync(file)) return { ok: false, message: `找不到记录 ${id}` };
+    const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (title !== undefined) {
+      const t = String(title).trim();
+      if (!t) return { ok: false, message: '资料名不能为空' };
+      rec.title = t;
+    }
+    if (author !== undefined) rec.author = String(author).trim();
+    if (publishedAt !== undefined) rec.publishedAt = String(publishedAt).trim();
+    if (docCategory !== undefined) rec.docCategory = String(docCategory).trim();
+    if (extras !== undefined) rec.extras = sanitizeExtras(extras);
+    rec.updatedAt = new Date().toISOString();
+    fs.writeFileSync(file, JSON.stringify(rec, null, 2), 'utf8');
+    return { ok: true, record: rec };
   } catch (err) {
     return { ok: false, message: String((err && err.message) || err) };
   }

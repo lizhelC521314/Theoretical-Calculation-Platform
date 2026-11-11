@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, type CtrUser, type HistoryEntry, type Project } from './api';
 import { getFormula } from './formula/registry';
+import { recordRecent } from './formula/library';
 import type { FormulaSpec } from './formula/types';
 import { BRAND } from './branding';
 import { IS_STANDARD } from './edition';
@@ -10,6 +11,7 @@ import { LibraryPage } from './pages/LibraryPage';
 import { CalculatorPage } from './pages/CalculatorPage';
 import { ComparePanel, HistoryPage } from './pages/HistoryPage';
 import { ProjectsPage } from './pages/ProjectsPage';
+import { ProjectCheckPage } from './pages/ProjectCheckPage';
 import { TestReportsPage } from './pages/TestReportsPage';
 import { TestsSearchPage } from './pages/TestsSearchPage';
 import { CaeReportsPage } from './pages/CaeReportsPage';
@@ -25,9 +27,11 @@ import { TrainingImportPage } from './pages/TrainingImportPage';
 import { TrainingSearchPage } from './pages/TrainingSearchPage';
 import { TheoryImportPage } from './pages/TheoryImportPage';
 import { TheorySearchPage } from './pages/TheorySearchPage';
+import { KbeDocImportPage, KbeDocSearchPage } from './pages/KbeDocPage';
+import { ProductLibraryPage } from './pages/ProductLibraryPage';
 import { SettingsPage } from './pages/SettingsPage';
 
-type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'materialImport' | 'materialSearch' | 'fmeaImport' | 'fmeaSearch' | 'trainingImport' | 'trainingSearch' | 'theoryImport' | 'theorySearch' | 'db' | 'kbe' | 'compare' | 'settings';
+type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'projectCheck' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'materialImport' | 'materialSearch' | 'fmeaImport' | 'fmeaSearch' | 'trainingImport' | 'trainingSearch' | 'theoryImport' | 'theorySearch' | 'productLib' | 'kbeStdImport' | 'kbeStdSearch' | 'kbeGdImport' | 'kbeGdSearch' | 'kbeLlImport' | 'kbeLlSearch' | 'kbePtImport' | 'kbePtSearch' | 'db' | 'kbe' | 'compare' | 'settings';
 
 interface NavLeaf { key: Page; label: string; icon?: string }
 /** 分组可嵌套：如「产品验证」下的「试验报告」子分组 */
@@ -44,6 +48,7 @@ const NAV: NavItem[] = [
     children: [
       { key: 'library', label: '公式库', icon: '∑' },
       { key: 'history', label: '计算记录', icon: '≡' },
+      { key: 'projectCheck', label: '项目校核包', icon: '✓' },
     ],
   },
   {
@@ -91,9 +96,46 @@ const NAV: NavItem[] = [
         children: [
           { key: 'theoryImport', label: '知识理论导入', icon: '⇪' },
           { key: 'theorySearch', label: '知识理论检索', icon: '🔍' },
+          { key: 'productLib', label: '产品定义库', icon: '📦' },
         ],
       },
       { key: 'kbe', label: '产品设计库', icon: '📂' },
+      {
+        key: 'kbeStandards',
+        label: '标准&规范',
+        icon: '📘',
+        children: [
+          { key: 'kbeStdImport', label: '标准资料导入', icon: '⇪' },
+          { key: 'kbeStdSearch', label: '标准资料检索', icon: '🔍' },
+        ],
+      },
+      {
+        key: 'kbeGuidelines',
+        label: '设计指南',
+        icon: '🧭',
+        children: [
+          { key: 'kbeGdImport', label: '指南导入', icon: '⇪' },
+          { key: 'kbeGdSearch', label: '指南检索', icon: '🔍' },
+        ],
+      },
+      {
+        key: 'kbeLessons',
+        label: '经验教训',
+        icon: '💡',
+        children: [
+          { key: 'kbeLlImport', label: '经验导入', icon: '⇪' },
+          { key: 'kbeLlSearch', label: '经验检索', icon: '🔍' },
+        ],
+      },
+      {
+        key: 'kbePapers',
+        label: '论文/专利',
+        icon: '📄',
+        children: [
+          { key: 'kbePtImport', label: '论文专利导入', icon: '⇪' },
+          { key: 'kbePtSearch', label: '论文专利检索', icon: '🔍' },
+        ],
+      },
       {
         key: 'fmea',
         label: 'FMEA库',
@@ -209,6 +251,7 @@ export function App() {
   );
 
   const openFormula = useCallback((f: FormulaSpec) => {
+    recordRecent(f.id);
     setFormula(f);
     setPage('calc');
   }, []);
@@ -259,6 +302,7 @@ export function App() {
     library: '公式库',
     calc: formula?.title ?? '计算',
     history: '计算记录',
+    projectCheck: '项目校核包',
     testsImport: '试验报告导入',
     testsSearch: '试验报告检索',
     lab: '实验数据入库与模型校准',
@@ -272,8 +316,17 @@ export function App() {
     trainingSearch: '培训资料检索',
     theoryImport: '知识理论导入',
     theorySearch: '知识理论检索',
+    productLib: '产品定义库',
     db: '产品数据库',
     kbe: '产品设计库',
+    kbeStdImport: '标准&规范 · 资料导入',
+    kbeStdSearch: '标准&规范 · 资料检索',
+    kbeGdImport: '设计指南 · 资料导入',
+    kbeGdSearch: '设计指南 · 资料检索',
+    kbeLlImport: '经验教训 · 资料导入',
+    kbeLlSearch: '经验教训 · 资料检索',
+    kbePtImport: '论文/专利 · 资料导入',
+    kbePtSearch: '论文/专利 · 资料检索',
     compare: '方案对比',
     settings: '设置',
   };
@@ -394,7 +447,13 @@ export function App() {
             <LibraryPage key={libDomain ?? 'all'} onOpen={openFormula} initialDomain={libDomain} />
           )}
           {page === 'calc' && formula && (
-            <CalculatorPage formula={formula} user={user} project={currentProject} onBack={() => setPage('library')} />
+            <CalculatorPage
+              formula={formula}
+              user={user}
+              project={currentProject}
+              onBack={() => setPage('library')}
+              onOpenFormula={openFormula}
+            />
           )}
           {page === 'history' && (
             <HistoryPage
@@ -406,6 +465,9 @@ export function App() {
                 setPage('compare');
               }}
             />
+          )}
+          {page === 'projectCheck' && (
+            <ProjectCheckPage user={user} projects={projects} currentProject={currentProject} />
           )}
           {page === 'testsImport' && <TestReportsPage user={user} currentProject={currentProject} />}
           {page === 'testsSearch' && <TestsSearchPage user={user} />}
@@ -420,8 +482,17 @@ export function App() {
           {page === 'trainingSearch' && <TrainingSearchPage user={user} onOpenImport={() => setPage('trainingImport')} />}
           {page === 'theoryImport' && <TheoryImportPage user={user} />}
           {page === 'theorySearch' && <TheorySearchPage user={user} onOpenImport={() => setPage('theoryImport')} />}
-          {page === 'db' && <DatabasePage user={user} />}
+          {page === 'productLib' && <ProductLibraryPage user={user} />}
+          {page === 'db' && <DatabasePage user={user} onNavigate={setPage} />}
           {page === 'kbe' && <KnowledgeBasePage user={user} />}
+          {page === 'kbeStdImport' && <KbeDocImportPage user={user} category="standards" />}
+          {page === 'kbeStdSearch' && <KbeDocSearchPage user={user} category="standards" />}
+          {page === 'kbeGdImport' && <KbeDocImportPage user={user} category="guidelines" />}
+          {page === 'kbeGdSearch' && <KbeDocSearchPage user={user} category="guidelines" />}
+          {page === 'kbeLlImport' && <KbeDocImportPage user={user} category="lessons" />}
+          {page === 'kbeLlSearch' && <KbeDocSearchPage user={user} category="lessons" />}
+          {page === 'kbePtImport' && <KbeDocImportPage user={user} category="papers" />}
+          {page === 'kbePtSearch' && <KbeDocSearchPage user={user} category="papers" />}
           {page === 'compare' && compare && (
             <ComparePanel a={compare.a} b={compare.b} onBack={() => setPage('history')} />
           )}

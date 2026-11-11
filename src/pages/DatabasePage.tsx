@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type CtrUser } from '../api';
 import { IS_STANDARD } from '../edition';
-import { UNC_CALC_LIB, UNC_TEST_LIB, UNC_TRUSTED, buildTrustedXlsxBase64, extractKeywords, parseArchiveName, productKey, trustedFileName } from '../report/db';
+import { KBE_DESIGN, UNC_CALC_LIB, UNC_TEST_LIB, UNC_TRUSTED, buildTrustedXlsxBase64, extractKeywords, parseArchiveName, productKey, trustedFileName } from '../report/db';
 
 interface Props {
   user: CtrUser;
+  /** 空状态下的跳转入口：去产生归档文件的模块 */
+  onNavigate?: (page: 'projects' | 'testsImport' | 'productLib') => void;
 }
 
-type Tab = 'calc' | 'test' | 'trusted';
+type Tab = 'calc' | 'test' | 'design' | 'trusted';
 
 interface DbFile {
   name: string;
@@ -92,11 +94,12 @@ function parseTestRows(rows: unknown[][]): { name: string; conditionText: string
 }
 
 /** 数据库模块：UNC 状态、三大库列表、可信资产生成 */
-export function DatabasePage({ user }: Props) {
+export function DatabasePage({ user, onNavigate }: Props) {
   const [tab, setTab] = useState<Tab>('calc');
   const [reachable, setReachable] = useState<boolean | null>(null);
   const [calcFiles, setCalcFiles] = useState<DbFile[]>([]);
   const [testFiles, setTestFiles] = useState<DbFile[]>([]);
+  const [designFiles, setDesignFiles] = useState<DbFile[]>([]);
   const [trustedFiles, setTrustedFiles] = useState<DbFile[]>([]);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -110,13 +113,15 @@ export function DatabasePage({ user }: Props) {
   const refresh = useCallback(async () => {
     const ping = await api.db.ping();
     setReachable(ping.reachable);
-    const [c, t, tr] = await Promise.all([
+    const [c, t, d, tr] = await Promise.all([
       api.db.list({ libType: 'calc' }),
       api.db.list({ libType: 'test' }),
+      api.db.list({ libType: 'design' }),
       api.db.list({ libType: 'trusted' }),
     ]);
     if (c.ok) setCalcFiles(c.files || []);
     if (t.ok) setTestFiles(t.files || []);
+    if (d.ok) setDesignFiles(d.files || []);
     if (tr.ok) setTrustedFiles(tr.files || []);
   }, []);
 
@@ -206,6 +211,7 @@ export function DatabasePage({ user }: Props) {
         </div>
         <div className="kv"><span>计算库</span><b style={{ fontSize: 12 }}>{UNC_CALC_LIB}</b></div>
         <div className="kv"><span>试验库</span><b style={{ fontSize: 12 }}>{UNC_TEST_LIB}</b></div>
+        <div className="kv"><span>产品设计库</span><b style={{ fontSize: 12 }}>{KBE_DESIGN}</b></div>
         {!IS_STANDARD && (
           <div className="kv"><span>可信资产库</span><b style={{ fontSize: 12 }}>{UNC_TRUSTED}</b></div>
         )}
@@ -213,6 +219,7 @@ export function DatabasePage({ user }: Props) {
         <div className="db-stats">
           <span className="chip">计算书 {calcFiles.length}</span>
           <span className="chip">试验报告 {testFiles.length}</span>
+          <span className="chip">型号档案 {designFiles.length}</span>
           {!IS_STANDARD && <span className="chip">已自动匹配 {totalMatches}</span>}
           {!IS_STANDARD && <span className="chip">可信资产 {trustedFiles.length}</span>}
           <button className="btn-ghost sm" onClick={refresh} disabled={busy === 'refresh'}>刷新</button>
@@ -228,6 +235,9 @@ export function DatabasePage({ user }: Props) {
         <button className={tab === 'test' ? 'tab-btn active' : 'tab-btn'} onClick={() => setTab('test')}>
           试验测试库（{testFiles.length}）
         </button>
+        <button className={tab === 'design' ? 'tab-btn active' : 'tab-btn'} onClick={() => setTab('design')}>
+          型号设计档案（{designFiles.length}）
+        </button>
         {!IS_STANDARD && (
           <button className={tab === 'trusted' ? 'tab-btn active' : 'tab-btn'} onClick={() => setTab('trusted')}>
             可信资产库（{trustedFiles.length}）
@@ -235,33 +245,93 @@ export function DatabasePage({ user }: Props) {
         )}
       </div>
 
+      {tab === 'design' && (
+        <FileList
+          files={designFiles}
+          busy={busy}
+          onOpen={openFile}
+          hint="型号设计档案由「产品定义库」发布型号时自动导出：包含型号概况、需求清单、关键参数、计算记录引用与版本基线。"
+          emptyActions={
+            onNavigate ? [{ label: '去产品定义库', onClick: () => onNavigate('productLib') }] : undefined
+          }
+        />
+      )}
+
       {tab === 'calc' && (
         <FileList
           files={calcFiles}
           onBuildTrusted={IS_STANDARD ? undefined : buildTrustedFor}
           busy={busy}
           onOpen={openFile}
+          hint="计算书来自「项目管理」：在项目卡片上点「导出到数据库」后即归档到计算库。"
+          emptyActions={
+            onNavigate ? [{ label: '去项目管理', onClick: () => onNavigate('projects') }] : undefined
+          }
         />
       )}
-      {tab === 'test' && <FileList files={testFiles} busy={busy} onOpen={openFile} />}
-      {!IS_STANDARD && tab === 'trusted' && <FileList files={trustedFiles} busy={busy} onOpen={openFile} />}
+      {tab === 'test' && (
+        <FileList
+          files={testFiles}
+          busy={busy}
+          onOpen={openFile}
+          hint="试验测试库来自「试验报告导入」：导入报告并在检索页归档后，这里会列出对应测试表。"
+          emptyActions={
+            onNavigate ? [{ label: '去试验报告导入', onClick: () => onNavigate('testsImport') }] : undefined
+          }
+        />
+      )}
+      {!IS_STANDARD && tab === 'trusted' && (
+        <FileList
+          files={trustedFiles}
+          busy={busy}
+          onOpen={openFile}
+          hint="可信资产由计算书与试验测试表自动匹配生成：先在「项目管理」导出计算书，再在计算书卡片上点「生成可信资产」。"
+          emptyActions={
+            onNavigate ? [{ label: '去项目管理', onClick: () => onNavigate('projects') }] : undefined
+          }
+        />
+      )}
 
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
 
-function FileList({ files, onBuildTrusted, busy, onOpen }: { files: DbFile[]; onBuildTrusted?: (f: DbFile) => void; busy: string; onOpen?: (f: DbFile) => void }) {
+function FileList({
+  files,
+  onBuildTrusted,
+  busy,
+  onOpen,
+  hint,
+  emptyActions,
+}: {
+  files: DbFile[];
+  onBuildTrusted?: (f: DbFile) => void;
+  busy: string;
+  onOpen?: (f: DbFile) => void;
+  hint?: string;
+  emptyActions?: Array<{ label: string; onClick: () => void }>;
+}) {
   return (
     <div className="file-list">
       {files.length === 0 && (
         <div className="settings-card">
           <h3>暂无归档文件</h3>
           <p className="settings-hint">
-            {IS_STANDARD
-              ? '计算书：在「项目管理」页点击项目卡片的「导出到数据库」。'
-              : '计算书：在「项目管理」页点击项目卡片的「导出到数据库」；试验报告：在「试验报告」页点击「导出 Excel 测试表」，后续将支持直接归档。'}
+            {hint ??
+              (IS_STANDARD
+                ? '计算书：在「项目管理」页点击项目卡片的「导出到数据库」。'
+                : '计算书：在「项目管理」页点击项目卡片的「导出到数据库」；试验报告：在「试验报告」页点击「导出 Excel 测试表」，后续将支持直接归档。')}
           </p>
+          {emptyActions && emptyActions.length > 0 && (
+            <div className="pc-actions">
+              {emptyActions.map((a) => (
+                <button className="btn-ghost sm" key={a.label} onClick={a.onClick}>
+                  {a.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {files.map((f) => {

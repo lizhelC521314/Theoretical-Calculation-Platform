@@ -124,7 +124,9 @@ export function HistoryPage({ user, projects, onReopen, onOpenCompare }: Props) 
               <div className="hi-title">{h.formulaTitle}</div>
               <div className="hi-meta">
                 <span className={h.projectId ? 'tag domain' : 'tag light'}>{projectName(h.projectId)}</span>
-                {h.domain} · {h.formulaId} · {new Date(h.createdAt).toLocaleString('zh-CN')}
+                {h.domain} · {h.formulaId}
+                {h.formulaVersion ? ` · v${h.formulaVersion}` : ''} ·{' '}
+                {new Date(h.createdAt).toLocaleString('zh-CN')}
               </div>
             </div>
             <div className="hi-actions">

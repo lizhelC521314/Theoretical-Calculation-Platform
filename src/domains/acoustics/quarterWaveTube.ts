@@ -59,6 +59,8 @@ function sampleCurve(r: NonNullable<ReturnType<typeof derive>>): CurvePoint[] {
 
 export const quarterWaveTube: FormulaSpec = {
   id: 'acoustics.muffler.quarterWave',
+  version: '1.0.0',
+  status: 'published',
   domain: 'acoustics',
   subsystem: '消声器',
   title: '四分之一波长管消音器',

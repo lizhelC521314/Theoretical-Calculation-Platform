@@ -13,6 +13,8 @@ import { POROUS_MEDIA_DIAGRAM } from './diagrams';
  */
 export const porousMediaFitting: FormulaSpec = {
   id: 'fluid.filter.porous-media-fitting',
+  version: '1.0.0',
+  status: 'published',
   domain: 'fluid',
   subsystem: '滤清器与过滤元件',
   title: '多孔介质性能拟合',

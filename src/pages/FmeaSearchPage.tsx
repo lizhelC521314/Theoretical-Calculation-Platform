@@ -1592,10 +1592,10 @@ export function FmeaSearchPage({ user, onOpenImport }: Props) {
                 </span>
               </div>
 
-              {/* 措施前后对比区：同时有 before 与 after S/O/D 时才展示 */}
+              {/* 措施前后对比区：同时有前与后 S/O/D 时才展示（主字段=措施前，*Before 字段=措施后） */}
               {(() => {
-                const hasBefore = hasBeforeRatings(record);
-                const hasAfter = hasAfterRatings(record);
+                const hasBefore = hasAfterRatings(record); // 主 S/O/D = 措施前评分
+                const hasAfter = hasBeforeRatings(record); // *Before 字段 = 措施后评分
                 if (!hasBefore || !hasAfter) {
                   // 措施实际做了但没留痕评分时，只显示实际措施 vs 建议措施
                   if (!record.measureActual) return null;
@@ -1619,18 +1619,18 @@ export function FmeaSearchPage({ user, onOpenImport }: Props) {
                     </div>
                   );
                 }
-                // 完整对比
-                const bS = Number(record.severityBefore);
-                const bO = Number(record.occurrenceBefore);
-                const bD = Number(record.detectionBefore);
+                // 完整对比：措施前 = 主字段（severity 等），措施后 = *Before 字段
+                const bS = Number(record.severity);
+                const bO = Number(record.occurrence);
+                const bD = Number(record.detection);
                 const bRpn = bS * bO * bD;
-                const bAp: ApLevel = computeAp(bS, bO, bD);
+                const bAp: ApLevel = (record.apLevel || computeAp(bS, bO, bD)) as ApLevel;
                 const bRisk: RiskLevel = bAp === 'H' ? '高' : bAp === 'M' ? '中' : '低';
-                const aS = Number(record.severity);
-                const aO = Number(record.occurrence);
-                const aD = Number(record.detection);
+                const aS = Number(record.severityBefore);
+                const aO = Number(record.occurrenceBefore);
+                const aD = Number(record.detectionBefore);
                 const aRpn = aS * aO * aD;
-                const aAp = (record.apLevel || computeAp(aS, aO, aD)) as ApLevel;
+                const aAp: ApLevel = computeAp(aS, aO, aD);
                 const aRisk: RiskLevel = aAp === 'H' ? '高' : aAp === 'M' ? '中' : '低';
                 const delta = apDelta(bAp, aAp);
                 const rpnDelta = bRpn - aRpn; // 正数表示改善

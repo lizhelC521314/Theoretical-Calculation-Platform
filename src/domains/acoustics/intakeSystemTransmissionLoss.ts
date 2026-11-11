@@ -611,6 +611,8 @@ for (let i = 1; i <= SEG_MAX; i++) {
 
 export const intakeSystemTransmissionLoss: FormulaSpec = {
   id: 'acoustics.intakeSystemTransmissionLoss',
+  version: '1.0.0',
+  status: 'published',
   domain: 'acoustics',
   subsystem: '进气系统',
   title: '★进气系统传递损失设计',
@@ -627,7 +629,7 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     { key: 'fmin', label: '频率下限', symbol: 'f_min', unit: 'Hz', default: 20, min: 0, required: true, group: SEC_RUN, description: 'TL 曲线与平均值的频带下限，进气噪声通常关注 20~2000 Hz' },
     { key: 'fmax', label: '频率上限', symbol: 'f_max', unit: 'Hz', default: 2000, min: 0, required: true, group: SEC_RUN, description: 'TL 曲线与平均值的频带上限' },
     ...withGroup(jcaInputs, SEC_JCA),
-    { key: 'mu', label: '空气动力粘度', symbol: 'μ', unit: 'Pa·s', unitGroup: 'dynamicViscosity', default: 1.81e-5, min: 0, required: true, group: SEC_MED, description: '20 ℃ 空气约 1.81×10⁻⁵ Pa·s；也可切换为 mPa·s 输入 0.0181' },
+    { key: 'mu', label: '空气动力粘度', symbol: 'μ', unit: 'Pa·s', unitGroup: 'dynamicViscosity', default: 1.81e-5, min: 0, required: true, group: SEC_MED, bind: { kind: 'material', field: 'fluidViscosity', temperatureFrom: 't' }, description: '20 ℃ 空气约 1.81×10⁻⁵ Pa·s；也可切换为 mPa·s 输入 0.0181；可从流体材料库按介质温度 t 插值' },
     { key: 'nPr', label: '空气普朗特数', symbol: 'N_pr', unit: '-', unitGroup: 'dimensionless', default: 0.71, min: 0, required: true, group: SEC_MED, description: '常温空气约 0.71，用于 JCA 热损耗项（式11）' },
     { key: 'gam', label: '比热比', symbol: 'γ', unit: '-', unitGroup: 'dimensionless', default: 1.4, min: 0, required: true, group: SEC_MED, description: '空气比热比，常温取 1.4' },
     { key: 'pAtm', label: '大气压力', symbol: 'P_0', unit: 'Pa', unitGroup: 'pressure', default: 101325, min: 0, required: true, group: SEC_MED, description: '用于 Keq = γP0/[γ − (γ−1)A]（式10）' },

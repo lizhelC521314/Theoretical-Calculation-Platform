@@ -1,10 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import { listFormulas } from '../src/formula/registry';
-import { UNIT_GROUPS } from '../src/formula/units';
+import { computeFormula } from '../src/formula/compute';
+import {
+  MATERIAL_BIND_FIELDS,
+  allowedMaterialTypes,
+  bindFieldLabel,
+  bindValueForParam,
+  interpFluidPoints,
+  resolveBindTemperature,
+} from '../src/formula/materialBinding';
+import { UNIT_GROUPS, autoUnit, fromSI, toSI } from '../src/formula/units';
+import { isUnitValid, validateInputs } from '../src/formula/validate';
+import { runUncertainty } from '../src/formula/uncertainty';
+import { backsolve } from '../src/formula/backsolve';
+import { isFeasible, satisfyConstraint, sweep, sweepGrid } from '../src/formula/explore';
+import type { FormulaSpec, ParamSpec } from '../src/formula/types';
+import { intakeHoseFull } from '../src/domains/structure/intakeHoseFull';
+import type { MaterialRecord } from '../src/report/material';
 import { helmholtzMuffler } from '../src/domains/acoustics/helmholtzMuffler';
 import { expansionMuffler } from '../src/domains/acoustics/expansionMuffler';
 import { quarterWaveTube } from '../src/domains/acoustics/quarterWaveTube';
 import { multiCavitySilencer } from '../src/domains/acoustics/multiCavitySilencer';
+import { airFilterElement } from '../src/domains/structure/airFilterElement';
 
 /**
  * 公式基准算例回归测试
@@ -27,6 +44,19 @@ describe('公式基准算例', () => {
         expect(f.latex.length).toBeGreaterThan(0);
         expect(f.assumptions.length).toBeGreaterThan(0);
         expect(f.benchmarks.length).toBeGreaterThan(0);
+      });
+
+      // 版本与状态是计算可追溯的前提：历史记录只快照这三个字段
+      it('版本号与生命周期状态合法', () => {
+        expect(f.version).toMatch(/^\d+\.\d+\.\d+$/);
+        expect(['draft', 'review', 'published', 'deprecated']).toContain(f.status);
+      });
+
+      it('标准依据结构合法', () => {
+        for (const s of f.standardRefs || []) {
+          expect(s.code.trim().length).toBeGreaterThan(0);
+          expect(s.title.trim().length).toBeGreaterThan(0);
+        }
       });
 
       // 输入声明的默认单位标签必须在其 unitGroup 中存在，否则界面初始化会回退到分组首项，
@@ -102,6 +132,24 @@ describe('赫姆霍兹消音器 TL 曲线', () => {
     // 远离共振处 TL 趋近 0（0.05·f_r 处应小于 0.1 dB）
     const far = pts.find((q) => q.x < 0.06 * fr)!;
     expect(far.y).toBeLessThan(0.1);
+  });
+});
+
+/**
+ * 公式版本治理
+ *
+ * 版本 / 状态 / 标准依据是计算可追溯的基础字段，
+ * 历史记录会快照前两者，报告会输出标准依据清单。
+ */
+describe('公式版本治理', () => {
+  it('滤芯设计公式引用 ISO 5011 等标准依据', () => {
+    const air = listFormulas().find((f) => f.id === airFilterElement.id);
+    expect(air).toBeDefined();
+    expect(air!.standardRefs?.some((s) => s.code.includes('ISO 5011'))).toBe(true);
+  });
+
+  it('全部公式默认为已发布状态，可直接用于正式校核', () => {
+    for (const f of listFormulas()) expect(f.status).toBe('published');
   });
 });
 
@@ -274,5 +322,671 @@ describe('多腔穿孔消音器 郭荣算例校验', () => {
     expect(peak.x).toBeGreaterThan(2700);
     expect(peak.x).toBeLessThan(3000);
     expect(peak.y).toBeGreaterThan(30);
+  });
+});
+
+/**
+ * 材料库绑定
+ *
+ * 绑定声明必须指向材料库真实存在的物性，且参数单位分组要与材料库单位一致，
+ * 否则带入值会静默错位（如把 MPa 当 Pa 填进应力参数）。
+ */
+describe('材料库绑定', () => {
+  const bound = listFormulas().flatMap((f) =>
+    f.inputs.filter((p) => p.bind).map((p) => ({ formula: f, param: p })),
+  );
+
+  const fakeRec = (patch: Partial<MaterialRecord>): MaterialRecord =>
+    ({ grade: 'EPDM-70', series: '密封橡胶', temperature: 23, ...patch }) as MaterialRecord;
+
+  /** 流体材料：属性表 0℃ / 80℃ 两点，用于验证线性插值与端点提示 */
+  const fluidRec = {
+    ...fakeRec({ grade: 'DW-40', series: '冷却液', temperature: null }),
+    type: 'fluid',
+    fluidPoints: [
+      { temperature: 0, density: 1050, dynamicViscosity: 4.0, thermalConductivity: 0.4, specificHeat: 3.8 },
+      { temperature: 80, density: 1000, dynamicViscosity: 1.0, thermalConductivity: 0.6, specificHeat: 4.2 },
+    ],
+  } as MaterialRecord;
+
+  it('存在已声明材料绑定的输入（进气管胶料参数）', () => {
+    expect(bound.length).toBeGreaterThan(0);
+    expect(bound.map((b) => `${b.formula.id}.${b.param.key}`)).toContain('structure.intakeHoseFull.E');
+  });
+
+  it('绑定字段均已定义，且参数单位分组与材料库单位一致', () => {
+    for (const { formula, param } of bound) {
+      const meta = MATERIAL_BIND_FIELDS[param.bind!.field];
+      expect(meta, `${formula.id}.${param.key} 绑定了未定义字段 ${param.bind!.field}`).toBeDefined();
+      if (param.unitGroup) {
+        expect(meta.unitGroup, `${formula.id}.${param.key} 单位分组应为 ${meta.unitGroup}`).toBe(
+          param.unitGroup,
+        );
+      } else {
+        expect(param.unit, `${formula.id}.${param.key} 单位应为 ${meta.unit}`).toBe(meta.unit);
+      }
+    }
+  });
+
+  it('按参数显示单位换算：应力 MPa/Pa、密度 g/cm³、泊松比无量纲', () => {
+    const rec = fakeRec({ elasticModulus: 6, density: 1200, poisson: 0.49, tensileStrength: 10 });
+    const stressMPa = { unitGroup: 'stress', unit: 'MPa' } as const;
+    const stressPa = { unitGroup: 'stress', unit: 'Pa' } as const;
+    expect(bindValueForParam(rec, 'elasticModulus', stressMPa, 'MPa')).toBeCloseTo(6, 9);
+    expect(bindValueForParam(rec, 'elasticModulus', stressPa, 'Pa')).toBeCloseTo(6e6, 3);
+    expect(bindValueForParam(rec, 'tensileStrength', stressMPa, 'MPa')).toBeCloseTo(10, 9);
+    expect(
+      bindValueForParam(rec, 'density', { unitGroup: 'density', unit: 'kg/m³' }, 'g/cm³'),
+    ).toBeCloseTo(1.2, 9);
+    expect(bindValueForParam(rec, 'poisson', { unit: '-' }, '-')).toBeCloseTo(0.49, 9);
+  });
+
+  it('材料缺少该物性时返回 null，界面保持手工输入', () => {
+    const rec = fakeRec({ elasticModulus: null });
+    expect(
+      bindValueForParam(rec, 'elasticModulus', { unitGroup: 'stress', unit: 'MPa' }, 'MPa'),
+    ).toBeNull();
+  });
+
+  it('流体绑定必须声明插值温度，且温度来源是已定义的温度输入', () => {
+    for (const { formula, param } of bound) {
+      if (!MATERIAL_BIND_FIELDS[param.bind!.field].fluid) continue;
+      expect(
+        param.bind!.temperatureFrom,
+        `${formula.id}.${param.key} 缺少插值温度来源`,
+      ).toBeTruthy();
+      const tp = formula.inputs.find((x) => x.key === param.bind!.temperatureFrom);
+      expect(tp, `${formula.id}.${param.key} 的插值温度输入不存在`).toBeDefined();
+      expect(['℃', 'K']).toContain(tp!.unit);
+      if (tp!.unitGroup) expect(tp!.unitGroup).toBe('temperature');
+    }
+  });
+
+  it('流体 / 多孔字段的默认材料类型按物性自动判定', () => {
+    expect(allowedMaterialTypes('fluidViscosity')).toEqual(['fluid']);
+    expect(allowedMaterialTypes('porousPermeability')).toEqual(['porous']);
+    expect(allowedMaterialTypes('density')).toEqual(['conventional', 'hyperelastic']);
+    expect(allowedMaterialTypes('density', ['fluid'])).toEqual(['fluid']);
+  });
+
+  it('按温度线性插值流体属性表', () => {
+    const mid = interpFluidPoints(fluidRec.fluidPoints, 40)!;
+    expect(mid.inRange).toBe(true);
+    expect(mid.density).toBeCloseTo(1025, 9);
+    expect(mid.dynamicViscosity).toBeCloseTo(2.5, 9);
+    expect(mid.thermalConductivity).toBeCloseTo(0.5, 9);
+    expect(mid.specificHeat).toBeCloseTo(4.0, 9);
+    expect(interpFluidPoints(fluidRec.fluidPoints, 0)!.inRange).toBe(true);
+    expect(interpFluidPoints(null, 25)).toBeNull();
+  });
+
+  it('温度超出属性表范围时取端点并提示，不静默外推', () => {
+    const hot = interpFluidPoints(fluidRec.fluidPoints, 120)!;
+    expect(hot.temperature).toBe(80);
+    expect(hot.inRange).toBe(false);
+    expect(hot.dynamicViscosity).toBeCloseTo(1.0, 9);
+    expect(bindFieldLabel(fluidRec, 'fluidViscosity', 120)).toContain('超出属性表');
+    expect(bindFieldLabel(fluidRec, 'fluidViscosity', 40)).toContain('按 40℃ 插值');
+    expect(bindFieldLabel(fluidRec, 'fluidViscosity')).toBe('动力粘度');
+  });
+
+  it('流体物性按库内单位换算到参数显示单位（mPa·s → Pa·s，kJ → J）', () => {
+    const opts = { temperatureC: 40 };
+    const dyn = { unitGroup: 'dynamicViscosity', unit: 'Pa·s' } as const;
+    expect(bindValueForParam(fluidRec, 'fluidViscosity', dyn, 'Pa·s', opts)).toBeCloseTo(2.5e-3, 12);
+    expect(bindValueForParam(fluidRec, 'fluidViscosity', dyn, 'mPa·s', opts)).toBeCloseTo(2.5, 9);
+    expect(
+      bindValueForParam(
+        fluidRec,
+        'fluidSpecificHeat',
+        { unitGroup: 'specificHeat', unit: 'J/(kg·K)' },
+        'kJ/(kg·K)',
+        opts,
+      ),
+    ).toBeCloseTo(4.0, 9);
+    // 未给出插值温度时不带值，避免用错温度
+    expect(bindValueForParam(fluidRec, 'fluidViscosity', dyn, 'Pa·s')).toBeNull();
+  });
+
+  it('多孔介质物性映射：渗透率取粘性阻力系数倒数，惯性阻力系数直取', () => {
+    const rec = {
+      ...fakeRec({}),
+      porousProps: {
+        poreSize: 25,
+        viscousResistance: 1e10,
+        inertialResistance: 5e5,
+        viscousCoefficient: 0.018,
+        inertialCoefficient: 3000,
+        remark: '',
+      },
+    } as MaterialRecord;
+    expect(
+      bindValueForParam(rec, 'porousPermeability', { unitGroup: 'permeability', unit: 'm²' }, 'm²'),
+    ).toBeCloseTo(1e-10, 20);
+    expect(
+      bindValueForParam(rec, 'porousPermeability', { unitGroup: 'permeability', unit: 'm²' }, '10⁻¹¹ m²'),
+    ).toBeCloseTo(10, 9);
+    expect(
+      bindValueForParam(
+        rec,
+        'porousInertialResistance',
+        { unitGroup: 'inverseLength', unit: 'm⁻¹' },
+        'm⁻¹',
+      ),
+    ).toBeCloseTo(5e5, 6);
+    expect(
+      bindValueForParam(
+        rec,
+        'porousViscousCoefficient',
+        { unitGroup: 'viscousResistance', unit: 'kg/(m³·s)' },
+        'kg/(m³·s)',
+      ),
+    ).toBeCloseTo(0.018, 12);
+    expect(
+      bindValueForParam(
+        fakeRec({}),
+        'porousPermeability',
+        { unitGroup: 'permeability', unit: 'm²' },
+        'm²',
+      ),
+    ).toBeNull();
+  });
+
+  it('从公式温度输入解析插值温度（℃ / K 均支持）', () => {
+    const inputs = [
+      { key: 'T', label: '空气温度', symbol: 'T', unit: '℃', unitGroup: 'temperature' },
+      { key: 'T0', label: '环境温度', symbol: 'T0', unit: 'K' },
+    ] as ParamSpec[];
+    const bind = { kind: 'material', field: 'fluidViscosity', temperatureFrom: 'T' } as const;
+    expect(resolveBindTemperature(bind, inputs, { T: 45 }, {})).toBeCloseTo(45, 9);
+    expect(
+      resolveBindTemperature({ ...bind, temperatureFrom: 'T0' }, inputs, { T0: 318 }, {}),
+    ).toBeCloseTo(44.85, 6);
+    expect(resolveBindTemperature(bind, inputs, { T: NaN }, {})).toBeUndefined();
+    expect(
+      resolveBindTemperature({ kind: 'material', field: 'density' }, inputs, { T: 45 }, {}),
+    ).toBeUndefined();
+  });
+
+  it('空气滤清器已接入流体与多孔介质绑定', () => {
+    const byKey = new Map(airFilterElement.inputs.map((p) => [p.key, p]));
+    expect(byKey.get('mu')!.bind).toMatchObject({ field: 'fluidViscosity', temperatureFrom: 'T0' });
+    expect(byKey.get('rho')!.bind).toMatchObject({ field: 'fluidDensity', temperatureFrom: 'T0' });
+    expect(byKey.get('K')!.bind).toMatchObject({ field: 'porousPermeability' });
+    expect(byKey.get('beta')!.bind).toMatchObject({ field: 'porousInertialResistance' });
+  });
+});
+
+/** 按元数据生成默认输入（声明单位），用于校验用例 */
+function defaultInputs(f: FormulaSpec) {
+  const values: Record<string, number> = {};
+  const units: Record<string, string> = {};
+  for (const p of f.inputs) {
+    values[p.key] = p.default ?? 0;
+    units[p.key] = p.unit;
+  }
+  return { values, units };
+}
+
+/**
+ * 单位安全与输出一致性
+ *
+ * 1) 单位分组内的换算必须可逆（含 ℃ ↔ K 平移）；
+ * 2) 更换显示单位不得改变 SI 计算结果——这是「单位安全」的核心断言；
+ * 3) 输出自动单位必须落在其分组内，且换算回 SI 后与原始值一致。
+ */
+describe('单位安全与输出一致性', () => {
+  const formulas = listFormulas();
+
+  it('单位分组内换算可逆（含温度平移）', () => {
+    for (const f of formulas) {
+      for (const p of f.inputs) {
+        if (!p.unitGroup) continue;
+        const g = UNIT_GROUPS[p.unitGroup];
+        expect(g, `${f.id}.${p.key} 单位分组 ${p.unitGroup} 未定义`).toBeDefined();
+        for (const u of g.units) {
+          expect(isUnitValid(p, u.label), `${f.id}.${p.key} 单位 ${u.label} 判定为非法`).toBe(true);
+          const v = 123.456;
+          const back = toSI(fromSI(v, p.unitGroup, u.label), p.unitGroup, u.label);
+          expect(Math.abs(back - v), `${f.id}.${p.key} ${u.label} 往返失真`).toBeLessThanOrEqual(
+            Math.abs(v) * 1e-12 + 1e-12,
+          );
+        }
+      }
+    }
+  });
+
+  it('常用单位换算系数正确（抽查）', () => {
+    expect(toSI(1, 'length', 'mm')).toBeCloseTo(1e-3, 12);
+    expect(toSI(1, 'stress', 'MPa')).toBeCloseTo(1e6, 6);
+    expect(toSI(1, 'stress', 'N/mm²')).toBeCloseTo(1e6, 6);
+    expect(toSI(1, 'pressure', 'mmH₂O')).toBeCloseTo(9.80665, 9);
+    expect(toSI(1, 'volumeFlow', 'm³/h')).toBeCloseTo(1 / 3600, 12);
+    expect(toSI(1, 'density', 'g/cm³')).toBeCloseTo(1000, 9);
+    expect(toSI(1, 'dynamicViscosity', 'cP')).toBeCloseTo(1e-3, 12);
+    // 温度是平移换算：0 ℃ = 273.15 K，但温差 1 ℃ = 1 K
+    expect(toSI(0, 'temperature', '℃')).toBeCloseTo(273.15, 9);
+    expect(fromSI(273.15, 'temperature', '℃')).toBeCloseTo(0, 9);
+    expect(toSI(1, 'temperatureDelta', '℃')).toBeCloseTo(1, 12);
+  });
+
+  it('切换显示单位不改变 SI 计算结果（全部基准算例）', () => {
+    let checked = 0;
+    for (const f of formulas) {
+      for (const b of f.benchmarks) {
+        // SI 输入向量 = 基准输入 + 其余参数的元数据默认值（默认值按声明单位书写，先折算到 SI）
+        const { values, units } = defaultInputs(f);
+        const siInputs: Record<string, number> = {};
+        for (const p of f.inputs) {
+          siInputs[p.key] = toSI(p.default ?? 0, p.unitGroup, p.unit);
+        }
+        Object.assign(siInputs, b.input);
+
+        // 展示值统一换到分组内最后一个（通常非首选）单位
+        for (const p of f.inputs) {
+          if (!p.unitGroup) {
+            values[p.key] = siInputs[p.key];
+            continue;
+          }
+          const g = UNIT_GROUPS[p.unitGroup];
+          const alt = g.units[g.units.length - 1].label;
+          units[p.key] = alt;
+          values[p.key] = fromSI(siInputs[p.key], p.unitGroup, alt);
+        }
+
+        const base = f.solve(siInputs);
+        const res = computeFormula(f, values, units);
+        expect(
+          res.ok,
+          `${f.id} · ${b.name} 校验未通过：${res.issues.map((i) => i.message).join('；')}`,
+        ).toBe(true);
+        for (const [k, v] of Object.entries(base)) {
+          if (!Number.isFinite(v)) continue;
+          const actual = res.outputsSI![k];
+          const rel = Math.abs(actual - v) / Math.max(Math.abs(v), 1e-12);
+          expect(rel, `${f.id}.${k} 换单位后偏差 ${rel}`).toBeLessThanOrEqual(1e-9);
+        }
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('输出自动单位属于其分组，且可换算回原 SI 值', () => {
+    let checked = 0;
+    for (const f of formulas) {
+      for (const b of f.benchmarks) {
+        const out = f.solve(b.input);
+        for (const o of f.outputs) {
+          const v = out[o.key];
+          if (!o.unitGroup || !Number.isFinite(v)) continue;
+          const g = UNIT_GROUPS[o.unitGroup];
+          expect(g, `${f.id}.${o.key} 输出单位分组 ${o.unitGroup} 未定义`).toBeDefined();
+          const { value, unit } = autoUnit(v, o.unitGroup);
+          expect(
+            g.units.some((u) => u.label === unit),
+            `${f.id}.${o.key} 自动单位 ${unit} 不在分组 ${o.unitGroup} 内`,
+          ).toBe(true);
+          const back = toSI(value, o.unitGroup, unit);
+          expect(
+            Math.abs(back - v),
+            `${f.id}.${o.key} 输出显示值 ${value} ${unit} 换算回 SI 失真`,
+          ).toBeLessThanOrEqual(Math.abs(v) * 1e-9 + 1e-12);
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+});
+
+describe('输入域校验', () => {
+  const f = intakeHoseFull;
+  const { values, units } = defaultInputs(f);
+
+  it('必填缺失 → error 并阻断计算', () => {
+    const bad = { ...values, E: NaN };
+    expect(validateInputs(f, bad, units).some((i) => i.key === 'E' && i.level === 'error')).toBe(true);
+    const res = computeFormula(f, bad, units);
+    expect(res.ok).toBe(false);
+    expect(res.outputsSI).toBeUndefined();
+  });
+
+  it('非法单位标签 → error，不再按原值静默计算', () => {
+    const res = computeFormula(f, values, { ...units, E: 'bar' });
+    expect(res.ok).toBe(false);
+    expect(res.outputsSI).toBeUndefined();
+    expect(res.issues.some((i) => i.key === 'E' && i.level === 'error')).toBe(true);
+  });
+
+  it('超出建议范围 → 仅 warn，不阻断计算', () => {
+    const p = f.inputs.find((x) => x.min !== undefined && x.min > 0 && x.kind !== 'select')!;
+    expect(p, '进气管公式应有带下限的数值输入').toBeDefined();
+    const below = { ...values, [p.key]: p.min! * 0.5 };
+    const issues = validateInputs(f, below, units);
+    expect(issues.some((i) => i.key === p.key && i.level === 'warn')).toBe(true);
+    expect(issues.some((i) => i.level === 'error')).toBe(false);
+    expect(computeFormula(f, below, units).ok).toBe(true);
+  });
+});
+
+/**
+ * 不确定性分析（蒙特卡洛 + 极值角点包络）
+ *
+ * 输入带公差时，单点结果不足以支撑设计判断。此处验证：
+ * 1) 固定种子可复现；
+ * 2) 不扰动时退化为基准值（区间宽度为 0）；
+ * 3) 统计量自洽：low ≤ P5 ≤ P50 ≤ P95 ≤ high、std ≥ 0、low ≤ mean ≤ high；
+ * 4) 影响因子为秩相关绝对值（0~1）且降序，抽样不失败。
+ */
+describe('不确定性分析', () => {
+  const f = airFilterElement;
+  const base = f.benchmarks[0].input;
+  const siInputs: Record<string, number> = {};
+  for (const p of f.inputs) siInputs[p.key] = toSI(p.default ?? 0, p.unitGroup, p.unit);
+  Object.assign(siInputs, base);
+
+  const specs = [
+    { key: 'vm', rel: 0.05, dist: 'uniform' as const },
+    { key: 'mu', rel: 0.05, dist: 'normal' as const },
+    { key: 'K', rel: 0.1, dist: 'uniform' as const },
+  ];
+
+  it('同一组输入与种子结果完全可复现', () => {
+    const a = runUncertainty(f, siInputs, specs, { samples: 500, seed: 42 });
+    const b = runUncertainty(f, siInputs, specs, { samples: 500, seed: 42 });
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+  });
+
+  it('不确定度为 0 时退化为基准结果（区间宽度为 0）', () => {
+    const zero = specs.map((s) => ({ ...s, rel: 0 }));
+    const r = runUncertainty(f, siInputs, zero, { samples: 300 });
+    expect(r.active).toEqual([]);
+    expect(r.failed).toBe(0);
+    const expect0 = f.solve(siInputs);
+    const dp = r.outputs.find((o) => o.key === 'dp')!;
+    expect(dp.mean).toBeCloseTo(expect0.dp, 12);
+    expect(dp.p5).toBe(dp.mean);
+    expect(dp.p95).toBe(dp.mean);
+    expect(dp.low).toBe(dp.mean);
+    expect(dp.high).toBe(dp.mean);
+    expect(dp.std).toBe(0);
+  });
+
+  it('统计量自洽且包络包含全部分位数', () => {
+    const r = runUncertainty(f, siInputs, specs, { samples: 1000, seed: 7 });
+    expect(r.failed).toBe(0);
+    expect(r.outputs.length).toBeGreaterThan(0);
+    for (const o of r.outputs) {
+      expect(Number.isFinite(o.mean), `${o.key} mean 应为数值`).toBe(true);
+      expect(o.std).toBeGreaterThanOrEqual(0);
+      expect(o.low).toBeLessThanOrEqual(o.p5 + Math.abs(o.p5) * 1e-12 + 1e-12);
+      expect(o.p5).toBeLessThanOrEqual(o.p50 + Math.abs(o.p50) * 1e-12 + 1e-12);
+      expect(o.p50).toBeLessThanOrEqual(o.p95 + Math.abs(o.p95) * 1e-12 + 1e-12);
+      expect(o.p95).toBeLessThanOrEqual(o.high + Math.abs(o.high) * 1e-12 + 1e-12);
+      expect(o.low).toBeLessThanOrEqual(o.mean + Math.abs(o.mean) * 1e-12 + 1e-12);
+      expect(o.mean).toBeLessThanOrEqual(o.high + Math.abs(o.high) * 1e-12 + 1e-12);
+    }
+    expect(r.active.map((a) => a.key)).toEqual(['vm', 'mu', 'K']);
+  });
+
+  it('扰动参数确实改变结果（压降随不确定度变化）', () => {
+    const r = runUncertainty(f, siInputs, specs, { samples: 1000, seed: 7 });
+    const dp = r.outputs.find((o) => o.key === 'dp')!;
+    const dp0 = f.solve(siInputs).dp;
+    expect(dp.high - dp.low).toBeGreaterThan(dp0 * 0.01);
+    // 未受扰动的输出保持不变
+    const dpc = r.outputs.find((o) => o.key === 'dpc')!;
+    expect(dpc.low).toBeCloseTo(dpc.high, 12);
+  });
+
+  it('影响因子为 0~1 的秩相关绝对值并降序排列', () => {
+    const r = runUncertainty(f, siInputs, specs, { samples: 1000, seed: 7 });
+    const dp = r.outputs.find((o) => o.key === 'dp')!;
+    expect(dp.influence.length).toBeGreaterThan(0);
+    for (const it of dp.influence) {
+      expect(it.score).toBeGreaterThanOrEqual(0);
+      expect(it.score).toBeLessThanOrEqual(1 + 1e-12);
+    }
+    for (let i = 1; i < dp.influence.length; i++) {
+      expect(dp.influence[i - 1].score).toBeGreaterThanOrEqual(dp.influence[i].score);
+    }
+  });
+
+  it('抽样数被限制在 100~5000', () => {
+    expect(runUncertainty(f, siInputs, specs, { samples: 10 }).samples).toBe(100);
+    expect(runUncertainty(f, siInputs, specs, { samples: 99999 }).samples).toBe(5000);
+  });
+
+  it('选择型输入与隐藏输入不参与扰动', () => {
+    const r = runUncertainty(
+      f,
+      siInputs,
+      [
+        { key: 'ftype', rel: 0.1, dist: 'uniform' },
+        { key: 'hP', rel: 0.1, dist: 'uniform' }, // ftype=1（圆柱式）时 hP 被隐藏
+        { key: 'K', rel: 0.1, dist: 'uniform' },
+      ],
+      { samples: 200 },
+    );
+    expect(r.active.map((a) => a.key)).toEqual(['K']);
+  });
+});
+
+/**
+ * 反算求解
+ *
+ * 正算给结果、反算给参数，是设计校核的两种提问方式。
+ * 这里验证：反算值回代后确实命中目标、显示单位回填链路一致、不可达时明确报错。
+ */
+describe('反算求解', () => {
+  const f = airFilterElement;
+  const { values, units } = defaultInputs(f);
+  const computed = computeFormula(f, values, units);
+  const inputsSI = computed.inputsSI!;
+  const outputsSI = computed.outputsSI!;
+
+  it('基准输入可正常计算（反算前提）', () => {
+    expect(computed.ok).toBe(true);
+    expect(outputsSI.dp).toBeGreaterThan(0);
+  });
+
+  it('按目标压降反算渗透率 K，回代命中目标', () => {
+    const goal = outputsSI.dp * 0.9;
+    const r = backsolve(f, inputsSI, { target: 'K', output: 'dp', goal });
+    expect(Math.abs(r.residual)).toBeLessThanOrEqual(goal * 1e-6);
+    expect(Math.abs(r.outputSI - goal) / goal).toBeLessThanOrEqual(1e-6);
+    // 压降随渗透率增大而下降，因此 90% 压降对应更大的 K
+    expect(r.value).toBeGreaterThan(inputsSI.K);
+    const check = f.solve({ ...inputsSI, K: r.value });
+    expect(Math.abs(check.dp - goal) / goal).toBeLessThanOrEqual(1e-6);
+    expect(r.iterations).toBeLessThan(60);
+  });
+
+  it('反算厚度并按显示单位回填后重算一致', () => {
+    const goal = outputsSI.dp * 0.8;
+    const r = backsolve(f, inputsSI, { target: 't', output: 'dp', goal });
+    const tDisplay = fromSI(r.value, 'length', units.t);
+    const res = computeFormula(f, { ...values, t: tDisplay }, units);
+    expect(res.ok).toBe(true);
+    expect(Math.abs(res.outputsSI!.dp - goal) / goal).toBeLessThanOrEqual(1e-6);
+  });
+
+  it('目标值超出搜索区间可达范围时明确报错', () => {
+    expect(() =>
+      backsolve(f, inputsSI, { target: 'etaV', output: 'Q', goal: outputsSI.Q * 1000 }),
+    ).toThrow(/超出搜索区间/);
+  });
+
+  it('选择型参数不可反算', () => {
+    expect(() => backsolve(f, inputsSI, { target: 'ftype', output: 'dp', goal: 200 })).toThrow(
+      /选择型/,
+    );
+  });
+
+  it('显式搜索区间被采用，且解落在区间内', () => {
+    const goal = outputsSI.dp * 0.9;
+    const min = inputsSI.K * 0.5;
+    const max = inputsSI.K * 4;
+    const r = backsolve(f, inputsSI, { target: 'K', output: 'dp', goal, min, max });
+    expect(r.bracket).toEqual([min, max]);
+    expect(r.value).toBeGreaterThanOrEqual(min);
+    expect(r.value).toBeLessThanOrEqual(max);
+    expect(Math.abs(r.residual)).toBeLessThanOrEqual(goal * 1e-6);
+  });
+});
+
+/**
+ * 设计探索：参数扫描与可行域
+ *
+ * 扫描给出「沿某参数变化时结果怎么走、哪一段满足约束」；
+ * 可行域给出「同时调两个参数时的设计窗口」。
+ */
+describe('设计探索', () => {
+  const f = airFilterElement;
+  const { values, units } = defaultInputs(f);
+  const computed = computeFormula(f, values, units);
+  const inputsSI = computed.inputsSI!;
+  const outputsSI = computed.outputsSI!;
+
+  it('约束判定：le / ge / between 及非有限值', () => {
+    expect(satisfyConstraint(5, { output: 'x', op: 'le', value: 5 })).toBe(true);
+    expect(satisfyConstraint(5.1, { output: 'x', op: 'le', value: 5 })).toBe(false);
+    expect(satisfyConstraint(5, { output: 'x', op: 'ge', value: 5 })).toBe(true);
+    expect(satisfyConstraint(4.9, { output: 'x', op: 'ge', value: 5 })).toBe(false);
+    expect(satisfyConstraint(5, { output: 'x', op: 'between', value: 10, value2: 1 })).toBe(true);
+    expect(satisfyConstraint(11, { output: 'x', op: 'between', value: 1, value2: 10 })).toBe(false);
+    expect(satisfyConstraint(NaN, { output: 'x', op: 'le', value: 5 })).toBe(false);
+    // 无约束时一律可行
+    expect(isFeasible({}, [])).toBe(true);
+    expect(isFeasible({ x: 100 }, [{ output: 'x', op: 'le', value: 5 }])).toBe(false);
+  });
+
+  it('参数扫描点数与首尾取值正确', () => {
+    const r = sweep(f, inputsSI, {
+      xKey: 'vm',
+      xMin: inputsSI.vm * 0.5,
+      xMax: inputsSI.vm * 1.5,
+      steps: 21,
+      output: 'dp',
+      constraints: [],
+    });
+    expect(r.points.length).toBe(21);
+    expect(r.evaluated).toBe(21);
+    expect(r.failed).toBe(0);
+    expect(r.points[0].x).toBeCloseTo(inputsSI.vm * 0.5, 15);
+    expect(r.points[20].x).toBeCloseTo(inputsSI.vm * 1.5, 15);
+    // 无约束 → 全程可行，且合并为一段覆盖全区间
+    expect(r.ratio).toBe(1);
+    expect(r.segments.length).toBe(1);
+    expect(r.segments[0][0]).toBeCloseTo(inputsSI.vm * 0.5, 15);
+  });
+
+  it('压降约束下可行段连续，且段内每点都满足约束', () => {
+    // 压降 ∝ 滤材厚度 t（β=0 时纯 Darcy 项），扫描 t 可得到明确的分界
+    const limit = outputsSI.dp;
+    const r = sweep(f, inputsSI, {
+      xKey: 't',
+      xMin: inputsSI.t * 0.2,
+      xMax: inputsSI.t * 3,
+      steps: 81,
+      output: 'dp',
+      constraints: [{ output: 'dp', op: 'le', value: limit }],
+    });
+    // 压降随厚度单调上升，故可行段必从区间左端开始
+    expect(r.segments.length).toBeGreaterThan(0);
+    expect(r.segments[0][0]).toBeCloseTo(inputsSI.t * 0.2, 15);
+    expect(r.ratio).toBeGreaterThan(0);
+    expect(r.ratio).toBeLessThan(1);
+    for (const pt of r.points) {
+      if (!pt.feasible) continue;
+      expect(pt.outputs.dp).toBeLessThanOrEqual(limit);
+      expect(pt.y).toBeLessThanOrEqual(limit);
+    }
+    // 段间按 x 升序、互不重叠
+    for (let i = 1; i < r.segments.length; i++) {
+      expect(r.segments[i][0]).toBeGreaterThan(r.segments[i - 1][1]);
+    }
+  });
+
+  it('区间约束（between）时只保留交集内的点', () => {
+    const mid = outputsSI.dp;
+    const r = sweep(f, inputsSI, {
+      xKey: 't',
+      xMin: inputsSI.t * 0.2,
+      xMax: inputsSI.t * 3,
+      steps: 81,
+      output: 'dp',
+      constraints: [{ output: 'dp', op: 'between', value: mid * 0.5, value2: mid * 1.2 }],
+    });
+    expect(r.segments.length).toBeGreaterThan(0);
+    for (const pt of r.points) {
+      if (!pt.feasible) continue;
+      expect(pt.outputs.dp).toBeGreaterThanOrEqual(mid * 0.5);
+      expect(pt.outputs.dp).toBeLessThanOrEqual(mid * 1.2);
+    }
+  });
+
+  it('扫描区间非法时明确报错', () => {
+    expect(() =>
+      sweep(f, inputsSI, { xKey: 'vm', xMin: 1, xMax: 1, steps: 11, output: 'dp', constraints: [] }),
+    ).toThrow(/扫描区间非法/);
+    expect(() =>
+      sweep(f, inputsSI, { xKey: 'ftype', xMin: 0, xMax: 1, steps: 11, output: 'dp', constraints: [] }),
+    ).toThrow(/选择型/);
+  });
+
+  it('可行域网格：格数、可行占比与约束一致', () => {
+    const r = sweepGrid(f, inputsSI, {
+      xKey: 't',
+      xMin: inputsSI.t * 0.5,
+      xMax: inputsSI.t * 2,
+      yKey: 'K',
+      yMin: inputsSI.K * 0.5,
+      yMax: inputsSI.K * 3,
+      size: 11,
+      constraints: [{ output: 'dp', op: 'le', value: outputsSI.dp * 1.5 }],
+    });
+    expect(r.xs.length).toBe(11);
+    expect(r.ys.length).toBe(11);
+    expect(r.cells.length).toBe(121);
+    expect(r.evaluated).toBe(121);
+    expect(r.failed).toBe(0);
+    expect(r.feasibleCount).toBe(r.cells.filter((c) => c.feasible).length);
+    expect(r.ratio).toBeCloseTo(r.feasibleCount / 121, 12);
+    // 压降 ∝ t/K：可行格应集中在小厚度、大渗透率一侧
+    const feasibleCells = r.cells.filter((c) => c.feasible);
+    expect(feasibleCells.length).toBeGreaterThan(0);
+    const avgX = feasibleCells.reduce((s, c) => s + c.xi, 0) / feasibleCells.length;
+    const avgY = feasibleCells.reduce((s, c) => s + c.yi, 0) / feasibleCells.length;
+    expect(avgX).toBeLessThan(5); // 网格中位索引
+    expect(avgY).toBeGreaterThan(5);
+  });
+
+  it('可行域横纵轴相同或非法区间时报错', () => {
+    expect(() =>
+      sweepGrid(f, inputsSI, {
+        xKey: 'vm',
+        xMin: 0.01,
+        xMax: 0.2,
+        yKey: 'vm',
+        yMin: 0.01,
+        yMax: 0.2,
+        size: 11,
+        constraints: [],
+      }),
+    ).toThrow(/不能是同一参数/);
+    expect(() =>
+      sweepGrid(f, inputsSI, {
+        xKey: 'vm',
+        xMin: 0.2,
+        xMax: 0.01,
+        yKey: 'K',
+        yMin: 1e-12,
+        yMax: 1e-11,
+        size: 11,
+        constraints: [],
+      }),
+    ).toThrow(/横轴区间非法/);
   });
 });

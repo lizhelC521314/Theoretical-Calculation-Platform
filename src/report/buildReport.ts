@@ -33,6 +33,7 @@ import html2canvas from 'html2canvas';
 import type { CtrUser, HistoryEntry, Project } from '../api';
 import { BRAND } from '../branding';
 import { getFormula } from '../formula/registry';
+import { FORMULA_STATUS_LABEL } from '../formula/types';
 import { autoUnit, formatNumber } from '../formula/units';
 
 interface ParamRow {
@@ -40,6 +41,8 @@ interface ParamRow {
   symbol: string;
   value: string;
   unit: string;
+  /** SI 统一单位下的数值，便于跨单位复核 */
+  si: string;
 }
 
 interface FormulaItem {
@@ -53,12 +56,31 @@ interface FormulaItem {
   pngH?: number;
 }
 
+/** 材料绑定来源：哪个参数取自哪条材料的哪个物性 */
+interface MaterialBindRow {
+  param: string;
+  field: string;
+  material: string;
+}
+
 interface Chapter {
   no: number;
   title: string;
   domain: string;
   time: string;
   purpose: string;
+  /** 公式编号（registry id） */
+  formulaId: string;
+  /** 记录快照的公式版本，旧数据为空 */
+  formulaVersion?: string;
+  /** 记录快照的公式状态（草稿/评审/已发布/已废止） */
+  formulaStatusLabel?: string;
+  /** 标准依据 */
+  standardRefs: { code: string; title: string; clause?: string }[];
+  /** 适用条件与假设 */
+  assumptions: string[];
+  /** 材料绑定明细 */
+  materialBindings: MaterialBindRow[];
   formulas: FormulaItem[];
   inputs: ParamRow[];
   outputs: (ParamRow & { primary: boolean })[];
@@ -83,6 +105,10 @@ export interface ReportModel {
 interface RecordInputs {
   values?: Record<string, number>;
   units?: Record<string, string>;
+  /** 统一 SI 输入快照 */
+  inputsSI?: Record<string, number>;
+  /** 材料绑定明细（由计算页保存） */
+  materialBindings?: Array<{ key: string; fieldLabel: string; material: string }>;
 }
 
 function dateStr(d: Date): string {
@@ -117,15 +143,19 @@ export function buildReportModel(
     const values = rec.values ?? {};
     const units = rec.units ?? {};
 
+    const siMap = rec.inputsSI ?? {};
+
     const inputs: ParamRow[] = (f?.inputs ?? []).map((p) => {
       // 单位按输入 key 记录；兼容早期按 unitGroup 记录的历史数据
       const unitLabel = units[p.key] ?? (p.unitGroup ? units[p.unitGroup] : undefined) ?? p.unit;
       const v = values[p.key];
+      const si = siMap[p.key];
       return {
         label: p.label,
         symbol: p.symbol,
         value: typeof v === 'number' ? formatNumber(v, 6) : '—',
         unit: unitLabel,
+        si: typeof si === 'number' ? formatNumber(si, 6) : '—',
       };
     });
 
@@ -137,6 +167,7 @@ export function buildReportModel(
         symbol: o.symbol,
         value: typeof disp.value === 'number' ? formatNumber(disp.value, o.digits ?? 3) : '—',
         unit: disp.unit,
+        si: typeof raw === 'number' ? formatNumber(raw, 6) : '—',
         primary: !!o.primary,
       };
     });
@@ -152,6 +183,25 @@ export function buildReportModel(
       domain: r.domain,
       time: new Date(r.createdAt).toLocaleString('zh-CN'),
       purpose: f?.summary ?? '',
+      formulaId: r.formulaId,
+      // 优先用记录快照（当时参与计算的版本），没有快照时才用当前库版本
+      formulaVersion: r.formulaVersion ?? f?.version,
+      formulaStatusLabel: FORMULA_STATUS_LABEL[
+        (r.formulaStatus ?? f?.status ?? 'published') as keyof typeof FORMULA_STATUS_LABEL
+      ],
+      standardRefs: (f?.standardRefs ?? []).map((s) => ({
+        code: s.code,
+        title: s.title,
+        clause: s.clause,
+      })),
+      assumptions: f?.assumptions ?? [],
+      materialBindings: (rec.materialBindings ?? [])
+        .map((b) => ({
+          param: f?.inputs.find((p) => p.key === b.key)?.label ?? b.key,
+          field: b.fieldLabel,
+          material: b.material,
+        }))
+        .filter((b) => !!b.material),
       formulas: (f?.latex ?? []).map((fx) => ({
         label: fx.label,
         tex: fx.tex,
@@ -784,6 +834,49 @@ function infoTable(lines: string[]) {
   });
 }
 
+/** 章节内小节序号：按实际出现的内容顺次编号，避免固定编号出现空号 */
+interface SectionNumbers {
+  purpose?: number;
+  basis: number;
+  formulas?: number;
+  inputs: number;
+  materials?: number;
+  outputs: number;
+  assumptions?: number;
+  conclusion?: number;
+}
+
+function sectionNumbers(c: Chapter): SectionNumbers {
+  let n = 0;
+  const sn: Partial<SectionNumbers> = {};
+  if (c.purpose) sn.purpose = ++n;
+  sn.basis = ++n;
+  if (c.formulas.length) sn.formulas = ++n;
+  sn.inputs = ++n;
+  if (c.materialBindings.length) sn.materials = ++n;
+  sn.outputs = ++n;
+  if (c.assumptions.length) sn.assumptions = ++n;
+  if (c.conclusion) sn.conclusion = ++n;
+  return sn as SectionNumbers;
+}
+
+/** 计算依据：公式编号 / 版本与状态 / 引用的外部标准 */
+function basisLines(c: Chapter): string[] {
+  const lines = [`公式编号：${c.formulaId}`];
+  if (c.formulaVersion) {
+    lines.push(`公式版本：v${c.formulaVersion}${c.formulaStatusLabel ? `（${c.formulaStatusLabel}）` : ''}`);
+  }
+  if (c.standardRefs.length === 0) {
+    lines.push('标准依据：未引用外部标准，按内部推导公式计算');
+  } else {
+    lines.push('标准依据：');
+    for (const s of c.standardRefs) {
+      lines.push(`　· ${s.code}《${s.title}》${s.clause ? ` ${s.clause}` : ''}`);
+    }
+  }
+  return lines;
+}
+
 /** 生成 Word 文档并打包为 base64（主进程负责保存）。可选传入 fmeaRecords，末尾加 FMEA 点检表章节 */
 export async function buildDocxBase64(m: ReportModel, fmeaRecords?: unknown[]): Promise<string> {
   const infoLines = [`项目名称：${m.projectName ?? '（临时计算）'}`];
@@ -813,16 +906,20 @@ export async function buildDocxBase64(m: ReportModel, fmeaRecords?: unknown[]): 
 
   const body: (Paragraph | Table)[] = [];
   for (const c of m.chapters) {
+    const sn = sectionNumbers(c);
     body.push(h1(`第 ${c.no} 章  ${c.title}`));
     body.push(p(`计算类别：${c.domain}    计算时间：${c.time}`, { size: 21, spacing: 160 }));
 
-    if (c.purpose) {
-      body.push(h2(`${c.no}.1 计算目的`));
+    if (sn.purpose) {
+      body.push(h2(`${c.no}.${sn.purpose} 计算目的`));
       body.push(p(c.purpose));
     }
 
-    if (c.formulas.length > 0) {
-      body.push(h2(`${c.no}.2 理论公式`));
+    body.push(h2(`${c.no}.${sn.basis} 计算依据`));
+    for (const line of basisLines(c)) body.push(p(line, { size: 22, spacing: 80 }));
+
+    if (sn.formulas) {
+      body.push(h2(`${c.no}.${sn.formulas} 理论公式`));
       for (const fx of c.formulas) {
         body.push(p(`${fx.label}：`, { size: 22, bold: true, spacing: 60 }));
         const children: (ImageRun | TextRun)[] = [];
@@ -854,26 +951,42 @@ export async function buildDocxBase64(m: ReportModel, fmeaRecords?: unknown[]): 
       }
     }
 
-    body.push(h2(`${c.no}.3 输入参数`));
+    body.push(h2(`${c.no}.${sn.inputs} 输入参数`));
     body.push(
       paramTable(
-        ['参数名称', '符号', '数值', '单位'],
-        c.inputs.map((r) => [r.label, r.symbol, r.value, r.unit]),
-        [45, 15, 25, 15],
+        ['参数名称', '符号', '数值', '单位', 'SI 值'],
+        c.inputs.map((r) => [r.label, r.symbol, r.value, r.unit, r.si]),
+        [38, 12, 20, 15, 15],
       ),
     );
 
-    body.push(h2(`${c.no}.4 计算结果`));
+    if (sn.materials) {
+      body.push(h2(`${c.no}.${sn.materials} 材料来源`));
+      body.push(
+        paramTable(
+          ['参数', '物性字段', '材料（牌号 · 系列号 · 温度）'],
+          c.materialBindings.map((b) => [b.param, b.field, b.material]),
+          [30, 22, 48],
+        ),
+      );
+    }
+
+    body.push(h2(`${c.no}.${sn.outputs} 计算结果`));
     body.push(
       paramTable(
-        ['结果名称', '符号', '数值', '单位'],
-        c.outputs.map((r) => [r.label, r.symbol, r.value, r.unit]),
-        [45, 15, 25, 15],
+        ['结果名称', '符号', '数值', '单位', 'SI 值'],
+        c.outputs.map((r) => [r.label, r.symbol, r.value, r.unit, r.si]),
+        [38, 12, 20, 15, 15],
       ),
     );
 
-    if (c.conclusion) {
-      body.push(h2(`${c.no}.5 结论`));
+    if (sn.assumptions) {
+      body.push(h2(`${c.no}.${sn.assumptions} 适用条件与假设`));
+      for (const a of c.assumptions) body.push(p(`· ${a}`, { size: 22, spacing: 60 }));
+    }
+
+    if (sn.conclusion) {
+      body.push(h2(`${c.no}.${sn.conclusion} 结论`));
       body.push(p(`经计算，${c.conclusion}。`, { size: 24 }));
     }
   }
@@ -1000,17 +1113,43 @@ export function buildPdfHtml(m: ReportModel, fmeaRecords?: unknown[]): string {
           return `<div class="fx"><div class="fx-label">${esc(fx.label)}：</div><div class="fx-tex">${esc(fx.tex)}</div></div>`;
         })
         .join('');
+      const sn = sectionNumbers(c);
+      const basis = basisLines(c)
+        .map((l) => `<div class="basis-line">${esc(l)}</div>`)
+        .join('');
+      const materials = sn.materials
+        ? `<h2>${c.no}.${sn.materials} 材料来源</h2>${pdfTable(
+            ['参数', '物性字段', '材料（牌号 · 系列号 · 温度）'],
+            c.materialBindings.map((b) => [b.param, b.field, b.material]),
+          )}`
+        : '';
+      const assumptions =
+        sn.assumptions && c.assumptions.length
+          ? `<h2>${c.no}.${sn.assumptions} 适用条件与假设</h2><ul>${c.assumptions
+              .map((a) => `<li>${esc(a)}</li>`)
+              .join('')}</ul>`
+          : '';
       return `
 <section class="chapter">
   <h1>第 ${c.no} 章　${esc(c.title)}</h1>
   <div class="meta">计算类别：${esc(c.domain)}　　计算时间：${esc(c.time)}</div>
-  ${c.purpose ? `<h2>${c.no}.1 计算目的</h2><p>${esc(c.purpose)}</p>` : ''}
-  ${c.formulas.length ? `<h2>${c.no}.2 理论公式</h2>${formulas}` : ''}
-  <h2>${c.no}.3 输入参数</h2>
-  ${pdfTable(['参数名称', '符号', '数值', '单位'], c.inputs.map((r) => [r.label, r.symbol, r.value, r.unit]))}
-  <h2>${c.no}.4 计算结果</h2>
-  ${pdfTable(['结果名称', '符号', '数值', '单位'], c.outputs.map((r) => [r.label, r.symbol, r.value, r.unit]))}
-  ${c.conclusion ? `<h2>${c.no}.5 结论</h2><p>经计算，${esc(c.conclusion)}。</p>` : ''}
+  ${sn.purpose ? `<h2>${c.no}.${sn.purpose} 计算目的</h2><p>${esc(c.purpose)}</p>` : ''}
+  <h2>${c.no}.${sn.basis} 计算依据</h2>
+  <div class="basis">${basis}</div>
+  ${sn.formulas ? `<h2>${c.no}.${sn.formulas} 理论公式</h2>${formulas}` : ''}
+  <h2>${c.no}.${sn.inputs} 输入参数</h2>
+  ${pdfTable(
+    ['参数名称', '符号', '数值', '单位', 'SI 值'],
+    c.inputs.map((r) => [r.label, r.symbol, r.value, r.unit, r.si]),
+  )}
+  ${materials}
+  <h2>${c.no}.${sn.outputs} 计算结果</h2>
+  ${pdfTable(
+    ['结果名称', '符号', '数值', '单位', 'SI 值'],
+    c.outputs.map((r) => [r.label, r.symbol, r.value, r.unit, r.si]),
+  )}
+  ${assumptions}
+  ${sn.conclusion ? `<h2>${c.no}.${sn.conclusion} 结论</h2><p>经计算，${esc(c.conclusion)}。</p>` : ''}
 </section>`;
     })
     .join('');
@@ -1043,6 +1182,8 @@ export function buildPdfHtml(m: ReportModel, fmeaRecords?: unknown[]): string {
   .chapter .meta { color: #556375; font-size: 10.5pt; margin-bottom: 12px; }
   .chapter h2 { font-family: 'SimHei', '黑体', sans-serif; font-size: 13pt; margin: 18px 0 8px; }
   .chapter p { margin: 6px 0; text-align: justify; }
+  .chapter .basis { font-size: 11pt; line-height: 1.85; margin: 4px 0 10px; }
+  .chapter .basis-line { white-space: pre-wrap; }
   .fx { margin: 6px 0 12px; }
   .fx-label { font-weight: 700; font-size: 11pt; }
   .fx-img-wrap { text-align: center; padding: 10px 0; margin-top: 4px; }

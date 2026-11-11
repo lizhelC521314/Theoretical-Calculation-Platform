@@ -107,10 +107,10 @@ const runInputs: ParamSpec[] = [
   { key: 'Q', label: '系统体积流量', symbol: 'Q', unit: 'm³/h', unitGroup: 'volumeFlow', default: 300, min: 0, required: true, showIf: { key: 'qMode', min: 1, max: 2 }, description: '发动机额定功率点或最大扭矩点的进气体积流量，示例 300 m³/h = 0.0833 m³/s；口径选「标准状态」时本值为 Q_std（20℃、101.3 kPa），计算前按式(17b) 折算为入口状态流量' },
   { key: 'mDot', label: '空气质量流量', symbol: 'ṁ', unit: 'kg/h', unitGroup: 'massFlow', default: 723, min: 0, required: true, showIf: { key: 'qMode', min: 3, max: 3 }, description: '口径为质量流量时填写：Q_in = ṁ/ρ_in（式 17b）；600 m³/h、ρ = 1.205 kg/m³ 对应约 723 kg/h' },
   { key: 'rhoMode', label: '密度计算方式', symbol: '-', unit: '-', kind: 'select', options: [{ value: 1, label: '直接输入密度' }, { value: 2, label: '按温度/海拔/湿度计算' }], default: 1, required: true, description: '方式 1 直接用下面的 ρ；方式 2 由本地大气压 p(z)、温度 T 与相对湿度按式 20~22 计算（高原、高温工况推荐）' },
-  { key: 'rho', label: '空气密度', symbol: 'ρ', unit: 'kg/m³', unitGroup: 'density', default: 1.205, min: 0, required: true, showIf: { key: 'rhoMode', min: 1, max: 1 }, description: '20℃、1 atm 约 1.205 kg/m³；方式 2 时本输入不参与计算' },
+  { key: 'rho', label: '空气密度', symbol: 'ρ', unit: 'kg/m³', unitGroup: 'density', default: 1.205, min: 0, required: true, showIf: { key: 'rhoMode', min: 1, max: 1 }, bind: { kind: 'material', field: 'fluidDensity', temperatureFrom: 'T' }, description: '20℃、1 atm 约 1.205 kg/m³；方式 2 时本输入不参与计算；可从流体材料库按空气温度 T 插值' },
   { key: 'z', label: '海拔高度', symbol: 'z', unit: 'm', unitGroup: 'lengthMeter', default: 0, min: 0, showIf: { key: 'rhoMode', min: 2, max: 2 }, description: '仅方式 2 使用：p = p0·(1 − 2.2557×10⁻⁵·z)^5.2559；海拔每升高 1000 m 密度约降 9%~10%' },
   { key: 'RH', label: '相对湿度', symbol: 'RH', unit: '-', unitGroup: 'dimensionless', default: 0, min: 0, max: 1, showIf: { key: 'rhoMode', min: 2, max: 2 }, description: '仅方式 2 使用：0~1，p_v = RH·p_sat(T)，p_sat 按 Buck 公式；湿度 100% 时密度约低 1%~2%' },
-  { key: 'mu', label: '空气动力粘度', symbol: 'μ', unit: 'mPa·s', unitGroup: 'dynamicViscosity', default: 0.0181, min: 0, required: true, description: '20℃ 空气约 1.81×10⁻⁵ Pa·s（输入 0.0181 即 18.1 μPa·s）' },
+  { key: 'mu', label: '空气动力粘度', symbol: 'μ', unit: 'mPa·s', unitGroup: 'dynamicViscosity', default: 0.0181, min: 0, required: true, bind: { kind: 'material', field: 'fluidViscosity', temperatureFrom: 'T' }, description: '20℃ 空气约 1.81×10⁻⁵ Pa·s（输入 0.0181 即 18.1 μPa·s）；可从流体材料库按空气温度 T 插值' },
   { key: 'T', label: '空气温度', symbol: 'T', unit: '℃', unitGroup: 'temperature', default: 20, required: true, description: '用于计算声速 c = (γRT)^(1/2) 与马赫数；增压机型出气管 60~80℃' },
   { key: 'V', label: '车速', symbol: 'V', unit: 'm/s', unitGroup: 'velocity', default: 0, min: 0, required: true, description: '进气口迎风时的车速（冲压修正）；台架静止取 0，120 km/h 约 33.3 m/s' },
   { key: 'Kin', label: '入口损失系数', symbol: 'K_in', unit: '-', unitGroup: 'dimensionless', default: 0.05, min: 0, required: true, description: '喇叭口 0.03~0.05，直角锐边 0.5，带防尘网 0.5~1.5，格栅 0.3~1.0，防雨帽 1.0~2.0，snorkel 1.5~3.0' },
@@ -235,6 +235,8 @@ for (let i = 1; i <= SEG_MAX; i++) {
 
 export const intakeSystemResistance: FormulaSpec = {
   id: 'fluid.intakeSystemResistance',
+  version: '1.0.0',
+  status: 'published',
   domain: 'fluid',
   subsystem: '进气系统',
   title: '★进气系统阻力设计',

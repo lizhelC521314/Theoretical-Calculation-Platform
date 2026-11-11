@@ -61,6 +61,8 @@ function sampleCurve(r: NonNullable<ReturnType<typeof derive>>): CurvePoint[] {
 
 export const expansionMuffler: FormulaSpec = {
   id: 'acoustics.muffler.expansion',
+  version: '1.0.0',
+  status: 'published',
   domain: 'acoustics',
   subsystem: '消声器',
   title: '膨胀腔消音器',

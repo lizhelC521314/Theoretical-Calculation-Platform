@@ -1,7 +1,7 @@
 import katex from 'katex';
 import { useMemo } from 'react';
 import type { FormulaSpec } from '../formula/types';
-import { DOMAIN_LABEL, showIfMatches } from '../formula/types';
+import { DOMAIN_LABEL, FORMULA_STATUS_LABEL, showIfMatches } from '../formula/types';
 
 function renderTex(tex: string): string {
   try {
@@ -39,6 +39,8 @@ export function FormulaView({
         <h2>{formula.title}</h2>
         <div className="fv-meta">
           <span className="tag domain">{DOMAIN_LABEL[formula.domain]}</span>
+          <span className="tag fv-ver" title="公式版本">v{formula.version}</span>
+          <span className={`tag fv-status ${formula.status}`}>{FORMULA_STATUS_LABEL[formula.status]}</span>
         </div>
         <p className="fv-summary">{formula.summary}</p>
       </div>
@@ -92,6 +94,20 @@ export function FormulaView({
           ))}
         </tbody>
       </table>
+
+      {formula.standardRefs && formula.standardRefs.length > 0 && (
+        <div className="standard-box">
+          <div className="assumption-title">标准依据</div>
+          <ul>
+            {formula.standardRefs.map((s) => (
+              <li key={s.code + s.clause}>
+                <b>{s.code}</b> {s.title}
+                {s.clause ? `（${s.clause}）` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="assumption-box">
         <div className="assumption-title">适用条件与假设</div>

@@ -405,6 +405,8 @@ const cavityAlphaOutputs: OutputSpec[] = Array.from({ length: CAVITY_MAX }, (_, 
 
 export const multiCavitySilencer: FormulaSpec = {
   id: 'acoustics.muffler.multiCavity',
+  version: '1.0.0',
+  status: 'published',
   domain: 'acoustics',
   subsystem: '消声器',
   title: '★多腔穿孔消音器',

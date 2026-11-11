@@ -1,6 +1,7 @@
 import type { FormulaSpec } from '../formula/types';
 import { showIfMatches } from '../formula/types';
 import { autoUnit, formatNumber } from '../formula/units';
+import type { InputIssue } from '../formula/validate';
 
 interface Props {
   formula: FormulaSpec;
@@ -8,16 +9,34 @@ interface Props {
   outputsSI: Record<string, number> | null;
   /** 原始 SI 输入，用于敏感性分析 */
   inputsSI: Record<string, number> | null;
+  /** 输入域校验问题：error 阻断计算，warn 仅提示 */
+  issues?: InputIssue[];
   onSensitivity?: (key: string) => void;
   sensitivityKey?: string | null;
 }
 
-export function ResultPanel({ formula, outputsSI, inputsSI, onSensitivity, sensitivityKey }: Props) {
+function IssueList({ issues, level }: { issues: InputIssue[]; level: 'error' | 'warn' }) {
+  const list = issues.filter((i) => i.level === level);
+  if (list.length === 0) return null;
+  return (
+    <ul className={`issue-list ${level}`}>
+      {list.map((i, idx) => (
+        <li key={`${i.key}-${idx}`}>{i.message}</li>
+      ))}
+    </ul>
+  );
+}
+
+export function ResultPanel({ formula, outputsSI, inputsSI, issues = [], onSensitivity, sensitivityKey }: Props) {
   if (!outputsSI) {
     return (
       <div className="result-block">
         <h3 className="panel-title">计算结果</h3>
-        <p className="empty-hint">请填写完整输入参数</p>
+        {issues.some((i) => i.level === 'error') ? (
+          <IssueList issues={issues} level="error" />
+        ) : (
+          <p className="empty-hint">请填写完整输入参数</p>
+        )}
       </div>
     );
   }
@@ -45,6 +64,7 @@ export function ResultPanel({ formula, outputsSI, inputsSI, onSensitivity, sensi
   return (
     <div className="result-block">
       <h3 className="panel-title">计算结果</h3>
+      <IssueList issues={issues} level="warn" />
 
       {hasGroup ? (
         // 按 group 分区渲染：每个分区里 primary 输出用主卡片，其余用普通行

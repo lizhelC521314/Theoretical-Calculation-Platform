@@ -6,15 +6,22 @@ interface Props { user: CtrUser; }
 
 interface DbFile { name: string; size: number; mtime: string; fullPath: string; }
 
-function parseArchiveName(name: string) {
-  const stem = name.replace(/\.xlsx$/i, '');
-  const parts = stem.split('+');
-  return { project: parts[0] || '', product: parts[1] || '', version: parts[2] || '', date: parts[3] || '' };
-}
+/** 知识经验库分类：四类文档直接浏览共享目录（型号设计档案已并入产品数据库） */
+type KbeCat = 'standards' | 'guidelines' | 'lessons' | 'papers';
 
-/** 产品设计库：浏览 Knowledge & Experience Base 下 Product Design Library 的归档文件 */
+const CATS: Array<{ key: KbeCat; label: string; hint: string }> = [
+  { key: 'standards', label: '标准&规范', hint: '国家 / 行业 / 企业标准与规范原文' },
+  { key: 'guidelines', label: '设计指南', hint: '设计手册、选型指南与设计方法' },
+  { key: 'lessons', label: '经验教训', hint: '问题复盘、失效案例与改进措施' },
+  { key: 'papers', label: '论文/专利', hint: '技术论文与专利文献' },
+];
+
+/** 知识经验库：标准&规范 / 设计指南 / 经验教训 / 论文专利（共享目录浏览） */
 export function KnowledgeBasePage({ user }: Props) {
-  const [ping, setPing] = useState<{ reachable: boolean; kbeRoot: string; kbeDesign: string } | null>(null);
+  const [cat, setCat] = useState<KbeCat>('standards');
+  const [ping, setPing] = useState<{ reachable: boolean; kbeRoot: string } | null>(null);
+  const [dir, setDir] = useState('');
+  const [missing, setMissing] = useState(false);
   const [files, setFiles] = useState<DbFile[]>([]);
   const [toast, setToast] = useState('');
 
@@ -26,21 +33,23 @@ export function KnowledgeBasePage({ user }: Props) {
 
   const refresh = useCallback(async () => {
     const pingRes = await api.db.ping();
-    setPing({
-      reachable: pingRes.reachable,
-      kbeRoot: pingRes.kbeRoot,
-      kbeDesign: pingRes.kbeDesign,
-    });
-    const res = await api.db.list({ libType: 'design' });
-    if (res.ok) setFiles(res.files || []);
-  }, []);
+    setPing({ reachable: pingRes.reachable, kbeRoot: pingRes.kbeRoot });
+
+    const res = await api.kbe.browse({ category: cat });
+    setDir(res.dir || '');
+    setMissing(res.exists === false);
+    setFiles(res.ok ? res.files || [] : []);
+    if (!res.ok) setToast(res.message || '无法读取该分类目录');
+  }, [cat]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  const current = CATS.find((c) => c.key === cat)!;
 
   return (
     <div className="db-page">
       <div className="settings-card">
-        <h3>产品设计库</h3>
+        <h3>知识经验库</h3>
         <div className="kv">
           <span>服务器</span>
           <b>{ping === null ? '检测中…' : ping.reachable ? '可达' : '不可达，请检查网络或 UNC 路径'}</b>
@@ -49,30 +58,44 @@ export function KnowledgeBasePage({ user }: Props) {
         <div className="kv"><span>知识经验库根</span><b style={{ fontSize: 12 }}>{ping?.kbeRoot || '\\\\10.1.1.245\\Knowledge & Experience Base'}</b></div>
         <div className="kv"><span>当前登录</span><b>{user.displayName || user.username}</b></div>
         <div className="db-stats">
-          <span className="chip">产品设计库 {files.length}</span>
+          <span className="chip">{current.label} {files.length}</span>
           <button className="btn-ghost sm" onClick={refresh}>刷新</button>
         </div>
       </div>
 
-      {ping && (
+      <div className="lib-tabs">
+        {CATS.map((c) => (
+          <button
+            key={c.key}
+            className={`tab-btn${cat === c.key ? ' active' : ''}`}
+            onClick={() => { setCat(c.key); setToast(''); }}
+            title={c.hint}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      {dir && (
         <div className="settings-card kv" style={{ marginTop: 12 }}>
           <span>当前库路径</span>
-          <b style={{ fontSize: 12, color: 'var(--muted)' }}>{ping.kbeDesign}</b>
+          <b style={{ fontSize: 12, color: 'var(--muted)' }}>{dir}</b>
         </div>
       )}
 
       <div className="file-list">
         {files.length === 0 && (
           <div className="settings-card">
-            <h3>暂无归档文件</h3>
+            <h3>{missing ? '目录尚未创建' : '暂无文件'}</h3>
             <p className="settings-hint">
-              产品设计库还没有内容。理论知识请在左侧「知识经验库 → 知识理论」中导入与检索；
-              FMEA 请在「知识经验库 → FMEA库」中检索。
+              {missing
+                ? `共享目录可达，但「${current.label}」目录缺失，请管理员在 \\\\10.1.1.245\\Knowledge & Experience Base 下创建后刷新。`
+                : `「${current.label}」还没有内容。${current.hint}；把文件放入该目录后点「刷新」即可在此浏览，双击用本地软件打开。`}
             </p>
           </div>
         )}
         {files.map((f) => {
-          const p = parseArchiveName(f.name);
+          const ext = f.name.includes('.') ? f.name.split('.').pop()!.toUpperCase() : '';
           return (
             <div
               className="settings-card file-card"
@@ -82,11 +105,8 @@ export function KnowledgeBasePage({ user }: Props) {
             >
               <div className="pc-head">
                 <h3>{f.name}</h3>
-                {p.version && <span className="tag light">{p.version}</span>}
+                {ext && <span className="tag light">{ext}</span>}
               </div>
-              <div className="kv"><span>项目</span><b>{p.project || '—'}</b></div>
-              <div className="kv"><span>产品</span><b>{p.product || '—'}</b></div>
-              <div className="kv"><span>日期</span><b>{p.date || '—'}</b></div>
               <div className="kv"><span>大小</span><b>{(f.size / 1024).toFixed(1)} KB · {new Date(f.mtime).toLocaleString('zh-CN')}</b></div>
             </div>
           );

@@ -125,6 +125,8 @@ function sampleCurve(v: Record<string, number>): CurvePoint[] {
 
 export const wovenTubeSilencer: FormulaSpec = {
   id: 'acoustics.muffler.wovenTube',
+  version: '1.0.0',
+  status: 'published',
   domain: 'acoustics',
   subsystem: '消声器',
   title: '★编织管消音器',

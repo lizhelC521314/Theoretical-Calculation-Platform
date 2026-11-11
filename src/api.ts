@@ -1,5 +1,7 @@
 /** 与主进程通信的受控接口（由 electron/preload.cjs 注入） */
 
+import type { ProductStore } from './product/types';
+
 export interface CtrUser {
   id: string;
   username: string;
@@ -17,6 +19,10 @@ export interface HistoryEntry {
   projectId: string | null;
   formulaId: string;
   formulaTitle: string;
+  /** 快照：计算时所用公式的版本号（旧记录无此字段） */
+  formulaVersion?: string;
+  /** 快照：计算时公式的生命周期状态 */
+  formulaStatus?: string;
   domain: string;
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
@@ -203,6 +209,54 @@ interface CtrApi {
     /** 桌面版：清理转换产生的临时 PDF */
     cleanup(pdfPath: string): Promise<{ ok: boolean; message?: string }>;
   };
+  kbe: {
+    /** 知识经验库：按分类浏览网络共享目录（白名单分类，不接受任意路径） */
+    browse(p: {
+      category: 'standards' | 'guidelines' | 'lessons' | 'papers';
+    }): Promise<{
+      ok: boolean;
+      dir?: string;
+      /** 目录是否已创建；false 表示共享可达但目录缺失 */
+      exists?: boolean;
+      files?: { name: string; size: number; mtime: string; fullPath: string }[];
+      message?: string;
+    }>;
+    /** 知识经验库资料：导入（PPT/Word/PDF 统一转 PDF）并写入元数据 */
+    docImport(p: {
+      category: 'standards' | 'guidelines' | 'lessons' | 'papers';
+      srcPath: string;
+      title: string;
+      author?: string;
+      publishedAt?: string;
+      docCategory?: string;
+      extras?: Record<string, string>;
+      createdBy?: string;
+      createdByDisplay?: string;
+    }): Promise<{ ok: boolean; record?: unknown; pdfPath?: string; dir?: string; message?: string }>;
+    /** 知识经验库资料：列出某分类下已入库资料 */
+    docList(p: { category: 'standards' | 'guidelines' | 'lessons' | 'papers' }): Promise<{
+      ok: boolean;
+      dir?: string;
+      exists?: boolean;
+      records?: unknown[];
+      message?: string;
+    }>;
+    /** 知识经验库资料：补录 / 修改元数据（含分类专属字段） */
+    docUpdate(p: {
+      category: 'standards' | 'guidelines' | 'lessons' | 'papers';
+      id: string;
+      title?: string;
+      author?: string;
+      publishedAt?: string;
+      docCategory?: string;
+      extras?: Record<string, string>;
+    }): Promise<{ ok: boolean; record?: unknown; message?: string }>;
+    /** 知识经验库资料：删除记录及归档 PDF */
+    docDelete(p: { category: 'standards' | 'guidelines' | 'lessons' | 'papers'; id: string }): Promise<{
+      ok: boolean;
+      message?: string;
+    }>;
+  };
   app: {
     info(): Promise<{ version: string; dataDir: string }>;
     /** 桌面版：用系统默认程序打开文件（支持 UNC 路径） */
@@ -212,6 +266,11 @@ interface CtrApi {
     /** 读取实验库（LabStore）快照；null 表示尚无数据 */
     get(): Promise<unknown | null>;
     set(snapshot: unknown): Promise<{ ok: true } | { ok: false; error: string }>;
+  };
+  product: {
+    /** 读取产品定义库快照（产品族 / 型号 / 需求 / 参数 / 基线）；null 表示尚无数据 */
+    get(): Promise<ProductStore | null>;
+    set(snapshot: ProductStore | null): Promise<{ ok: true } | { ok: false; error: string }>;
   };
 }
 
@@ -229,7 +288,12 @@ const demoUser: CtrUser = {
 };
 
 // 浏览器调试用的内存数据（刷新页面即丢失，仅保证交互流程可走通）
-const mem = { history: [] as HistoryEntry[], projects: [] as Project[], lab: null as unknown };
+const mem = {
+  history: [] as HistoryEntry[],
+  projects: [] as Project[],
+  lab: null as unknown,
+  product: null as ProductStore | null,
+};
 
 const fallback: CtrApi = {
   auth: {
@@ -334,6 +398,13 @@ const fallback: CtrApi = {
     toPdf: async () => ({ ok: false, message: '浏览器调试模式不支持 PPT 转 PDF' }),
     cleanup: async () => ({ ok: false, message: '浏览器调试模式不支持清理临时文件' }),
   },
+  kbe: {
+    browse: async () => ({ ok: false, files: [], message: '浏览器调试模式无法访问知识经验库共享目录' }),
+    docImport: async () => ({ ok: false, message: '浏览器调试模式不支持导入，请在桌面程序中使用' }),
+    docList: async () => ({ ok: false, records: [], message: '浏览器调试模式无法访问知识经验库共享目录' }),
+    docUpdate: async () => ({ ok: false, message: '浏览器调试模式无法访问知识经验库共享目录' }),
+    docDelete: async () => ({ ok: false, message: '浏览器调试模式无法访问知识经验库共享目录' }),
+  },
   app: {
     info: async () => ({ version: '0.1.0-browser', dataDir: '(浏览器调试)' }),
     openPath: async () => ({ ok: false, message: '浏览器调试模式无法调用本地程序打开文件' }),
@@ -342,6 +413,13 @@ const fallback: CtrApi = {
     get: async () => mem.lab,
     set: async (snapshot) => {
       mem.lab = snapshot ?? null;
+      return { ok: true as const };
+    },
+  },
+  product: {
+    get: async () => mem.product,
+    set: async (snapshot) => {
+      mem.product = snapshot ?? null;
       return { ok: true as const };
     },
   },

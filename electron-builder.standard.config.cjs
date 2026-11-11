@@ -10,14 +10,14 @@ const base = require('./electron-builder.config.cjs');
 module.exports = {
   ...base,
   appId: 'com.ctr.theory-calc.standard',
-  productName: '汽车零部件理论计算平台（标准版）',
-  artifactName: 'Theoretical Calculation Platform Standard Setup ${version}.${ext}',
+  productName: '汽车零部件数字设计平台（标准版）',
+  artifactName: '汽车零部件数字设计平台（标准版） Setup ${version}.${ext}',
   directories: {
     ...base.directories,
     output: 'release-standard',
   },
   nsis: {
     ...base.nsis,
-    shortcutName: '汽车零部件理论计算平台（标准版）',
+    shortcutName: '汽车零部件数字设计平台（标准版）',
   },
 };

@@ -434,12 +434,12 @@ export interface FmeaDraft {
   failureModeMaster: FailureModeMaster | ''; // 失效模式主词（归并后）
   failureCauseMaster: FailureCauseMaster | ''; // 失效原因主词（归并后）
   failureEffectMaster: FailureEffectMaster | ''; // 失效后果主词（归并后）
-  severity: string; // S 严重度 1~10（空串表示未填）
-  occurrence: string; // O 频度 1~10
-  detection: string; // D 探测度 1~10
-  severityBefore: string; // 措施前 S 评分（空串=未留痕，当前 severity 即为措施后值）
-  occurrenceBefore: string; // 措施前 O
-  detectionBefore: string; // 措施前 D
+  severity: string; // S 严重度 1~10，措施前评分（空串表示未填）
+  occurrence: string; // O 频度 1~10，措施前评分
+  detection: string; // D 探测度 1~10，措施前评分
+  severityBefore: string; // 措施后 S 评分（空串=未留痕；历史字段名 *Before，主字段 severity 为措施前值）
+  occurrenceBefore: string; // 措施后 O
+  detectionBefore: string; // 措施后 D
   action: string; // 建议的措施
   measureActual: string; // 实际采取的措施（区别于建议措施；验证后回填）
   measureType: string; // 措施类型
@@ -495,13 +495,13 @@ export const FMEA_FIELDS: Array<{
   { key: 'causeCode', label: '原因编码', hint: 'D/M/P/Mf + 细类', options: causeCodeOptions(), group: '失效链' },
   { key: 'failureEffect', label: '潜在的失效后果', hint: '尽量量化：泄漏率、抱怨数、成本', multiline: true, group: '失效链' },
   { key: 'conclusion', label: '一句话结论', hint: '对设计的核心提醒，≤40 字', multiline: true, group: '失效链' },
-  { key: 'severity', label: '严重度 S', hint: '1~10，没有可留空', group: '风险' },
-  { key: 'occurrence', label: '频度 O', hint: '1~10，没有可留空', group: '风险' },
-  { key: 'detection', label: '探测度 D', hint: '1~10，没有可留空', group: '风险' },
+  { key: 'severity', label: '严重度 S（前）', hint: '措施前评分，1~10，没有可留空', group: '风险' },
+  { key: 'occurrence', label: '频度 O（前）', hint: '措施前评分，1~10，没有可留空', group: '风险' },
+  { key: 'detection', label: '探测度 D（前）', hint: '措施前评分，1~10，没有可留空', group: '风险' },
   { key: 'riskLevel', label: '风险等级', hint: '留空则按后果自动判定', options: RISK_LEVELS.filter(Boolean) as string[], group: '风险' },
-  { key: 'severityBefore', label: '措施前 S', hint: '留空则表示未留痕', group: '措施前评分' },
-  { key: 'occurrenceBefore', label: '措施前 O', hint: '留空则表示未留痕', group: '措施前评分' },
-  { key: 'detectionBefore', label: '措施前 D', hint: '留空则表示未留痕', group: '措施前评分' },
+  { key: 'severityBefore', label: '措施后 S', hint: '留空则表示未留痕', group: '措施后评分' },
+  { key: 'occurrenceBefore', label: '措施后 O', hint: '留空则表示未留痕', group: '措施后评分' },
+  { key: 'detectionBefore', label: '措施后 D', hint: '留空则表示未留痕', group: '措施后评分' },
   { key: 'action', label: '建议的措施', hint: '可直接照做的对策', multiline: true, group: '措施' },
   { key: 'measureActual', label: '实际采取的措施', hint: '验证后回填，区别于建议措施', multiline: true, group: '措施' },
   { key: 'measureType', label: '措施类型', hint: '设计/材料/工艺/检测', options: MEASURE_TYPES, group: '措施' },
@@ -536,12 +536,13 @@ const HEADER_ALIASES: Array<{ key: FmeaDraftKey; re: RegExp }> = [
   { key: 'failureCause', re: /失效起因|起因|机理|原因|根因/ },
   { key: 'causeCategory', re: /原因分类/ },
   { key: 'causeCode', re: /原因编码|原因细类|原因代码/ },
-  { key: 'severityBefore', re: /措施前.*S|前.*严重度|S.*前|基准.*S/i },
-  { key: 'occurrenceBefore', re: /措施前.*O|前.*频度|O.*前|基准.*O/i },
-  { key: 'detectionBefore', re: /措施前.*D|前.*探测度|D.*前|基准.*D/i },
-  { key: 'severity', re: /严重度|^S$/i },
-  { key: 'occurrence', re: /频度|发生度|频次|^O$/i },
-  { key: 'detection', re: /探测度|^D$/i },
+  // 措施后评分 → 历史字段 *Before；措施前评分 → 主字段（severity 等）
+  { key: 'severityBefore', re: /措施后.*S|后.*严重度|S.*后/i },
+  { key: 'occurrenceBefore', re: /措施后.*O|后.*频度|O.*后/i },
+  { key: 'detectionBefore', re: /措施后.*D|后.*探测度|D.*后/i },
+  { key: 'severity', re: /措施前.*S|前.*严重度|S.*前|基准.*S|严重度|^S$/i },
+  { key: 'occurrence', re: /措施前.*O|前.*频度|O.*前|基准.*O|频度|发生度|频次|^O$/i },
+  { key: 'detection', re: /措施前.*D|前.*探测度|D.*前|基准.*D|探测度|^D$/i },
   { key: 'riskLevel', re: /风险等级|风险级别|^风险$/ },
   { key: 'measureActual', re: /实际.*措施|实际.*对策|落地.*措施|整改.*实际/i },
   { key: 'measureType', re: /措施类型/ },
@@ -661,7 +662,7 @@ export function fmeaRpn(rec: Pick<FmeaDraft, 'severity' | 'occurrence' | 'detect
   return s * o * d;
 }
 
-/** 判断是否留痕了措施前的 S/O/D 完整评分 */
+/** 判断 *Before 字段（现语义为措施后评分）是否完整留痕 */
 export function hasBeforeRatings(rec: Pick<FmeaDraft, 'severityBefore' | 'occurrenceBefore' | 'detectionBefore'>): boolean {
   return [rec.severityBefore, rec.occurrenceBefore, rec.detectionBefore].every((v) => {
     const n = Number(v);
@@ -669,7 +670,7 @@ export function hasBeforeRatings(rec: Pick<FmeaDraft, 'severityBefore' | 'occurr
   });
 }
 
-/** 判断是否留痕了措施后的 S/O/D 完整评分 */
+/** 判断主字段 S/O/D（现语义为措施前评分）是否完整留痕 */
 export function hasAfterRatings(rec: Pick<FmeaDraft, 'severity' | 'occurrence' | 'detection'>): boolean {
   return [rec.severity, rec.occurrence, rec.detection].every((v) => {
     const n = Number(v);
@@ -1817,12 +1818,12 @@ const CSV_HEADER = [
   '潜在的失效起因/机理',
   '原因编码',
   '原因分类',
-  '严重度S',
-  '频度O',
-  '探测度D',
-  '措施前S',
-  '措施前O',
-  '措施前D',
+  '严重度S（前）',
+  '频度O（前）',
+  '探测度D（前）',
+  '措施后S',
+  '措施后O',
+  '措施后D',
   '风险等级',
   '建议的措施',
   '实际采取的措施',
@@ -2135,7 +2136,7 @@ export function fmeaCardText(rec: FmeaRecord): string {
     line('原因编码', rec.causeCode) +
     line('原因分类', rec.causeCategory) +
     line('风险等级', rec.riskLevel) +
-    line('严重度/频度/探测度', [rec.severity, rec.occurrence, rec.detection].filter(Boolean).join(' / ')) +
+    line('严重度/频度/探测度（前）', [rec.severity, rec.occurrence, rec.detection].filter(Boolean).join(' / ')) +
     line('建议措施', rec.action) +
     line('措施类型', rec.measureType) +
     line('验证状态', rec.verificationStatus) +
@@ -2193,9 +2194,9 @@ export function fmeaTemplateCsv(): string {
     '潜在的失效起因/机理',
     '原因编码',
     '原因分类',
-    '严重度S',
-    '频度O',
-    '探测度D',
+    '严重度S（前）',
+    '频度O（前）',
+    '探测度D（前）',
     '风险等级',
     '建议的措施',
     '措施类型',

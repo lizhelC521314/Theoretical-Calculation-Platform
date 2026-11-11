@@ -74,6 +74,15 @@ const bridge = {
     /** 清理转换产生的临时 PDF */
     cleanup: (pdfPath) => ipcRenderer.invoke('ppt:cleanup', pdfPath),
   },
+  kbe: {
+    /** 知识经验库：按分类浏览目录（标准&规范 / 设计指南 / 经验教训 / 论文专利） */
+    browse: (p) => ipcRenderer.invoke('kbe:browse', p),
+    /** 知识经验库四类资料：导入（统一转 PDF）/ 列表 / 删除 */
+    docImport: (p) => ipcRenderer.invoke('kbe:docImport', p),
+    docList: (p) => ipcRenderer.invoke('kbe:docList', p),
+    docUpdate: (p) => ipcRenderer.invoke('kbe:docUpdate', p),
+    docDelete: (p) => ipcRenderer.invoke('kbe:docDelete', p),
+  },
   app: {
     info: () => ipcRenderer.invoke('app:info'),
     openPath: (filePath) => ipcRenderer.invoke('app:openPath', filePath),
@@ -81,6 +90,10 @@ const bridge = {
   lab: {
     get: () => ipcRenderer.invoke('lab:get'),
     set: (snapshot) => ipcRenderer.invoke('lab:set', snapshot),
+  },
+  product: {
+    get: () => ipcRenderer.invoke('product:get'),
+    set: (snapshot) => ipcRenderer.invoke('product:set', snapshot),
   },
 };
 

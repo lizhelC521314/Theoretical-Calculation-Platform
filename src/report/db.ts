@@ -22,6 +22,7 @@ export const UNC_MATERIAL_LIB = '\\\\10.1.1.245\\materials library';
 /** 知识经验库根目录（知识理论、FMEA库、培训在其下） */
 export const KBE_ROOT = '\\\\10.1.1.245\\Knowledge & Experience Base';
 export const KBE_THEORY = `${KBE_ROOT}\\Theoretical Knowledge Base`;
+export const KBE_DESIGN = `${KBE_ROOT}\\Product Design Library`;
 export const KBE_FMEA = `${KBE_ROOT}\\FMEA Library`;
 export const KBE_TRAINING = `${KBE_ROOT}\\Training`;
 
@@ -39,6 +40,14 @@ export function cleanFileName(s: string): string {
 export function archiveFileName(project: string, product: string, version: string, date?: string): string {
   const d = (date || new Date().toISOString().slice(0, 10)).replace(/-/g, '');
   return `${cleanFileName(project)}+${cleanFileName(product)}+${cleanFileName(version || 'V0')}+${d}.xlsx`;
+}
+
+/** 型号设计档案文件名：产品族+型号P/N+版本+日期.xlsx（归档到 Product Design Library） */
+export function designArchiveFileName(familyName: string, modelId: string, version: string, date?: string): string {
+  const d = (date || new Date().toISOString().slice(0, 10)).replace(/-/g, '');
+  return `${cleanFileName(familyName || '未归类')}+${cleanFileName(modelId)}+${cleanFileName(
+    version || 'V0',
+  )}+${d}.xlsx`;
 }
 
 /**

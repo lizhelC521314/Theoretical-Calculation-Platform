@@ -60,6 +60,8 @@ function derive(v: Record<string, number>) {
 
 export const helmholtzMuffler: FormulaSpec = {
   id: 'acoustics.muffler.helmholtz',
+  version: '1.0.0',
+  status: 'published',
   domain: 'acoustics',
   subsystem: '消声器',
   title: '亥姆霍兹消音器',

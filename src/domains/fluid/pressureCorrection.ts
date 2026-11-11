@@ -35,6 +35,8 @@ function derive(v: Record<string, number>) {
 
 export const pressureCorrection: FormulaSpec = {
   id: 'fluid.pressureCorrection',
+  version: '1.0.0',
+  status: 'published',
   domain: 'fluid',
   subsystem: '压降修正',
   title: '压力修正',
