@@ -224,7 +224,10 @@ function bufToBase64(buf: ArrayBuffer | Uint8Array): string {
  * 内容与计算书最后一页附表一致：信息行（项目/版本/日期）+ 双行表头 + 每项计算的合并块，
  * 序号与计算题目纵向合并，设计参数与计算结果各占两列，中间计算量不输出。
  */
-export async function buildSummaryXlsxBase64(m: ReportModel): Promise<string> {
+export async function buildSummaryXlsxBase64(
+  m: ReportModel,
+  fmeaRecords?: unknown[],
+): Promise<string> {
   const wb = new ExcelJS.Workbook();
   wb.creator = m.compiler;
   wb.created = new Date();
@@ -304,6 +307,77 @@ export async function buildSummaryXlsxBase64(m: ReportModel): Promise<string> {
   note.getCell(1).value = '注：表中仅列出设计参数与主结果，中间计算量未列入；计算过程详见各章。';
   note.getCell(1).font = { name: '宋体', size: 9, color: { argb: 'FF556375' } };
   note.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+
+  // FMEA 点检表（项目引用过的 FMEA）
+  if (Array.isArray(fmeaRecords) && fmeaRecords.length > 0) {
+    const thin = { style: 'thin' as const, color: { argb: 'FF808080' } };
+    const fBorder = { top: thin, left: thin, bottom: thin, right: thin };
+    const fFill: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCE6F4' } };
+    const headers = [
+      '编号', '系统', '产品大类', '产品小类', '部件名称', '材料',
+      '失效编码', '失效模式', '失效起因', '原因编码',
+      '失效后果', '风险等级', 'S', 'O', 'D',
+      '建议措施', '措施类型', '验证状态',
+      '一句话结论', '设计规避', '录入人', '记录时间',
+    ];
+    const fws = wb.addWorksheet('FMEA点检表', {
+      views: [{ state: 'frozen', ySplit: 1 }],
+      pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+    });
+    fws.columns = [
+      { width: 16 }, { width: 12 }, { width: 10 }, { width: 10 }, { width: 22 }, { width: 14 },
+      { width: 10 }, { width: 32 }, { width: 28 }, { width: 10 },
+      { width: 28 }, { width: 10 }, { width: 5 }, { width: 5 }, { width: 5 },
+      { width: 32 }, { width: 10 }, { width: 10 },
+      { width: 36 }, { width: 30 }, { width: 14 }, { width: 14 },
+    ];
+
+    const hRow = fws.addRow(headers);
+    hRow.height = 26;
+    for (let c = 1; c <= headers.length; c++) {
+      const cell = hRow.getCell(c);
+      cell.border = fBorder;
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.font = { name: '宋体', size: 10, bold: true };
+      cell.fill = fFill;
+    }
+
+    for (const rec of fmeaRecords) {
+      const r = rec as Record<string, unknown>;
+      const values = [
+        r.id ?? '',
+        r.system ?? '',
+        r.productCategory ?? '',
+        r.productSubCategory ?? '',
+        r.part ?? '',
+        r.material ?? '',
+        r.failureCode ?? '',
+        r.failureMode ?? '',
+        r.failureCause ?? '',
+        r.causeCode ?? '',
+        r.failureEffect ?? '',
+        r.riskLevel ?? '',
+        r.severity ?? '',
+        r.occurrence ?? '',
+        r.detection ?? '',
+        r.action ?? '',
+        r.measureType ?? '',
+        r.verificationStatus ?? '',
+        r.conclusion ?? '',
+        r.designGuide ?? '',
+        r.createdByDisplay ?? r.createdBy ?? '',
+        r.recordDate ?? '',
+      ];
+      const row = fws.addRow(values);
+      row.height = 48;
+      for (let c = 1; c <= headers.length; c++) {
+        const cell = row.getCell(c);
+        cell.border = fBorder;
+        cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+        cell.font = { name: '宋体', size: 10 };
+      }
+    }
+  }
 
   const buf = await wb.xlsx.writeBuffer();
   return bufToBase64(buf as unknown as ArrayBuffer);
@@ -423,6 +497,101 @@ function paramTable(headers: string[], rows: string[][], widths: number[]) {
  * 附表汇总表格（Word）：单张表承载「项目/版本/日期」信息行 + 双行表头 + 每项计算的合并块
  * 序号与计算题目纵向合并，设计参数与计算结果各占「名称 + 数值」两列
  */
+/** FMEA 点检表列（与 Excel buildSummaryXlsxBase64 / PDF 保持一致，单一来源） */
+const FMEA_HEADERS = [
+  '编号', '系统', '产品大类', '产品小类', '部件名称', '材料',
+  '失效编码', '失效模式', '失效起因', '原因编码',
+  '失效后果', '风险等级', 'S', 'O', 'D',
+  '建议措施', '措施类型', '验证状态',
+  '一句话结论', '设计规避', '录入人', '记录时间',
+] as const;
+
+/** 把一条 FMEA 记录展平为 FMEA_HEADERS 对齐的行 */
+function fmeaRowValues(rec: unknown): string[] {
+  const r = rec as Record<string, unknown>;
+  // designGuide 在 fmea.ts 里是 deriveDesignGuide(record) 动态生成，Excel 直接用字段 r.designGuide
+  // 但 main.cjs 从 Parquet 读出的就是原始字段，没有 designGuide —— 这里做兼容：如果有就用，没有留空
+  return [
+    String(r.id ?? ''),
+    String(r.system ?? ''),
+    String(r.productCategory ?? ''),
+    String(r.productSubCategory ?? ''),
+    String(r.part ?? ''),
+    String(r.material ?? ''),
+    String(r.failureCode ?? ''),
+    String(r.failureMode ?? ''),
+    String(r.failureCause ?? ''),
+    String(r.causeCode ?? ''),
+    String(r.failureEffect ?? ''),
+    String(r.riskLevel ?? ''),
+    String(r.severity ?? ''),
+    String(r.occurrence ?? ''),
+    String(r.detection ?? ''),
+    String(r.action ?? ''),
+    String(r.measureType ?? ''),
+    String(r.verificationStatus ?? ''),
+    String(r.conclusion ?? ''),
+    String(r.designGuide ?? ''),
+    String((r.createdByDisplay ?? r.createdBy) ?? ''),
+    String(r.recordDate ?? ''),
+  ];
+}
+
+/** Word：FMEA 点检表 —— 22 列，横向排列，短列用较窄百分比、长列用较宽百分比 */
+function fmeaDocxTable(records: unknown[]): Table {
+  // 22 列宽度百分比总和 = 100；长文本列（失效模式/起因/后果/建议措施/设计规避）给 7~8%，短列 2~3%
+  const widths = [
+    4, 3, 3, 3, 5, 3,       // 编号/系统/大类/小类/部件/材料
+    3, 7, 7, 3,              // 失效编码/模式/起因/原因编码
+    6, 3, 1.5, 1.5, 1.5,     // 后果/风险/S/O/D
+    6, 3, 3,                 // 建议措施/措施类型/验证
+    7, 7, 3, 3,              // 一句话结论/设计规避/录入人/记录时间
+  ];
+  const total = widths.reduce((a, b) => a + b, 0);
+
+  const mkCell = (text: string, percent: number, opts: { head?: boolean } = {}) =>
+    new TableCell({
+      borders: CELL_BORDERS,
+      width: { size: percent, type: WidthType.PERCENTAGE },
+      verticalAlign: VerticalAlign.CENTER,
+      margins: { top: 40, bottom: 40, left: 60, right: 60 },
+      children: [
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 40, after: 40 },
+          children: [
+            new TextRun({
+              text: (text ?? '').slice(0, 80),
+              size: 18,
+              font: FONT_SONG,
+              bold: opts.head,
+            }),
+          ],
+        }),
+      ],
+    });
+
+  const rows: TableRow[] = [];
+  // 表头行
+  rows.push(
+    new TableRow({
+      tableHeader: true,
+      children: FMEA_HEADERS.map((h, i) => mkCell(h, (widths[i] / total) * 100, { head: true })),
+    }),
+  );
+  // 数据行
+  for (const rec of records) {
+    const values = fmeaRowValues(rec);
+    rows.push(
+      new TableRow({
+        children: values.map((v, i) => mkCell(v, (widths[i] / total) * 100)),
+      }),
+    );
+  }
+
+  return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows });
+}
+
 function summaryTable(m: ReportModel) {
   const widthOf = (col: number, span = 1) =>
     SUM_WIDTHS.slice(col, col + span).reduce((a, b) => a + b, 0);
@@ -615,8 +784,8 @@ function infoTable(lines: string[]) {
   });
 }
 
-/** 生成 Word 文档并打包为 base64（主进程负责保存） */
-export async function buildDocxBase64(m: ReportModel): Promise<string> {
+/** 生成 Word 文档并打包为 base64（主进程负责保存）。可选传入 fmeaRecords，末尾加 FMEA 点检表章节 */
+export async function buildDocxBase64(m: ReportModel, fmeaRecords?: unknown[]): Promise<string> {
   const infoLines = [`项目名称：${m.projectName ?? '（临时计算）'}`];
   if (m.product) infoLines.push(`产品名称：${m.product}`);
   if (m.productVersion) infoLines.push(`产品版本：${m.productVersion}`);
@@ -715,27 +884,59 @@ export async function buildDocxBase64(m: ReportModel): Promise<string> {
   body.push(summaryTable(m));
   body.push(p('注：表中仅列出设计参数与主结果，中间计算量未列入；计算过程详见各章。', { size: 19, spacing: 100 }));
 
+  /** FMEA 点检表如果有记录，单独开一个 section 用 A4 横向（22 列宽表不跨页） */
+  const hasFmea = Array.isArray(fmeaRecords) && fmeaRecords.length > 0;
+
+  // 横版 section 用窄边距：上下 10mm ≈ 576 twips，左右 8mm ≈ 457 twips
+  const LANDSCAPE_PAGE = {
+    margin: { top: 576, bottom: 576, left: 457, right: 457, header: 0, footer: 0 },
+    size: { width: 16838, height: 11906, orientation: 'landscape' as const },
+  };
+  const PORTRAIT_PAGE = {
+    margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 },
+    size: { width: 11906, height: 16838 }, // A4 portrait
+  };
+
+  const defaultFooter = {
+    default: new Footer({
+      children: [
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [
+            new TextRun({ children: [`${m.company}  `, PageNumber.CURRENT, ' / ', PageNumber.TOTAL_PAGES], size: 18, font: FONT_SONG }),
+          ],
+        }),
+      ],
+    }),
+  };
+
+  const sections = [
+    {
+      properties: { page: PORTRAIT_PAGE },
+      footers: defaultFooter,
+      children: [...cover, ...toc, ...body],
+    },
+  ];
+
+  if (hasFmea) {
+    sections.push({
+      properties: { page: LANDSCAPE_PAGE },
+      footers: defaultFooter,
+      children: [
+        h1('附表  FMEA点检表'),
+        fmeaDocxTable(fmeaRecords!),
+        p(
+          `注：共 ${fmeaRecords!.length} 条 FMEA 案例被本项目引用，表中内容来自 KBE_FMEA 库中 citation 指向本项目的记录。`,
+          { size: 19, spacing: 100 },
+        ),
+      ],
+    });
+  }
+
   const doc = new Document({
     title: m.docName,
     creator: m.compiler,
-    sections: [
-      {
-        properties: {},
-        footers: {
-          default: new Footer({
-            children: [
-              new Paragraph({
-                alignment: AlignmentType.CENTER,
-                children: [
-                  new TextRun({ children: [`${m.company}  `, PageNumber.CURRENT, ' / ', PageNumber.TOTAL_PAGES], size: 18, font: FONT_SONG }),
-                ],
-              }),
-            ],
-          }),
-        },
-        children: [...cover, ...toc, ...body],
-      },
-    ],
+    sections: sections,
   });
   return Packer.toBase64String(doc);
 }
@@ -753,11 +954,36 @@ function pdfTable(headers: string[], rows: string[][], widths?: number[]): strin
   return `<table><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>`;
 }
 
-/** 生成自包含 A4 HTML（内联样式，离线排版），主进程隐藏窗口加载后 printToPDF */
-export function buildPdfHtml(m: ReportModel): string {
+/** PDF：FMEA 点检表 section 字符串，列对齐与 FMEA_HEADERS 一致 */
+function fmeaPdfSection(records?: unknown[]): string {
+  if (!Array.isArray(records) || records.length === 0) return '';
+  const rows = records.map((r) => fmeaRowValues(r));
+  // PDF 表格用百分比宽度：短列窄、长列宽
+  const widths = [
+    4, 3, 3, 3, 5, 3,
+    3, 7, 7, 3,
+    6, 3, 1.5, 1.5, 1.5,
+    6, 3, 3,
+    7, 7, 3, 3,
+  ];
+  const header = FMEA_HEADERS.map((h, i) => `<th style="width:${widths[i]}%">${esc(h)}</th>`).join('');
+  const body = rows
+    .map((r) => `<tr>${r.map((c, i) => `<td style="width:${widths[i]}%">${esc(c)}</td>`).join('')}</tr>`)
+    .join('');
+  return `
+<section class="chapter summary fmea-landscape">
+  <h1>附表　FMEA点检表</h1>
+  <table class="fmea-table"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>
+  <p class="note">注：共 ${records.length} 条 FMEA 案例被本项目引用，表中内容来自 KBE_FMEA 库中 citation 指向本项目的记录。</p>
+</section>`;
+}
+
+/** 生成自包含 A4 HTML（内联样式，离线排版），主进程隐藏窗口加载后 printToPDF。可选传入 fmeaRecords，末尾加 FMEA 点检表 section */
+export function buildPdfHtml(m: ReportModel, fmeaRecords?: unknown[]): string {
+  const tocFmea = Array.isArray(fmeaRecords) && fmeaRecords.length > 0 ? '<div class="toc-item">附表　FMEA点检表</div>' : '';
   const tocItems = m.chapters
     .map((c) => `<div class="toc-item">第 ${c.no} 章　${esc(c.title)}（${esc(c.domain)}）</div>`)
-    .join('') + '<div class="toc-item">附表　全部计算汇总</div>';
+    .join('') + '<div class="toc-item">附表　全部计算汇总</div>' + tocFmea;
 
   const chapters = m.chapters
     .map((c) => {
@@ -828,7 +1054,11 @@ export function buildPdfHtml(m: ReportModel): string {
   ul { margin: 6px 0; padding-left: 22px; }
   li { margin: 3px 0; font-size: 11pt; }
   .summary td { vertical-align: top; font-size: 10pt; }
+  .fmea-table th, .fmea-table td { font-size: 9pt; vertical-align: top; word-break: break-word; }
+  .fmea-table th { font-weight: 700; text-align: center; }
   .summary .note { color: #556375; font-size: 9.5pt; margin-top: 6px; }
+  .fmea-landscape { page: fmea; page-break-before: always; }
+  @page fmea { size: A4 landscape; margin: 8mm; }
   .sum-table { table-layout: fixed; }
   .sum-table td { text-align: center; vertical-align: middle; padding: 4px 6px; font-size: 9.5pt; }
   .sum-table td.sum-k { font-weight: 700; }
@@ -853,5 +1083,6 @@ export function buildPdfHtml(m: ReportModel): string {
   <div class="toc"><h1>目　录</h1>${tocItems}</div>
   ${chapters}
   ${summary}
+  ${fmeaPdfSection(fmeaRecords)}
 </body></html>`;
 }

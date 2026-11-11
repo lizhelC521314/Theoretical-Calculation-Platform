@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type CtrUser } from '../api';
-import { KBE_FMEA } from '../report/db';
+import { FmeaImageInput } from '../components/FmeaImageInput';
 import {
   buildFmeaRecord,
   emptyFmeaDraft,
@@ -12,8 +12,8 @@ import {
   normalizeRecordDate,
   parseFmeaCsv,
   parseFmeaXlsx,
+  recordYearForId,
   validateFmeaDraft,
-  yearFromDate,
   type FmeaDraft,
   type FmeaParseResult,
   type FmeaValidation,
@@ -33,7 +33,7 @@ interface FmeaEntry {
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 /**
- * FMEA 案例库导入
+ * FMEA库导入
  * 批量导入技术中心的《FMEA 案例收集》Excel（多工作表自动合并），或手工录入一张卡片。
  * 入库时自动编号 FM-年份-序号，一张卡片一个 Parquet 文件。
  */
@@ -124,11 +124,8 @@ export function FmeaImportPage({ user }: Props) {
         validation: validateFmeaDraft(draftRow),
       };
     });
-    setEntries((prev) => {
-      const next = [...prev, ...added];
-      if (detailIdx < 0) window.setTimeout(() => setDetailIdx(next.length - added.length), 0);
-      return next;
-    });
+    setEntries((prev) => [...prev, ...added]);
+    if (detailIdx < 0) setDetailIdx(entries.length);
     setImportNote(
       `${hint}：识别 ${res.rows.length} 条` +
         (res.skipped ? `，跳过 ${res.skipped} 行（空行 / 小节标题 / 示例行）` : '') +
@@ -162,7 +159,7 @@ export function FmeaImportPage({ user }: Props) {
   const downloadTemplate = async (kind: 'csv' | 'xlsx') => {
     const content = fmeaTemplateCsv();
     if (kind === 'csv') {
-      const res = await api.file.save({ defaultName: 'FMEA案例库导入模板.csv', content });
+      const res = await api.file.save({ defaultName: 'FMEA库导入模板.csv', content });
       if (res.ok) showToast('CSV 模板已保存');
       return;
     }
@@ -173,7 +170,7 @@ export function FmeaImportPage({ user }: Props) {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'FMEA案例');
       const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-      const res = await api.file.save({ defaultName: 'FMEA案例库导入模板.xlsx', buffer: buf });
+      const res = await api.file.save({ defaultName: 'FMEA库导入模板.xlsx', buffer: buf });
       if (res.ok) showToast('Excel 模板已保存');
     } catch (e) {
       showToast(`模板生成失败：${e instanceof Error ? e.message : String(e)}`);
@@ -209,7 +206,7 @@ export function FmeaImportPage({ user }: Props) {
           remain.push({ ...entry, validation: v });
           continue;
         }
-        const year = yearFromDate(entry.draft.recordDate);
+        const year = recordYearForId(entry.draft.recordDate, entry.sourceSheet);
         const id = nextFmeaId(used, year);
         const fileName = fmeaFileName(id);
         const record = buildFmeaRecord(entry.draft, {
@@ -303,36 +300,72 @@ export function FmeaImportPage({ user }: Props) {
         </div>
 
         <div className="fmea-form-grid">
-          {FMEA_FIELDS.map((f) => (
-            <label className={f.multiline ? 'field full' : 'field'} key={f.key}>
-              <span className="mat-field-label">
-                <span className="mat-field-name">{f.label}</span>
-                <span className="mat-field-unit">{f.hint || '\u00A0'}</span>
-              </span>
-              {f.multiline ? (
-                <textarea
-                  rows={3}
-                  value={draft[f.key]}
-                  placeholder={f.hint || '选填'}
-                  onChange={(e) => patch(f.key, e.target.value)}
-                />
-              ) : (
-                <input
-                  value={draft[f.key]}
-                  placeholder={f.hint || '选填'}
-                  onChange={(e) => patch(f.key, e.target.value)}
-                />
-              )}
-            </label>
-          ))}
+          {FMEA_FIELDS.map((f) => {
+            const val = draft[f.key];
+            const opts = f.options;
+            const isCustom = f.allowCustom && opts && !opts.includes(val) && val !== '';
+            return (
+              <label className={f.multiline ? 'field full' : 'field'} key={f.key}>
+                <span className="mat-field-label">
+                  <span className="mat-field-name">{f.label}</span>
+                  <span className="mat-field-unit">{f.hint || '\u00A0'}</span>
+                </span>
+                {opts ? (
+                  <>
+                    <select
+                      value={isCustom ? opts[opts.length - 1] : val}
+                      onChange={(e) => {
+                        const sel = e.target.value;
+                        if (f.allowCustom && sel === '自定义') {
+                          // 切到自定义：保留原值做占位，操作者再在 text 框里改
+                          patch(f.key, val && !opts.includes(val) ? val : '');
+                        } else {
+                          patch(f.key, sel);
+                        }
+                      }}
+                    >
+                      <option value="">未填写</option>
+                      {opts.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                    {f.allowCustom && (isCustom || val === '') && (
+                      <input
+                        className="mat-custom-input"
+                        placeholder="自定义系统名称，如 燃油系统 / 进气歧管系统"
+                        value={isCustom ? val : ''}
+                        onChange={(e) => patch(f.key, e.target.value)}
+                      />
+                    )}
+                  </>
+                ) : f.multiline ? (
+                  <textarea
+                    rows={3}
+                    value={val}
+                    placeholder={f.hint || '选填'}
+                    onChange={(e) => patch(f.key, e.target.value)}
+                  />
+                ) : (
+                  <input
+                    value={val}
+                    placeholder={f.hint || '选填'}
+                    onChange={(e) => patch(f.key, e.target.value)}
+                  />
+                )}
+              </label>
+            );
+          })}
           {FMEA_IMAGE_FIELDS.map((f) => (
-            <label className="field" key={f.key}>
-              <span className="mat-field-label">
-                <span className="mat-field-name">{f.label}</span>
-                <span className="mat-field-unit">选填，填写序号或说明</span>
-              </span>
-              <input value={draft[f.key]} onChange={(e) => patch(f.key, e.target.value)} placeholder="如：原表图 3" />
-            </label>
+            <div className="field image" key={f.key}>
+              <FmeaImageInput
+                label={f.label}
+                value={draft[f.key]}
+                onChange={(v) => patch(f.key, v)}
+                placeholder="支持导入图片或 Ctrl+V 粘贴"
+              />
+            </div>
           ))}
         </div>
 
@@ -379,9 +412,8 @@ export function FmeaImportPage({ user }: Props) {
             <h3>还没有待入库的卡片</h3>
             <p className="settings-hint">
               把《FMEA 案例收集》Excel 直接拖进「批量导入 Excel」，或在上面手工填写一条。入库后每张卡片自动编号
-              （FM-年份-序号），保存为
-              <span className="mono"> {KBE_FMEA} </span>
-              下的独立 .parquet 文件，检索页即可按机种、部件、关键词查到。
+              （FM-年份-序号），保存为共享盘「FMEA Library」目录下的独立 .parquet 文件，检索页即可按机种、部件、关键词查到。
+              导入时自动清理「填写示例 / 责任人填写 / 插入图片」等占位行，并合并同机种、同部件、同失效模式、同原因的重复案例。
             </p>
           </div>
         ) : (
@@ -450,37 +482,69 @@ export function FmeaImportPage({ user }: Props) {
               <span className="small muted">改动实时校验，补全后即可入库</span>
             </div>
             <div className="fmea-form-grid">
-              {FMEA_FIELDS.map((f) => (
-                <label className={f.multiline ? 'field full' : 'field'} key={f.key}>
-                  <span className="mat-field-label">
-                    <span className="mat-field-name">{f.label}</span>
-                    <span className="mat-field-unit">{f.hint || '\u00A0'}</span>
-                  </span>
-                  {f.multiline ? (
-                    <textarea
-                      rows={3}
-                      value={entries[detailIdx].draft[f.key]}
-                      onChange={(e) => patchEntry(detailIdx, f.key, e.target.value)}
-                    />
-                  ) : (
-                    <input
-                      value={entries[detailIdx].draft[f.key]}
-                      onChange={(e) => patchEntry(detailIdx, f.key, e.target.value)}
-                    />
-                  )}
-                </label>
-              ))}
+              {FMEA_FIELDS.map((f) => {
+                const val = entries[detailIdx].draft[f.key];
+                const opts = f.options;
+                const isCustom = f.allowCustom && opts && !opts.includes(val) && val !== '';
+                return (
+                  <label className={f.multiline ? 'field full' : 'field'} key={f.key}>
+                    <span className="mat-field-label">
+                      <span className="mat-field-name">{f.label}</span>
+                      <span className="mat-field-unit">{f.hint || '\u00A0'}</span>
+                    </span>
+                    {opts ? (
+                      <>
+                        <select
+                          value={isCustom ? opts[opts.length - 1] : val}
+                          onChange={(e) => {
+                            const sel = e.target.value;
+                            if (f.allowCustom && sel === '自定义') {
+                              patchEntry(detailIdx, f.key, val && !opts.includes(val) ? val : '');
+                            } else {
+                              patchEntry(detailIdx, f.key, sel);
+                            }
+                          }}
+                        >
+                          <option value="">未填写</option>
+                          {opts.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                        {f.allowCustom && (isCustom || val === '') && (
+                          <input
+                            className="mat-custom-input"
+                            placeholder="自定义系统名称，如 燃油系统 / 进气歧管系统"
+                            value={isCustom ? val : ''}
+                            onChange={(e) => patchEntry(detailIdx, f.key, e.target.value)}
+                          />
+                        )}
+                      </>
+                    ) : f.multiline ? (
+                      <textarea
+                        rows={3}
+                        value={val}
+                        onChange={(e) => patchEntry(detailIdx, f.key, e.target.value)}
+                      />
+                    ) : (
+                      <input
+                        value={val}
+                        onChange={(e) => patchEntry(detailIdx, f.key, e.target.value)}
+                      />
+                    )}
+                  </label>
+                );
+              })}
               {FMEA_IMAGE_FIELDS.map((f) => (
-                <label className="field" key={f.key}>
-                  <span className="mat-field-label">
-                    <span className="mat-field-name">{f.label}</span>
-                    <span className="mat-field-unit">选填</span>
-                  </span>
-                  <input
+                <div className="field image" key={f.key}>
+                  <FmeaImageInput
+                    label={f.label}
                     value={entries[detailIdx].draft[f.key]}
-                    onChange={(e) => patchEntry(detailIdx, f.key, e.target.value)}
+                    onChange={(v) => patchEntry(detailIdx, f.key, v)}
+                    placeholder="导入或 Ctrl+V 粘贴"
                   />
-                </label>
+                </div>
               ))}
             </div>
             {entries[detailIdx].validation.issues.length > 0 && (

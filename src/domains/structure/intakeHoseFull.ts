@@ -17,7 +17,7 @@ export const intakeHoseFull: FormulaSpec = {
   id: 'structure.intakeHoseFull',
   domain: 'structure',
   subsystem: '进气系统',
-  title: '橡胶进气软管全几何反算设计',
+  title: '★ 橡胶进气软管全几何反算设计',
   summary: '全几何反算：波距 w、波高 h 不再输入，而是按运动行程、隔振率、拔脱力、声辐射等要求与壁厚 t、波数 N、长度 L 一起反推，并逐项正算复核余量。',
   tags: ['进气软管', '波纹管', '橡胶软管', 'EPDM', '全几何反算', '波高反算', '波距反算', '行程约束', '壁厚', '波数', '隔振', '拔脱力', '管壁声辐射', 'EJMA', 'SAE J20', 'NVH', '结构设计'],
   description:

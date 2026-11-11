@@ -48,6 +48,7 @@ const KBE_ROOT = '\\\\10.1.1.245\\Knowledge & Experience Base';
 const KBE_THEORY = `${KBE_ROOT}\\Theoretical Knowledge Base`;
 const KBE_DESIGN = `${KBE_ROOT}\\Product Design Library`;
 const KBE_FMEA = `${KBE_ROOT}\\FMEA Library`;
+const KBE_TRAINING = `${KBE_ROOT}\\Training`;
 
 function libDir(libType) {
   switch (libType) {
@@ -59,6 +60,7 @@ function libDir(libType) {
     case 'theory': return KBE_THEORY;
     case 'design': return KBE_DESIGN;
     case 'fmea': return KBE_FMEA;
+    case 'training': return KBE_TRAINING;
     default: return null;
   }
 }
@@ -81,7 +83,7 @@ function isInAnyRoot(target, roots) {
 }
 
 const isDev = !app.isPackaged;
-const PRODUCT_TITLE = '汽车零部件理论计算平台';
+const PRODUCT_TITLE = '汽车零部件数字设计平台';
 /** 标准版按可执行文件名识别（打包时 productName 含「标准版」），与渲染层开关独立 */
 const WINDOW_TITLE =
   app.isPackaged && /标准版/.test(path.basename(process.execPath))
@@ -1068,7 +1070,7 @@ ipcMain.handle('material:write', async (_e, payload) => {
   }
 });
 
-/** FMEA 案例库写入：一条知识卡片一个 Parquet 文件（文件名即编号） */
+/** FMEA库写入：一条知识卡片一个 Parquet 文件（文件名即编号） */
 ipcMain.handle('fmea:write', async (_e, payload) => {
   try {
     const { record, fileName, overwrite } = payload || {};
@@ -1084,6 +1086,33 @@ ipcMain.handle('fmea:write', async (_e, payload) => {
       return { ok: false, exists: true, message: '同名 FMEA 记录已存在' };
     }
     return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 按项目筛选引用过的 FMEA 记录（扫描 KBE_FMEA 下所有 Parquet，按 citations.projectId 过滤） */
+ipcMain.handle('fmea:listByProject', async (_e, payload) => {
+  try {
+    const { projectId } = payload || {};
+    if (!projectId) return { ok: true, records: [] };
+    ensureDir(KBE_FMEA);
+    const files = fs
+      .readdirSync(KBE_FMEA)
+      .filter((n) => /\.parquet$/i.test(n))
+      .map((n) => path.join(KBE_FMEA, n));
+    const out = [];
+    for (const fp of files) {
+      try {
+        const rec = await readFmeaParquet(fp);
+        if (!rec) continue;
+        const cites = Array.isArray(rec.citations) ? rec.citations : [];
+        if (cites.some((c) => c && c.projectId === projectId)) out.push(rec);
+      } catch {
+        // 单个文件坏了跳过，不影响其他
+      }
+    }
+    return { ok: true, records: out };
+  } catch (err) {
+    return { ok: false, records: [], message: String((err && err.message) || err) };
   }
 });
 
@@ -1202,6 +1231,7 @@ ipcMain.handle('db:ping', async () => {
     kbeTheory: KBE_THEORY,
     kbeDesign: KBE_DESIGN,
     kbeFmea: KBE_FMEA,
+    kbeTraining: KBE_TRAINING,
   };
 });
 
@@ -1365,6 +1395,483 @@ ipcMain.handle('ppt:cleanup', (_e, pdfPath) => {
     const root = path.normalize(PPT_TEMP_DIR + path.sep);
     if (!p.startsWith(root)) return { ok: false, message: '仅允许清理临时目录内的文件' };
     if (fs.existsSync(p)) fs.unlinkSync(p);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 培训资料转 PDF 的 COM 脚本：按文件类型调用 Word / PowerPoint / Excel（含 WPS） */
+function officePdfScript(kind, src, dst) {
+  const q = (s) => String(s).replace(/'/g, "''");
+  const head = `
+$ErrorActionPreference = 'Stop'
+$src = '${q(src)}'
+$dst = '${q(dst)}'
+$ok = $false
+`;
+  if (kind === 'word') {
+    return `${head}
+foreach ($id in @('Word.Application','KWPS.Application')) {
+  $app = $null
+  $doc = $null
+  try {
+    $app = New-Object -ComObject $id
+    try { $app.Visible = $false } catch {}
+    $doc = $app.Documents.Open($src, $false, $true)
+    $doc.SaveAs($dst, 17)
+    $doc.Close(0)
+    $app.Quit()
+    $ok = $true
+    break
+  } catch {
+    if ($doc) { try { $doc.Close(0) } catch {} }
+    if ($app) { try { $app.Quit() } catch {} }
+  }
+}
+if ($ok) { Write-Output 'OK' } else { Write-Output 'ERR'; exit 1 }
+`;
+  }
+  if (kind === 'excel') {
+    return `${head}
+foreach ($id in @('Excel.Application','KET.Application')) {
+  $app = $null
+  $wb = $null
+  try {
+    $app = New-Object -ComObject $id
+    try { $app.Visible = $false } catch {}
+    $wb = $app.Workbooks.Open($src, 0, $true)
+    $wb.ExportAsFixedFormat(0, $dst)
+    $wb.Close($false)
+    $app.Quit()
+    $ok = $true
+    break
+  } catch {
+    if ($wb) { try { $wb.Close($false) } catch {} }
+    if ($app) { try { $app.Quit() } catch {} }
+  }
+}
+if ($ok) { Write-Output 'OK' } else { Write-Output 'ERR'; exit 1 }
+`;
+  }
+  // 演示文稿
+  return `${head}
+foreach ($id in @('PowerPoint.Application','KWPP.Application')) {
+  $app = $null
+  $pres = $null
+  try {
+    $app = New-Object -ComObject $id
+    $pres = $app.Presentations.Open($src, -1, 0, 0)
+    $pres.SaveAs($dst, 32)
+    $pres.Close()
+    $app.Quit()
+    $ok = $true
+    break
+  } catch {
+    if ($pres) { try { $pres.Close() } catch {} }
+    if ($app) { try { $app.Quit() } catch {} }
+  }
+}
+if ($ok) { Write-Output 'OK' } else { Write-Output 'ERR'; exit 1 }
+`;
+}
+
+/** 把 Office 文档转为 PDF：PDF 直接拷贝，其余先走 Office/WPS COM，再用 LibreOffice 兜底 */
+async function convertToPdf(src, dst) {
+  const ext = path.extname(src).toLowerCase().slice(1);
+  if (ext === 'pdf') {
+    fs.copyFileSync(src, dst);
+    return { ok: true };
+  }
+  const kind =
+    ['doc', 'docx', 'rtf'].includes(ext)
+      ? 'word'
+      : ['ppt', 'pptx', 'pps', 'ppsx'].includes(ext)
+        ? 'ppt'
+        : ['xls', 'xlsx', 'xlsm'].includes(ext)
+          ? 'excel'
+          : '';
+  if (!kind) return { ok: false, message: `不支持的文件格式：.${ext}` };
+
+  await runPowerShell(officePdfScript(kind, src, dst));
+
+  if (!fs.existsSync(dst) || fs.statSync(dst).size === 0) {
+    const loDir = path.join(pptTempDir(), `training-lo-${Date.now()}`);
+    ensureDir(loDir);
+    await convertWithLibreOffice(src, loDir);
+    const produced = fs.existsSync(loDir) ? fs.readdirSync(loDir).find((f) => /\.pdf$/i.test(f)) : null;
+    if (produced) {
+      try {
+        fs.renameSync(path.join(loDir, produced), dst);
+      } catch {}
+    }
+    try {
+      fs.rmSync(loDir, { recursive: true, force: true });
+    } catch {}
+  }
+
+  if (!fs.existsSync(dst) || fs.statSync(dst).size === 0) {
+    return {
+      ok: false,
+      message: '资料转 PDF 失败：未检测到可用的 Word / PowerPoint / Excel / WPS / LibreOffice',
+    };
+  }
+  return { ok: true };
+}
+
+/** 读取 PDF 前几页文字（与 test:pdfText 同一套 pdfjs 加载方式） */
+async function pdfTextPages(filePath, maxPages = 2) {
+  const pdfjsFile = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'pdfjs-dist', 'legacy', 'build', 'pdf.mjs')
+    : require.resolve('pdfjs-dist/legacy/build/pdf.mjs');
+  const { getDocument } = await import(pathToFileURL(pdfjsFile).href);
+  const data = new Uint8Array(fs.readFileSync(filePath));
+  const task = getDocument({
+    data,
+    useSystemFonts: true,
+    isEvalSupported: false,
+    useWorkerFetch: false,
+    disableFontFace: true,
+  });
+  try {
+    const doc = await task.promise;
+    const pages = Math.min(doc.numPages || 1, maxPages);
+    const parts = [];
+    for (let p = 1; p <= pages; p++) {
+      const page = await doc.getPage(p);
+      const content = await page.getTextContent();
+      parts.push(pdfLinesFromItems(content.items));
+    }
+    return parts.join('\n');
+  } finally {
+    await task.destroy();
+  }
+}
+
+function decodeXmlText(s) {
+  return String(s)
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&#(\d+);/g, (_m, d) => String.fromCharCode(Number(d)))
+    .replace(/&#x([0-9a-f]+);/gi, (_m, h) => String.fromCharCode(parseInt(h, 16)));
+}
+
+/** DOCX 封面文字：直接解析正文（无需安装 Office） */
+async function docxCoverText(file) {
+  const mammoth = require('mammoth');
+  const res = await mammoth.extractRawText({ path: file });
+  return String((res && res.value) || '');
+}
+
+/** PPTX 封面文字：读取前 3 页幻灯片的文本框 */
+async function pptxCoverText(file) {
+  const JSZip = require('jszip');
+  const zip = await JSZip.loadAsync(fs.readFileSync(file));
+  const slides = Object.keys(zip.files)
+    .map((name) => ({ name, m: name.match(/^ppt\/slides\/slide(\d+)\.xml$/i) }))
+    .filter((x) => x.m && !zip.files[x.name].dir)
+    .sort((a, b) => Number(a.m[1]) - Number(b.m[1]))
+    .slice(0, 3);
+  const out = [];
+  for (const s of slides) {
+    const xml = await zip.file(s.name).async('string');
+    const texts = [];
+    for (const m of xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)) texts.push(decodeXmlText(m[1]));
+    out.push(texts.join('\n'));
+  }
+  return out.join('\n');
+}
+
+/** XLSX / XLS 封面文字：读取第一个工作表前 20 行 */
+function xlsxCoverText(file) {
+  const XLSX = require('xlsx');
+  const wb = XLSX.readFile(file);
+  const name = wb.SheetNames[0];
+  const sheet = name ? wb.Sheets[name] : null;
+  if (!sheet) return '';
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+  return rows
+    .slice(0, 20)
+    .map((row) => row.map((cell) => String(cell == null ? '' : cell)).join(' '))
+    .join('\n');
+}
+
+/**
+ * 培训资料封面文字提取（用于自动识别培训人与培训时间）。
+ * 新格式直接解析，旧版二进制 Office 先转 PDF 再读前两页；取不到文字时返回空串，由界面沿用文件名识别结果。
+ */
+async function trainingCoverText(src) {
+  const ext = path.extname(src).toLowerCase();
+  if (ext === '.pdf') return pdfTextPages(src, 2);
+  if (ext === '.docx') return docxCoverText(src);
+  if (ext === '.pptx' || ext === '.ppsx') return pptxCoverText(src);
+  if (ext === '.xlsx' || ext === '.xlsm' || ext === '.xls') return xlsxCoverText(src);
+  if (ext === '.doc' || ext === '.rtf' || ext === '.ppt' || ext === '.pps') {
+    const dir = path.join(os.tmpdir(), 'ctr-training-cover');
+    ensureDir(dir);
+    const dst = path.join(dir, `cover-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pdf`);
+    try {
+      const conv = await convertToPdf(src, dst);
+      if (!conv.ok) return '';
+      return await pdfTextPages(dst, 2);
+    } finally {
+      try {
+        if (fs.existsSync(dst)) fs.unlinkSync(dst);
+      } catch {}
+    }
+  }
+  return '';
+}
+
+/** 培训资料封面文字：返回原始文本，由渲染进程解析培训人与培训时间 */
+ipcMain.handle('training:extractCover', async (_e, filePath) => {
+  try {
+    const src = String(filePath || '');
+    if (!src || !fs.existsSync(src)) return { ok: false, message: '文件不存在或无法访问' };
+    const text = String((await trainingCoverText(src)) || '').replace(/\r/g, '');
+    return { ok: true, text: text.slice(0, 6000) };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 培训资料编号：TR-年份-序号，按现有 JSON 记录递增 */
+function nextTrainingId() {
+  ensureDir(KBE_TRAINING);
+  const year = new Date().getFullYear();
+  const re = new RegExp(`^TR-${year}-(\\d{3,})\\.json$`, 'i');
+  let max = 0;
+  for (const n of fs.readdirSync(KBE_TRAINING)) {
+    const m = n.match(re);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `TR-${year}-${String(max + 1).padStart(3, '0')}`;
+}
+
+/** 培训资料导入：转 PDF、写元数据 JSON，一条资料 = 一个 PDF + 一个 JSON */
+ipcMain.handle('training:import', async (_e, payload) => {
+  let pdfPath = '';
+  try {
+    const { srcPath, title, trainer, trainedAt, category, createdBy, createdByDisplay } = payload || {};
+    const src = String(srcPath || '');
+    if (!src || !fs.existsSync(src)) return { ok: false, message: '培训资料不存在或无法访问' };
+    const titleText = String(title || '').trim();
+    if (!titleText) return { ok: false, message: '培训资料名不能为空' };
+    ensureDir(KBE_TRAINING);
+    const id = nextTrainingId();
+    const pdfName = `${id}.pdf`;
+    pdfPath = path.join(KBE_TRAINING, pdfName);
+
+    const conv = await convertToPdf(src, pdfPath);
+    if (!conv.ok) return { ok: false, message: conv.message || '转换失败' };
+
+    const record = {
+      schema: 'ctr-training-v1',
+      id,
+      title: titleText,
+      trainer: String(trainer || '').trim(),
+      trainedAt: String(trainedAt || '').trim(),
+      category: String(category || '').trim(),
+      sourceName: path.basename(src),
+      sourceFormat: path.extname(src).toLowerCase().slice(1),
+      pdfName,
+      createdAt: new Date().toISOString(),
+      createdBy: String(createdBy || ''),
+      createdByDisplay: String(createdByDisplay || ''),
+    };
+    fs.writeFileSync(path.join(KBE_TRAINING, `${id}.json`), JSON.stringify(record, null, 2), 'utf8');
+    return { ok: true, record, pdfPath, dir: KBE_TRAINING };
+  } catch (err) {
+    try {
+      if (pdfPath && fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
+    } catch {}
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 培训资料列表：读取目录内 TR-*.json，并补上 PDF 路径 */
+ipcMain.handle('training:list', async () => {
+  try {
+    if (!fs.existsSync(KBE_TRAINING)) return { ok: true, dir: KBE_TRAINING, records: [] };
+    const records = [];
+    for (const n of fs.readdirSync(KBE_TRAINING)) {
+      if (!/^TR-\d{4}-\d{3,}\.json$/i.test(n)) continue;
+      try {
+        const rec = JSON.parse(fs.readFileSync(path.join(KBE_TRAINING, n), 'utf8'));
+        if (!rec || !rec.id) continue;
+        const pdfPath = path.join(KBE_TRAINING, rec.pdfName || `${rec.id}.pdf`);
+        records.push({ ...rec, pdfPath, pdfExists: fs.existsSync(pdfPath) });
+      } catch {}
+    }
+    records.sort(
+      (a, b) => String(b.trainedAt || '').localeCompare(String(a.trainedAt || '')) || String(b.id).localeCompare(String(a.id)),
+    );
+    return { ok: true, dir: KBE_TRAINING, records };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+ipcMain.handle('training:update', async (_e, payload) => {
+  try {
+    const { id, title, trainer, trainedAt, category } = payload || {};
+    if (!id) return { ok: false, message: '缺少记录编号' };
+    const file = path.join(KBE_TRAINING, `${id}.json`);
+    if (!fs.existsSync(file)) return { ok: false, message: `找不到记录 ${id}` };
+    const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+    rec.title = String(title ?? rec.title ?? '').trim();
+    rec.trainer = String(trainer ?? rec.trainer ?? '').trim();
+    rec.trainedAt = String(trainedAt ?? rec.trainedAt ?? '').trim();
+    rec.category = String(category ?? rec.category ?? '').trim();
+    rec.updatedAt = new Date().toISOString();
+    fs.writeFileSync(file, JSON.stringify(rec, null, 2), 'utf8');
+    const pdfPath = path.join(KBE_TRAINING, rec.pdfName || `${rec.id}.pdf`);
+    return { ok: true, record: { ...rec, pdfPath, pdfExists: fs.existsSync(pdfPath) } };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+ipcMain.handle('training:delete', async (_e, payload) => {
+  try {
+    const { id } = payload || {};
+    if (!id) return { ok: false, message: '缺少记录编号' };
+    const file = path.join(KBE_TRAINING, `${id}.json`);
+    if (!fs.existsSync(file)) return { ok: false, message: `找不到记录 ${id}` };
+    const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const pdfPath = path.join(KBE_TRAINING, rec.pdfName || `${rec.id}.pdf`);
+    const thumbPath = path.join(KBE_TRAINING, `${rec.id}.png`);
+    fs.unlinkSync(file);
+    if (fs.existsSync(pdfPath)) {
+      try { fs.unlinkSync(pdfPath); } catch {}
+    }
+    if (fs.existsSync(thumbPath)) {
+      try { fs.unlinkSync(thumbPath); } catch {}
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 知识理论编号：TH-年份-序号，按现有 JSON 记录递增 */
+function nextTheoryId() {
+  ensureDir(KBE_THEORY);
+  const year = new Date().getFullYear();
+  const re = new RegExp(`^TH-${year}-(\\d{3,})\\.json$`, 'i');
+  let max = 0;
+  for (const n of fs.readdirSync(KBE_THEORY)) {
+    const m = n.match(re);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `TH-${year}-${String(max + 1).padStart(3, '0')}`;
+}
+
+/** 知识理论导入：PPT / Word / PDF 统一转为 PDF，并写入同名元数据 JSON */
+ipcMain.handle('theory:import', async (_e, payload) => {
+  let pdfPath = '';
+  try {
+    const { srcPath, title, author, publishedAt, category, createdBy, createdByDisplay } = payload || {};
+    const src = String(srcPath || '');
+    if (!src || !fs.existsSync(src)) return { ok: false, message: '文件不存在或无法访问' };
+    const titleText = String(title || '').trim();
+    if (!titleText) return { ok: false, message: '资料名不能为空' };
+    const authorText = String(author || '').trim();
+    if (!authorText) return { ok: false, message: '作者不能为空' };
+    ensureDir(KBE_THEORY);
+    const id = nextTheoryId();
+    const pdfName = `${id}.pdf`;
+    pdfPath = path.join(KBE_THEORY, pdfName);
+
+    const conv = await convertToPdf(src, pdfPath);
+    if (!conv.ok) return { ok: false, message: conv.message || '转换失败' };
+
+    const record = {
+      schema: 'ctr-theory-v1',
+      id,
+      title: titleText,
+      author: authorText,
+      publishedAt: String(publishedAt || '').trim(),
+      category: String(category || '').trim(),
+      sourceName: path.basename(src),
+      sourceFormat: path.extname(src).toLowerCase().slice(1),
+      pdfName,
+      createdAt: new Date().toISOString(),
+      createdBy: String(createdBy || ''),
+      createdByDisplay: String(createdByDisplay || ''),
+    };
+    fs.writeFileSync(path.join(KBE_THEORY, `${id}.json`), JSON.stringify(record, null, 2), 'utf8');
+    return { ok: true, record, pdfPath, dir: KBE_THEORY };
+  } catch (err) {
+    try {
+      if (pdfPath && fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
+    } catch {}
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 知识理论列表：读取目录内 TH-*.json，并补上 PDF 路径 */
+ipcMain.handle('theory:list', async () => {
+  try {
+    if (!fs.existsSync(KBE_THEORY)) return { ok: true, dir: KBE_THEORY, records: [] };
+    const records = [];
+    for (const n of fs.readdirSync(KBE_THEORY)) {
+      if (!/^TH-\d{4}-\d{3,}\.json$/i.test(n)) continue;
+      try {
+        const rec = JSON.parse(fs.readFileSync(path.join(KBE_THEORY, n), 'utf8'));
+        if (!rec || !rec.id) continue;
+        const pdfPath = path.join(KBE_THEORY, rec.pdfName || `${rec.id}.pdf`);
+        records.push({ ...rec, pdfPath, pdfExists: fs.existsSync(pdfPath) });
+      } catch {}
+    }
+    records.sort(
+      (a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')) || String(b.id).localeCompare(String(a.id)),
+    );
+    return { ok: true, dir: KBE_THEORY, records };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+ipcMain.handle('theory:update', async (_e, payload) => {
+  try {
+    const { id, title, author, publishedAt, category } = payload || {};
+    if (!id) return { ok: false, message: '缺少记录编号' };
+    const file = path.join(KBE_THEORY, `${id}.json`);
+    if (!fs.existsSync(file)) return { ok: false, message: `找不到记录 ${id}` };
+    const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const titleText = String(title ?? rec.title ?? '').trim();
+    if (!titleText) return { ok: false, message: '资料名不能为空' };
+    const authorText = String(author ?? rec.author ?? '').trim();
+    if (!authorText) return { ok: false, message: '作者不能为空' };
+    rec.title = titleText;
+    rec.author = authorText;
+    rec.publishedAt = String(publishedAt ?? rec.publishedAt ?? '').trim();
+    rec.category = String(category ?? rec.category ?? '').trim();
+    rec.updatedAt = new Date().toISOString();
+    fs.writeFileSync(file, JSON.stringify(rec, null, 2), 'utf8');
+    const pdfPath = path.join(KBE_THEORY, rec.pdfName || `${rec.id}.pdf`);
+    return { ok: true, record: { ...rec, pdfPath, pdfExists: fs.existsSync(pdfPath) } };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+ipcMain.handle('theory:delete', async (_e, payload) => {
+  try {
+    const { id } = payload || {};
+    if (!id) return { ok: false, message: '缺少记录编号' };
+    const file = path.join(KBE_THEORY, `${id}.json`);
+    if (!fs.existsSync(file)) return { ok: false, message: `找不到记录 ${id}` };
+    const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const pdfPath = path.join(KBE_THEORY, rec.pdfName || `${rec.id}.pdf`);
+    fs.unlinkSync(file);
+    if (fs.existsSync(pdfPath)) {
+      try { fs.unlinkSync(pdfPath); } catch {}
+    }
     return { ok: true };
   } catch (err) {
     return { ok: false, message: String((err && err.message) || err) };

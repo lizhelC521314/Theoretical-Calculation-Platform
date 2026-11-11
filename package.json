@@ -1,6 +1,6 @@
 {
   "name": "ctr-calc",
-  "productName": "汽车零部件理论计算平台",
+  "productName": "汽车零部件数字设计平台",
   "version": "0.1.0",
   "private": true,
   "description": "面向汽车零部件设计与 CAE 工程师的理论公式计算平台",
@@ -23,6 +23,7 @@
     "echarts": "^5.5.0",
     "exceljs": "^4.4.0",
     "html2canvas": "^1.4.1",
+    "jszip": "^3.10.2",
     "katex": "^0.16.11",
     "mammoth": "^1.13.0",
     "parquetjs-lite": "^0.8.7",

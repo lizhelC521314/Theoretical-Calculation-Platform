@@ -18,6 +18,7 @@ export async function exportReport(
   project: Project | null,
   user: CtrUser,
   format: ReportFormat,
+  fmeaRecords?: unknown[],
 ): Promise<{ ok: boolean; canceled?: boolean }> {
   const model = buildReportModel(records, project, user);
   // 关键：所有公式统一在渲染进程中用 KaTeX + html2canvas 转成 PNG，
@@ -25,10 +26,10 @@ export async function exportReport(
   await preRenderFormulaImages(model);
   const name = reportFileName(project);
   if (format === 'docx') {
-    const base64 = await buildDocxBase64(model);
+    const base64 = await buildDocxBase64(model, fmeaRecords);
     return api.file.saveDocx({ defaultName: `${name}.docx`, base64 });
   }
-  const html = buildPdfHtml(model);
+  const html = buildPdfHtml(model, fmeaRecords);
   return api.file.savePdf({ defaultName: `${name}.pdf`, html });
 }
 
@@ -40,9 +41,10 @@ export async function exportSummaryExcel(
   records: HistoryEntry[],
   project: Project | null,
   user: CtrUser,
+  fmeaRecords?: unknown[],
 ): Promise<{ ok: boolean; canceled?: boolean }> {
   const model = buildReportModel(records, project, user);
-  const base64 = await buildSummaryXlsxBase64(model);
+  const base64 = await buildSummaryXlsxBase64(model, fmeaRecords);
   return api.file.saveXlsx({ defaultName: `${reportFileName(project)}.xlsx`, base64 });
 }
 
@@ -54,9 +56,10 @@ export async function archiveSummaryExcel(
   records: HistoryEntry[],
   project: Project | null,
   user: CtrUser,
+  fmeaRecords?: unknown[],
 ): Promise<{ ok: boolean; message?: string; filePath?: string }> {
   const model = buildReportModel(records, project, user);
-  const base64 = await buildSummaryXlsxBase64(model);
+  const base64 = await buildSummaryXlsxBase64(model, fmeaRecords);
   const name = archiveFileName(model.projectName || '', model.product || '', model.productVersion, model.dateShort);
   return api.db.archive({ base64, fileName: name, libType: 'calc' });
 }

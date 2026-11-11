@@ -312,6 +312,20 @@ select {
 .field input:focus {
   border-color: var(--blue);
 }
+.mat-custom-input {
+  width: 100%;
+  margin-top: 6px;
+  padding: 7px 10px;
+  border: 1px dashed #b8cce4;
+  border-radius: 5px;
+  font-size: 13px;
+  outline: none;
+  background: #fafcff;
+}
+.mat-custom-input:focus {
+  border-color: var(--blue);
+  border-style: solid;
+}
 .login-error {
   background: #fdecea;
   color: var(--danger);
@@ -2435,7 +2449,7 @@ select {
 .partial-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: #43566c; }
 .partial-check select { height: 28px; border: 1px solid var(--border); border-radius: 6px; background: #fff; padding: 0 6px; }
 
-/* ---------- FMEA 案例库 ---------- */
+/* ---------- FMEA库 ---------- */
 .fmea-page {
   display: flex;
   flex-direction: column;
@@ -2505,6 +2519,301 @@ select {
   line-height: 16px;
   font-size: 10.5px;
 }
+.fmea-cat {
+  background: #eef7f0;
+  color: #1f6b3a;
+  border-radius: 9px;
+  padding: 0 7px;
+  line-height: 16px;
+  font-size: 10.5px;
+}
+.fmea-sys {
+  color: #5b7089;
+  font-weight: 600;
+  margin-right: 4px;
+}
+.fmea-risk {
+  border-radius: 9px;
+  padding: 0 7px;
+  line-height: 16px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fmea-risk.high {
+  background: #fde8e6;
+  color: #b03030;
+}
+.fmea-risk.mid {
+  background: #fff4e5;
+  color: #a86400;
+}
+.fmea-risk.low {
+  background: #eaf5ec;
+  color: #1f6b3a;
+}
+.fmea-risk-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 0 4px;
+}
+.fmea-risk-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.fmea-risk-chip {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--muted);
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-size: 11.5px;
+}
+.fmea-risk-chip.active {
+  border-color: var(--blue);
+  color: var(--blue);
+  background: var(--blue-light);
+  font-weight: 600;
+}
+.fmea-hl {
+  background: #fff1a8;
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+.fmea-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 0 10px;
+  border-bottom: 1px dashed #e6edf5;
+  margin-bottom: 10px;
+}
+.fmea-cite {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.fmea-conclusion {
+  background: var(--blue-light);
+  border-left: 3px solid var(--blue);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+.fmea-conclusion-label {
+  font-size: 11px;
+  color: var(--blue-deep);
+  font-weight: 700;
+}
+.fmea-conclusion p {
+  margin: 2px 0 0;
+  font-size: 13.5px;
+  color: #123a63;
+  line-height: 1.55;
+}
+.fmea-bullets {
+  margin: 0;
+  padding-left: 16px;
+}
+.fmea-bullets li {
+  margin: 2px 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.fmea-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.fmea-table th,
+.fmea-table td {
+  border: 1px solid #e6edf5;
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.fmea-table th {
+  background: #f7fafd;
+  color: #4d657f;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fmea-cites {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fmea-cites li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  padding: 4px 0;
+  border-bottom: 1px dashed #eef2f7;
+}
+.fmea-cites li span {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.fmea-similar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fmea-sim-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #e6edf5;
+  background: #fff;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.fmea-sim-item:hover {
+  border-color: var(--blue);
+  background: var(--blue-light);
+}
+.fmea-sim-mode {
+  flex: 1;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fmea-sim-meta {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.fmea-sim-id {
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+  color: #6b7f96;
+}
+.fmea-image-note {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: #a86400;
+  background: #fff7e8;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.fmea-img-input {
+  border: 1px dashed #c6d3e4;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #fbfdff;
+  cursor: text;
+  transition: border-color 0.15s, background 0.15s;
+  outline: none;
+}
+.fmea-img-input.focused {
+  border-color: var(--blue);
+  background: #f4f8ff;
+  box-shadow: 0 0 0 2px rgba(26, 95, 180, 0.08);
+}
+.fmea-img-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.fmea-img-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.fmea-img-body {
+  min-height: 48px;
+}
+.fmea-img-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 0;
+  text-align: center;
+  border-top: 1px dashed #e2e8f0;
+}
+.fmea-img-placeholder {
+  color: #a86400;
+  font-size: 12px;
+  padding: 6px 8px;
+  background: #fff7e8;
+  border-radius: 4px;
+  display: inline-block;
+}
+.fmea-img-text {
+  font-size: 12.5px;
+  color: var(--text);
+  padding: 6px 8px;
+  background: #eef4ff;
+  border-radius: 4px;
+  white-space: pre-wrap;
+}
+.fmea-img-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--danger);
+  background: #fdecea;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.fmea-img-preview {
+  position: relative;
+  display: inline-block;
+  margin-top: 4px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #d6e3f3;
+  background: #fbfdff;
+}
+.fmea-img-preview-label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 4px 6px;
+  background: #f3f6fa;
+  border-bottom: 1px solid #e2e8f0;
+}
+.fmea-img-preview img,
+.fmea-img-input .fmea-img-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+}
+.fmea-img-input .fmea-img-preview img {
+  max-height: 140px;
+}
+.fmea-img-size {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  font-size: 10.5px;
+  color: #4a5f78;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+.fmea-chain-text .fmea-img-preview,
+.fmea-block td .fmea-img-preview {
+  display: block;
+  margin-top: 8px;
+}
+.field.image {
+  grid-column: span 2;
+}
+.fmea-item-top {
+  flex-wrap: wrap;
+}
 .fmea-item-part {
   margin: 3px 0 2px;
   font-size: 13px;
@@ -2543,6 +2852,31 @@ select {
   padding: 14px 16px;
   overflow: auto;
   min-height: 0;
+}
+/* 中缝拖动条：两侧区域可自由调整宽窄 */
+.theory-splitter {
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+}
+.theory-splitter::after {
+  content: '';
+  position: absolute;
+  top: 12%;
+  bottom: 12%;
+  left: 3px;
+  width: 2px;
+  border-radius: 2px;
+  background: #dde5ef;
+  transition: background 0.15s;
+}
+.theory-splitter:hover::after,
+body.col-resizing .theory-splitter::after {
+  background: var(--accent, #2f6fed);
+}
+body.col-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 .fmea-detail-head {
   border-bottom: 1px solid #eef2f7;
@@ -2690,4 +3024,315 @@ select {
   background: #fdecea;
   color: var(--danger);
   font-weight: 600;
+}
+
+/* ---------- 培训 ---------- */
+.training-path {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.training-path .mono {
+  color: var(--text);
+}
+.training-import-card {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.training-import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.training-import-head,
+.training-import-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.3fr) 110px 140px 104px minmax(140px, 1fr) minmax(160px, 1.2fr) 56px;
+  gap: 8px;
+  align-items: center;
+}
+.training-import-head {
+  padding: 4px 2px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.training-import-row {
+  padding: 6px 2px;
+  border-bottom: 1px dashed var(--border);
+}
+.training-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+}
+.training-input.date {
+  width: 132px;
+}
+.training-input:disabled {
+  opacity: 0.65;
+}
+.training-source {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.training-state {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.training-state.ok {
+  color: var(--ok);
+}
+.training-state.err {
+  color: var(--danger);
+}
+.training-date-sep {
+  font-size: 12px;
+  color: var(--muted);
+}
+.training-page .fmea-detail {
+  overflow: auto;
+}
+
+/* ---------- FMEA 产品结构树 ---------- */
+.fmea-tree-card {
+  margin-top: 12px;
+}
+.fmea-tree-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.fmea-tree-head h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--blue-deep);
+}
+.fmea-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fmea-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: #f7fafd;
+  border-radius: 6px;
+  padding: 7px 10px;
+  text-align: left;
+  color: var(--text);
+  font-size: 13px;
+}
+.fmea-tree-row:hover {
+  background: var(--blue-light);
+}
+.fmea-tree-row.system {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: #fff;
+  background: linear-gradient(90deg, var(--blue) 0%, #2a72c8 100%);
+  border-radius: 4px;
+  margin: 2px 0 4px;
+  padding-left: 10px;
+}
+.fmea-tree-row.system:hover {
+  background: linear-gradient(90deg, #0d4da0 0%, #2062b2 100%);
+}
+.fmea-tree-row.system .fmea-tree-chev {
+  color: #fff;
+}
+.fmea-tree-row.system .fmea-tree-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+.fmea-tree-system {
+  margin-bottom: 6px;
+}
+.fmea-tree-row.major {
+  font-weight: 600;
+  color: var(--blue-deep);
+  border-left: 3px solid var(--blue);
+}
+.fmea-tree-row.minor {
+  background: #fbfcfe;
+  padding-left: 30px;
+  font-size: 12.5px;
+}
+.fmea-tree-chev {
+  width: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.fmea-tree-code {
+  min-width: 34px;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  color: var(--blue);
+}
+.fmea-tree-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fmea-tree-count {
+  min-width: 28px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 12px;
+}
+.fmea-tree-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 4px 44px;
+}
+.fmea-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid transparent;
+  background: #fff;
+  border-radius: 5px;
+  padding: 5px 8px;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.fmea-tree-item:hover {
+  border-color: #cddff5;
+  background: #f7fbff;
+}
+.fmea-tree-item.active {
+  border-color: var(--blue);
+  background: var(--blue-light);
+}
+.fmea-tree-item.matched {
+  background: #fff8e6;
+  box-shadow: inset 3px 0 0 #f59e0b;
+}
+.fmea-tree-item.active.matched {
+  background: var(--blue-light);
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+.fmea-tree-item-mode {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fmea-tree-system {
+  flex-shrink: 0;
+  margin: 0 4px;
+  color: #3e6b9c;
+  font-size: 12px;
+  background: #e8f0fb;
+  border-radius: 3px;
+  padding: 0 5px;
+  height: 18px;
+  line-height: 18px;
+}
+.fmea-tree-item-meta {
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.fmea-tree-item .fmea-tree-chev.small {
+  width: 14px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.fmea-tree-item-wrap {
+  display: flex;
+  flex-direction: column;
+}
+.fmea-detail-inline {
+  margin: 4px 0 4px 40px;
+  padding: 14px 16px;
+  border: 1px solid #d6e3f3;
+  border-radius: 6px;
+  background: #fafcff;
+}
+.fmea-body {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 12px;
+  margin-top: 10px;
+  min-height: 500px;
+}
+.fmea-tree-left {
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+  margin: 0;
+}
+.fmea-tree-left .fmea-tree-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+}
+.fmea-detail-right {
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin: 0;
+}
+.fmea-tree-root .fmea-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fmea-tree-root .fmea-tree-row {
+  padding: 8px 12px;
+}
+.fmea-tree-root .fmea-tree-items {
+  padding-left: 28px;
+  gap: 3px;
+}
+.fmea-use.small {
+  font-size: 11px;
+  color: var(--blue);
+  padding: 0 5px;
+  border-radius: 8px;
+  background: #eaf2ff;
+  white-space: nowrap;
+}
+.fmea-code {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11.5px;
+  line-height: 18px;
+  background: #e8f0fe;
+  color: var(--blue-deep);
+  font-weight: 600;
+  margin-right: 6px;
+}
+.fmea-code.cause {
+  background: #f1f5f9;
+  color: #475569;
+  font-weight: 500;
 }

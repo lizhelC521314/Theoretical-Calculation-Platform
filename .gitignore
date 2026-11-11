@@ -41,3 +41,12 @@ Desktop.ini
 公式梳理/~$*
 公式梳理/*.pdf
 .trae-html-share-packages/
+
+# === 临时调试文件（不入库） ===
+.tmp-pdf-test.out.txt
+_extract_docx.py
+_fmea_plan_extracted.txt
+__pycache__/
+资料/
+~$*
+*.docx.bak

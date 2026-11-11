@@ -3,7 +3,6 @@ import { api, type CtrUser } from '../api';
 import { UNC_CALC_LIB } from '../report/db';
 
 interface Props { user: CtrUser; }
-type Tab = 'theory' | 'design' | 'fmea';
 
 interface DbFile { name: string; size: number; mtime: string; fullPath: string; }
 
@@ -13,10 +12,9 @@ function parseArchiveName(name: string) {
   return { project: parts[0] || '', product: parts[1] || '', version: parts[2] || '', date: parts[3] || '' };
 }
 
-/** 知识经验库：三个子库的浏览与文件卡片，结构与产品数据库页同构 */
+/** 产品设计库：浏览 Knowledge & Experience Base 下 Product Design Library 的归档文件 */
 export function KnowledgeBasePage({ user }: Props) {
-  const [tab, setTab] = useState<Tab>('theory');
-  const [ping, setPing] = useState<{ reachable: boolean; kbeRoot: string; kbeTheory: string; kbeDesign: string; kbeFmea: string } | null>(null);
+  const [ping, setPing] = useState<{ reachable: boolean; kbeRoot: string; kbeDesign: string } | null>(null);
   const [files, setFiles] = useState<DbFile[]>([]);
   const [toast, setToast] = useState('');
 
@@ -31,26 +29,18 @@ export function KnowledgeBasePage({ user }: Props) {
     setPing({
       reachable: pingRes.reachable,
       kbeRoot: pingRes.kbeRoot,
-      kbeTheory: pingRes.kbeTheory,
       kbeDesign: pingRes.kbeDesign,
-      kbeFmea: pingRes.kbeFmea,
     });
-    const res = await api.db.list({ libType: tab });
+    const res = await api.db.list({ libType: 'design' });
     if (res.ok) setFiles(res.files || []);
-  }, [tab]);
+  }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
-
-  const tabs: { key: Tab; label: string; dir: string }[] = [
-    { key: 'theory', label: '理论知识库', dir: ping?.kbeTheory ?? '' },
-    { key: 'design', label: '产品设计库', dir: ping?.kbeDesign ?? '' },
-    { key: 'fmea', label: 'FMEA 库', dir: ping?.kbeFmea ?? '' },
-  ];
 
   return (
     <div className="db-page">
       <div className="settings-card">
-        <h3>知识经验库</h3>
+        <h3>产品设计库</h3>
         <div className="kv">
           <span>服务器</span>
           <b>{ping === null ? '检测中…' : ping.reachable ? '可达' : '不可达，请检查网络或 UNC 路径'}</b>
@@ -59,50 +49,25 @@ export function KnowledgeBasePage({ user }: Props) {
         <div className="kv"><span>知识经验库根</span><b style={{ fontSize: 12 }}>{ping?.kbeRoot || '\\\\10.1.1.245\\Knowledge & Experience Base'}</b></div>
         <div className="kv"><span>当前登录</span><b>{user.displayName || user.username}</b></div>
         <div className="db-stats">
-          <span className="chip">理论知识库 {tab === 'theory' ? files.length : '—'}</span>
-          <span className="chip">产品设计库 {tab === 'design' ? files.length : '—'}</span>
-          <span className="chip">FMEA 库 {tab === 'fmea' ? files.length : '—'}</span>
+          <span className="chip">产品设计库 {files.length}</span>
           <button className="btn-ghost sm" onClick={refresh}>刷新</button>
         </div>
-      </div>
-
-      <div className="lib-tabs">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            className={tab === t.key ? 'tab-btn active' : 'tab-btn'}
-            onClick={() => setTab(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
       </div>
 
       {ping && (
         <div className="settings-card kv" style={{ marginTop: 12 }}>
           <span>当前库路径</span>
-          <b style={{ fontSize: 12, color: 'var(--muted)' }}>{tabs.find((t) => t.key === tab)?.dir}</b>
+          <b style={{ fontSize: 12, color: 'var(--muted)' }}>{ping.kbeDesign}</b>
         </div>
       )}
 
-      {tab === 'fmea' && (
-        <div className="settings-card" style={{ marginTop: 12 }}>
-          <h3>FMEA 已改为知识卡片检索</h3>
-          <p className="settings-hint">
-            每条 FMEA 存为一张独立卡片（FM-年份-序号.parquet），请在左侧「FMEA 案例库 → FMEA 检索」中按机种、部件、失效模式、材料检索，
-            一屏查看「失效起因 → 失效模式 → 失效后果 → 建议措施」；管理员在「FMEA 导入」中批量导入《FMEA 案例收集》Excel。
-          </p>
-        </div>
-      )}
-
-      {tab !== 'fmea' && <div className="file-list">
+      <div className="file-list">
         {files.length === 0 && (
           <div className="settings-card">
             <h3>暂无归档文件</h3>
             <p className="settings-hint">
-              当前子库还没有内容。产品数据库下的归档路径：
-              理论计算 → 计算库；实验测试 → 实验库；可信资产 → 可信资产库。
-              本模块先作为知识库根目录浏览入口，后续可按子库类型归档 Word / PDF / Excel 经验文档。
+              产品设计库还没有内容。理论知识请在左侧「知识经验库 → 知识理论」中导入与检索；
+              FMEA 请在「知识经验库 → FMEA库」中检索。
             </p>
           </div>
         )}
@@ -126,7 +91,7 @@ export function KnowledgeBasePage({ user }: Props) {
             </div>
           );
         })}
-      </div>}
+      </div>
 
       {toast && <div className="toast">{toast}</div>}
     </div>

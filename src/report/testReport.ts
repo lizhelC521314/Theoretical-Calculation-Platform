@@ -712,7 +712,7 @@ export function testReportFileName(meta: TestReportMeta): string {
  */
 export async function buildTestXlsxBase64(meta: TestReportMeta, items: TestItem[]): Promise<string> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = '理论计算平台';
+  wb.creator = '数字设计平台';
   wb.created = new Date();
 
   const ws = wb.addWorksheet('试验测试表', {

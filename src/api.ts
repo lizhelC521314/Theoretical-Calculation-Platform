@@ -119,7 +119,7 @@ interface CtrApi {
     readText(p: { fullPath: string }): Promise<{ ok: boolean; text?: string; message?: string }>;
     pdfData(filePath: string): Promise<{ ok: boolean; fileUrl?: string; size?: number; message?: string }>;
     remove(p: { fullPath: string }): Promise<{ ok: boolean; message?: string }>;
-    ping(): Promise<{ reachable: boolean; root: string; calc: string; test: string; trusted: string; cae: string; material: string; kbeRoot: string; kbeTheory: string; kbeDesign: string; kbeFmea: string }>;
+    ping(): Promise<{ reachable: boolean; root: string; calc: string; test: string; trusted: string; cae: string; material: string; kbeRoot: string; kbeTheory: string; kbeDesign: string; kbeFmea: string; kbeTraining: string }>;
   };
   material: {
     /** 材料库：以 Apache Parquet 写入一条记录 */
@@ -132,7 +132,7 @@ interface CtrApi {
     }>;
   };
   fmea: {
-    /** FMEA 案例库：一张知识卡片写入一个 Parquet 文件 */
+    /** FMEA库：一张知识卡片写入一个 Parquet 文件 */
     write(p: { record: unknown; fileName: string; overwrite?: boolean }): Promise<{
       ok: boolean;
       exists?: boolean;
@@ -140,6 +140,62 @@ interface CtrApi {
       targetDir?: string;
       message?: string;
     }>;
+    /** FMEA库：按项目 id 筛选所有被该项目引用过的 FMEA 记录 */
+    listByProject(p: { projectId: string }): Promise<{
+      ok: boolean;
+      records?: unknown[];
+      message?: string;
+    }>;
+  };
+  theory: {
+    /** 知识理论：导入 PPT / Word / PDF 并统一转 PDF，返回入库记录 */
+    import(p: {
+      srcPath: string;
+      title: string;
+      author: string;
+      publishedAt: string;
+      category?: string;
+      createdBy?: string;
+      createdByDisplay?: string;
+    }): Promise<{ ok: boolean; record?: unknown; pdfPath?: string; dir?: string; message?: string }>;
+    /** 知识理论：列出已入库资料 */
+    list(): Promise<{ ok: boolean; dir?: string; records?: unknown[]; message?: string }>;
+    /** 知识理论：更新资料名 / 作者 / 日期 / 类别 */
+    update(p: {
+      id: string;
+      title?: string;
+      author?: string;
+      publishedAt?: string;
+      category?: string;
+    }): Promise<{ ok: boolean; record?: unknown; message?: string }>;
+    /** 知识理论：删除记录及归档 PDF */
+    delete(p: { id: string }): Promise<{ ok: boolean; message?: string }>;
+  };
+  training: {
+    /** 培训：导入资料并自动转 PDF，返回入库记录 */
+    import(p: {
+      srcPath: string;
+      title: string;
+      trainer: string;
+      trainedAt: string;
+      category?: string;
+      createdBy?: string;
+      createdByDisplay?: string;
+    }): Promise<{ ok: boolean; record?: unknown; pdfPath?: string; dir?: string; message?: string }>;
+    /** 培训：列出已入库资料 */
+    list(): Promise<{ ok: boolean; dir?: string; records?: unknown[]; message?: string }>;
+    /** 培训：读取资料封面文字，用于自动识别培训人与培训时间 */
+    extractCover(filePath: string): Promise<{ ok: boolean; text?: string; message?: string }>;
+    /** 培训：更新标题 / 培训人 / 时间 / 类别 */
+    update(p: {
+      id: string;
+      title?: string;
+      trainer?: string;
+      trainedAt?: string;
+      category?: string;
+    }): Promise<{ ok: boolean; record?: unknown; message?: string }>;
+    /** 培训：删除记录及归档 PDF */
+    delete(p: { id: string }): Promise<{ ok: boolean; message?: string }>;
   };
   ppt: {
     /** 桌面版：PPT / PPTX 转文字版 PDF（PowerPoint / WPS / LibreOffice），返回临时路径与 base64 */
@@ -252,13 +308,27 @@ const fallback: CtrApi = {
     readText: async () => ({ ok: false, message: '浏览器调试模式无法读取 UNC 路径文件' }),
     pdfData: async () => ({ ok: false, message: '浏览器调试模式无法读取 UNC 路径 PDF' }),
     remove: async () => ({ ok: false, message: '浏览器调试模式无法删除服务器文件' }),
-    ping: async () => ({ reachable: false, root: '', calc: '', test: '', trusted: '', cae: '', material: '', kbeRoot: '', kbeTheory: '', kbeDesign: '', kbeFmea: '' }),
+    ping: async () => ({ reachable: false, root: '', calc: '', test: '', trusted: '', cae: '', material: '', kbeRoot: '', kbeTheory: '', kbeDesign: '', kbeFmea: '', kbeTraining: '' }),
   },
   material: {
     write: async () => ({ ok: false, message: '浏览器调试模式无法写入 UNC 路径' }),
   },
   fmea: {
     write: async () => ({ ok: false, message: '浏览器调试模式无法写入 UNC 路径' }),
+    listByProject: async () => ({ ok: false, records: [], message: '浏览器调试模式无法读取 FMEA 库' }),
+  },
+  theory: {
+    import: async () => ({ ok: false, message: '浏览器调试模式无法写入 UNC 路径' }),
+    list: async () => ({ ok: false, records: [], message: '浏览器调试模式无法读取 UNC 路径' }),
+    update: async () => ({ ok: false, message: '浏览器调试模式无法更新知识理论' }),
+    delete: async () => ({ ok: false, message: '浏览器调试模式无法删除知识理论' }),
+  },
+  training: {
+    import: async () => ({ ok: false, message: '浏览器调试模式无法写入 UNC 路径' }),
+    list: async () => ({ ok: false, records: [], message: '浏览器调试模式无法读取 UNC 路径' }),
+    extractCover: async () => ({ ok: false, message: '浏览器调试模式无法读取本地资料封面' }),
+    update: async () => ({ ok: false, message: '浏览器调试模式无法更新培训资料' }),
+    delete: async () => ({ ok: false, message: '浏览器调试模式无法删除培训资料' }),
   },
   ppt: {
     toPdf: async () => ({ ok: false, message: '浏览器调试模式不支持 PPT 转 PDF' }),

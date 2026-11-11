@@ -19,9 +19,11 @@ export const UNC_TRUSTED = `${UNC_ROOT}\\Trusted Data Asset Library`;
 export const UNC_CAE_LIB = `${UNC_ROOT}\\Virtual Verification Library`;
 export const UNC_MATERIAL_LIB = '\\\\10.1.1.245\\materials library';
 
-/** 知识经验库根目录（FMEA 案例库在其下） */
+/** 知识经验库根目录（知识理论、FMEA库、培训在其下） */
 export const KBE_ROOT = '\\\\10.1.1.245\\Knowledge & Experience Base';
+export const KBE_THEORY = `${KBE_ROOT}\\Theoretical Knowledge Base`;
 export const KBE_FMEA = `${KBE_ROOT}\\FMEA Library`;
+export const KBE_TRAINING = `${KBE_ROOT}\\Training`;
 
 /** 项目-产品-版本键：统一空格，避免因字符差异导致匹配失败 */
 export function productKey(project: string, product: string, version: string): string {
@@ -296,7 +298,7 @@ export async function buildTrustedXlsxBase64(
   const fillHeader: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCE6F4' } };
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = '理论计算平台';
+  wb.creator = '数字设计平台';
   wb.created = new Date();
 
   const ws = wb.addWorksheet('可信数据资产', {

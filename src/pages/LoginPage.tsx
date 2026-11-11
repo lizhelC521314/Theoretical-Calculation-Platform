@@ -47,7 +47,7 @@ export function LoginPage({ onLogin }: Props) {
         <h1>{BRAND.companyName}</h1>
         <h2>{BRAND.productName}</h2>
         <p className="brand-desc">
-          面向汽车零部件设计与 CAE 工程师的理论计算平台，集成流体、结构、声学、热与电池包领域的工程公式，
+          面向汽车零部件设计与 CAE 工程师的数字设计平台，集成流体、结构、NVH、热与电池包领域的工程公式，
           为产品性能与可靠性设计提供快速、可追溯的理论计算依据。
         </p>
         <ul className="brand-points">

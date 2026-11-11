@@ -21,9 +21,13 @@ import { MaterialsSearchPage } from './pages/MaterialsSearchPage';
 import { KnowledgeBasePage } from './pages/KnowledgeBasePage';
 import { FmeaImportPage } from './pages/FmeaImportPage';
 import { FmeaSearchPage } from './pages/FmeaSearchPage';
+import { TrainingImportPage } from './pages/TrainingImportPage';
+import { TrainingSearchPage } from './pages/TrainingSearchPage';
+import { TheoryImportPage } from './pages/TheoryImportPage';
+import { TheorySearchPage } from './pages/TheorySearchPage';
 import { SettingsPage } from './pages/SettingsPage';
 
-type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'materialImport' | 'materialSearch' | 'fmeaImport' | 'fmeaSearch' | 'db' | 'kbe' | 'compare' | 'settings';
+type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'materialImport' | 'materialSearch' | 'fmeaImport' | 'fmeaSearch' | 'trainingImport' | 'trainingSearch' | 'theoryImport' | 'theorySearch' | 'db' | 'kbe' | 'compare' | 'settings';
 
 interface NavLeaf { key: Page; label: string; icon?: string }
 /** 分组可嵌套：如「产品验证」下的「试验报告」子分组 */
@@ -75,21 +79,46 @@ const NAV: NavItem[] = [
       { key: 'materialSearch', label: '材料检索', icon: '🔍' },
     ],
   },
-  { key: 'kbe', label: '知识经验库', icon: '📚' },
   {
-    key: 'fmea',
-    label: 'FMEA 案例库',
-    icon: '◈',
+    key: 'kbeGroup',
+    label: '知识经验库',
+    icon: '📚',
     children: [
-      { key: 'fmeaImport', label: 'FMEA 导入', icon: '⇪' },
-      { key: 'fmeaSearch', label: 'FMEA 检索', icon: '🔍' },
+      {
+        key: 'theory',
+        label: '知识理论',
+        icon: '📖',
+        children: [
+          { key: 'theoryImport', label: '知识理论导入', icon: '⇪' },
+          { key: 'theorySearch', label: '知识理论检索', icon: '🔍' },
+        ],
+      },
+      { key: 'kbe', label: '产品设计库', icon: '📂' },
+      {
+        key: 'fmea',
+        label: 'FMEA库',
+        icon: '◈',
+        children: [
+          { key: 'fmeaImport', label: 'FMEA 导入', icon: '⇪' },
+          { key: 'fmeaSearch', label: 'FMEA 检索', icon: '🔍' },
+        ],
+      },
+      {
+        key: 'training',
+        label: '培训',
+        icon: '🎓',
+        children: [
+          { key: 'trainingImport', label: '培训资料导入', icon: '⇪' },
+          { key: 'trainingSearch', label: '培训资料检索', icon: '🔍' },
+        ],
+      },
     ],
   },
   { key: 'settings', label: '设置', icon: '⚙' },
 ];
 
 /** 标准版不提供的导入 / 校准类页面 */
-const STANDARD_HIDDEN_PAGES = new Set<Page>(['testsImport', 'lab', 'caeImport', 'materialImport', 'fmeaImport']);
+const STANDARD_HIDDEN_PAGES = new Set<Page>(['testsImport', 'lab', 'caeImport', 'materialImport', 'fmeaImport', 'trainingImport', 'theoryImport']);
 
 /** 标准版导航：剔除导入类页面，并把只剩检索项的子分组上提为直接的检索入口 */
 function standardNav(items: NavItem[]): NavItem[] {
@@ -137,7 +166,8 @@ export function App() {
   const [libDomain, setLibDomain] = useState<string | undefined>(undefined);
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(['theory', 'validation', 'virtualValidation', 'material', 'fmea']));
+  // 启动时所有模块分组默认折叠，仅一级入口可见，便于操作者快速定位
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   // 标准版兜底：隐藏页面（如旧状态残留）统一回到工作台
   useEffect(() => {
@@ -238,8 +268,12 @@ export function App() {
     materialSearch: '材料检索',
     fmeaImport: 'FMEA 导入',
     fmeaSearch: 'FMEA 检索',
+    trainingImport: '培训资料导入',
+    trainingSearch: '培训资料检索',
+    theoryImport: '知识理论导入',
+    theorySearch: '知识理论检索',
     db: '产品数据库',
-    kbe: '知识经验库',
+    kbe: '产品设计库',
     compare: '方案对比',
     settings: '设置',
   };
@@ -382,6 +416,10 @@ export function App() {
           {page === 'materialSearch' && <MaterialsSearchPage user={user} />}
           {page === 'fmeaImport' && <FmeaImportPage user={user} />}
           {page === 'fmeaSearch' && <FmeaSearchPage user={user} onOpenImport={() => setPage('fmeaImport')} />}
+          {page === 'trainingImport' && <TrainingImportPage user={user} />}
+          {page === 'trainingSearch' && <TrainingSearchPage user={user} onOpenImport={() => setPage('trainingImport')} />}
+          {page === 'theoryImport' && <TheoryImportPage user={user} />}
+          {page === 'theorySearch' && <TheorySearchPage user={user} onOpenImport={() => setPage('theoryImport')} />}
           {page === 'db' && <DatabasePage user={user} />}
           {page === 'kbe' && <KnowledgeBasePage user={user} />}
           {page === 'compare' && compare && (

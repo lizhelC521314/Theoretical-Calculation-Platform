@@ -73,8 +73,14 @@ export function ProjectsPage({ user, projects, currentProject, onSelectProject, 
     }
     setExporting(`${project?.id ?? 'temp'}-${format}`);
     try {
-      const res = await exportReport(records, project, user, format);
-      if (res.ok) showToast(format === 'docx' ? 'Word 计算书已导出' : 'PDF 计算书已导出');
+      // 查项目引用过的 FMEA，Word/PDF 计算书末尾加 FMEA 点检表
+      let fmeaRecords: unknown[] = [];
+      if (project?.id) {
+        const fmeaRes = await api.fmea.listByProject({ projectId: project.id });
+        if (fmeaRes.ok && Array.isArray(fmeaRes.records)) fmeaRecords = fmeaRes.records;
+      }
+      const res = await exportReport(records, project, user, format, fmeaRecords);
+      if (res.ok) showToast(fmeaRecords.length ? `${format === 'docx' ? 'Word' : 'PDF'} 计算书已导出（含 ${fmeaRecords.length} 条引用 FMEA）` : `${format === 'docx' ? 'Word' : 'PDF'} 计算书已导出`);
     } finally {
       setExporting('');
     }
@@ -89,8 +95,13 @@ export function ProjectsPage({ user, projects, currentProject, onSelectProject, 
     }
     setExporting(`${project?.id ?? 'temp'}-archive`);
     try {
-      const res = await archiveSummaryExcel(records, project, user);
-      if (res.ok) showToast('已归档到产品数据库');
+      let fmeaRecords: unknown[] = [];
+      if (project?.id) {
+        const fmeaRes = await api.fmea.listByProject({ projectId: project.id });
+        if (fmeaRes.ok && Array.isArray(fmeaRes.records)) fmeaRecords = fmeaRes.records;
+      }
+      const res = await archiveSummaryExcel(records, project, user, fmeaRecords);
+      if (res.ok) showToast(fmeaRecords.length ? `已归档到产品数据库（含 ${fmeaRecords.length} 条引用 FMEA）` : '已归档到产品数据库');
       else showToast(`归档失败：${res.message || '请检查 UNC 路径'}`);
     } finally {
       setExporting('');

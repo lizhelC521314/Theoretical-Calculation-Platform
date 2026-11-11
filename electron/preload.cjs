@@ -44,6 +44,20 @@ const bridge = {
   },
   fmea: {
     write: (p) => ipcRenderer.invoke('fmea:write', p),
+    listByProject: (p) => ipcRenderer.invoke('fmea:listByProject', p),
+  },
+  theory: {
+    import: (p) => ipcRenderer.invoke('theory:import', p),
+    list: () => ipcRenderer.invoke('theory:list'),
+    update: (p) => ipcRenderer.invoke('theory:update', p),
+    delete: (p) => ipcRenderer.invoke('theory:delete', p),
+  },
+  training: {
+    import: (p) => ipcRenderer.invoke('training:import', p),
+    list: () => ipcRenderer.invoke('training:list'),
+    extractCover: (filePath) => ipcRenderer.invoke('training:extractCover', filePath),
+    update: (p) => ipcRenderer.invoke('training:update', p),
+    delete: (p) => ipcRenderer.invoke('training:delete', p),
   },
   db: {
     archive: (p) => ipcRenderer.invoke('db:archive', p),

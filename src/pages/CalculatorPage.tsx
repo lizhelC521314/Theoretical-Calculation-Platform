@@ -259,9 +259,9 @@ export function CalculatorPage({ formula, user, project, onBack }: Props) {
             outputsSI={computed ? computed.outputsSI : null}
             inputsSI={computed ? computed.inputsSI : null}
           />
-          {/* 结果 → 结果曲线 → 参数敏感性分析（敏感性分析固定放最后，标准版不展示） */}
+          {/* 结果 → 结果曲线 → 参数敏感性分析（两种版本都展示） */}
           {formula.curve && computed && <CurveChart spec={formula.curve} inputsSI={computed.inputsSI} />}
-          {!IS_STANDARD && <SensitivityChart formula={formula} inputsSI={computed ? computed.inputsSI : null} />}
+          <SensitivityChart formula={formula} inputsSI={computed ? computed.inputsSI : null} />
         </div>
       </div>
 

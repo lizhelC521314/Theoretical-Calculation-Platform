@@ -10,8 +10,8 @@ export const BRAND = {
   /** 公司简称（侧栏 / 顶栏标题使用，建议 ≤4 个字） */
   companyShort: '万友滤机',
   /** 产品名称 */
-  productName: '汽车零部件理论计算平台',
-  productShort: '理论计算平台',
+  productName: '汽车零部件数字设计平台',
+  productShort: '数字设计平台',
   /** 版本号（与 package.json / 安装包一致） */
   version: '0.1.0',
   /** LOGO 文件名（位于 public/ 目录，已替换为公司白底 LOGO PNG） */
