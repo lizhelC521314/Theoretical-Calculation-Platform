@@ -2577,6 +2577,842 @@ select {
   background: var(--blue-light);
   font-weight: 600;
 }
+.fmea-ap {
+  border-radius: 9px;
+  padding: 0 7px;
+  line-height: 16px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.fmea-ap.H {
+  background: #fde8e6;
+  color: #b03030;
+  border: 1px solid #f5c6c1;
+}
+.fmea-ap.M {
+  background: #fff4e5;
+  color: #a86400;
+  border: 1px solid #f2d39a;
+}
+.fmea-ap.L {
+  background: #eaf5ec;
+  color: #1f6b3a;
+  border: 1px solid #b4dcc0;
+}
+.fmea-ap-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 2px 0 4px;
+}
+.fmea-ap-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.fmea-ap-chip {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--muted);
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-size: 11.5px;
+}
+.fmea-ap-chip.active {
+  border-color: var(--blue);
+  color: var(--blue);
+  background: var(--blue-light);
+  font-weight: 600;
+}
+
+/* ===== 导入质量清单 ===== */
+.import-analysis {
+  border: 1px solid #d4e2f2;
+  background: #f3f8fe;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 10px 0;
+}
+.ia-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ia-head h4 {
+  margin: 0;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ia-summary {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #2e5a8e;
+}
+.ia-summary.muted {
+  color: var(--muted);
+}
+.ia-family {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin: 8px 0 4px;
+  font-size: 12px;
+}
+.ia-family-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+.ia-family-chip {
+  background: #fff;
+  border: 1px solid #c0d4ea;
+  border-radius: 4px;
+  padding: 1px 8px;
+  color: #2e5a8e;
+  font-size: 11.5px;
+}
+.ia-family-chip.unclassified {
+  background: #fff9f0;
+  border-color: #f2d39a;
+  color: #a86400;
+}
+.ia-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.ia-metric {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  border: 1px solid;
+  font-size: 12px;
+}
+.ia-metric-critical {
+  background: #fde8e6;
+  border-color: #f5c6c1;
+  color: #b03030;
+}
+.ia-metric-warn {
+  background: #fff4e5;
+  border-color: #f2d39a;
+  color: #a86400;
+}
+.ia-metric-info {
+  background: #eef4fb;
+  border-color: #d4e2f2;
+  color: #2e5a8e;
+}
+.ia-metric-good {
+  background: #eaf5ec;
+  border-color: #b4dcc0;
+  color: #1f6b3a;
+}
+.ia-metric-count {
+  font-size: 16px;
+  font-weight: 700;
+  min-width: 22px;
+  text-align: right;
+}
+.ia-metric-label {
+  flex: 1;
+}
+.ia-metric-pct {
+  font-size: 10.5px;
+  opacity: 0.75;
+}
+.ia-issues {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px dashed #d4e2f2;
+}
+.ia-issues h5 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.ia-issues ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.ia-issues li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.ia-issues li:nth-child(odd) {
+  background: rgba(46, 90, 142, 0.04);
+}
+.ia-row-no {
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+  color: #6b7f96;
+  min-width: 72px;
+}
+.ia-row-mode {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.ia-row-issues {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.ia-row-tag {
+  font-size: 10px;
+  background: #fde8e6;
+  color: #b03030;
+  border: 1px solid #f5c6c1;
+  border-radius: 3px;
+  padding: 0 5px;
+}
+.ia-all-good {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: #eaf5ec;
+  border: 1px solid #b4dcc0;
+  border-radius: 5px;
+  color: #1f6b3a;
+  font-size: 12.5px;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* ===== 状态机 UI ===== */
+.fmea-status-chip {
+  display: inline-block;
+  border-radius: 10px;
+  padding: 1px 9px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  line-height: 18px;
+}
+.fmea-status-chip.sm {
+  font-size: 10.5px;
+  padding: 0 6px;
+  border-radius: 8px;
+  line-height: 15px;
+  font-weight: 500;
+}
+.fmea-status-draft {
+  background: #fff4e5;
+  color: #a86400;
+  border: 1px solid #f2d39a;
+}
+.fmea-status-review {
+  background: #eef4fb;
+  color: #2e5a8e;
+  border: 1px solid #d4e2f2;
+}
+.fmea-status-published {
+  background: #eaf5ec;
+  color: #1f6b3a;
+  border: 1px solid #b4dcc0;
+}
+.fmea-status-archived {
+  background: #f1f1f1;
+  color: #555;
+  border: 1px solid #c8c8c8;
+}
+.fmea-status-chain {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  font-weight: 400;
+}
+.fmea-arrow {
+  color: #aaa;
+  font-weight: 700;
+  font-size: 11px;
+}
+.fmea-transit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.fmea-transit-current {
+  font-size: 12px;
+  color: var(--muted);
+}
+.fmea-transit-btn {
+  font-size: 11.5px;
+}
+.fmea-transit-btn.to-review {
+  border-color: #2e5a8e;
+  color: #2e5a8e;
+}
+.fmea-transit-btn.to-published {
+  border-color: #1f6b3a;
+  color: #1f6b3a;
+}
+.fmea-transit-btn.to-draft {
+  border-color: #a86400;
+  color: #a86400;
+}
+.fmea-transit-btn.to-archived {
+  border-color: #777;
+  color: #555;
+}
+.fmea-status-history {
+  margin-top: 8px;
+  padding-top: 6px;
+}
+.fmea-status-history ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fmea-status-h-item {
+  display: grid;
+  grid-template-columns: 10px auto 1fr auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.fmea-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #aaa;
+  display: inline-block;
+}
+.fmea-status-dot.fmea-status-draft { background: #f2a341; }
+.fmea-status-dot.fmea-status-review { background: #4f84c4; }
+.fmea-status-dot.fmea-status-published { background: #3ca863; }
+.fmea-status-dot.fmea-status-archived { background: #888; }
+.fmea-status-desc {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.fmea-status-by {
+  color: #555;
+  font-weight: 500;
+}
+.fmea-status-note {
+  color: #888;
+  font-style: italic;
+  grid-column: 1 / -1;
+  padding-left: 16px;
+}
+.fmea-status-at {
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+  color: #888;
+}
+
+/* 状态快捷筛选器 */
+.fmea-status-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 2px 0 4px;
+}
+.fmea-status-filter-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.fmea-status-filter .fmea-status-chip {
+  border: 1px solid var(--border);
+  cursor: pointer;
+  opacity: 0.72;
+  transition: opacity 0.15s, box-shadow 0.15s;
+}
+.fmea-status-filter .fmea-status-chip:hover {
+  opacity: 1;
+}
+.fmea-status-filter .fmea-status-chip.active {
+  opacity: 1;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px rgba(46, 90, 142, 0.18);
+}
+.fmea-status-all {
+  background: #fff;
+  color: var(--muted);
+}
+.fmea-status-filter .fmea-status-all.active {
+  border-color: var(--blue);
+  color: var(--blue);
+  background: var(--blue-light);
+}
+
+/* ===== 视图切换：工作表 ===== */
+.fmea-page.view-worksheet .fmea-tree-left {
+  display: none;
+}
+.fmea-page.view-worksheet .fmea-detail-right {
+  flex: 1 1 100%;
+  max-width: 100%;
+}
+.fmea-view-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-left: 4px;
+}
+.fmea-view-switch button {
+  border: none;
+  background: #fff;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+}
+.fmea-view-switch button:last-child {
+  border-right: none;
+}
+.fmea-view-switch button.active {
+  background: var(--blue);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* 工作表汇总卡 */
+.fmea-worksheet-summary {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border: 1px solid #e0e7ef;
+  border-radius: 8px;
+  background: #fafbfd;
+  margin-bottom: 10px;
+}
+.ws-sum-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2px 10px;
+  min-width: 70px;
+}
+.ws-sum-num {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+.ws-sum-num.green { color: #1f6b3a; }
+.ws-sum-num.blue { color: #2e5a8e; }
+.ws-sum-num.orange { color: #a86400; }
+.ws-sum-num.red { color: #b03030; }
+.ws-sum-num.amber { color: #a86400; }
+.ws-sum-lbl {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* 工作表系统头 */
+.fmea-worksheet-system {
+  margin-bottom: 10px;
+}
+.ws-sys-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #d4e2f2;
+  border-radius: 6px;
+  background: linear-gradient(to bottom, #eef4fb, #e3ecf7);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+.ws-sys-head:hover {
+  background: linear-gradient(to bottom, #e3ecf7, #d6e3f2);
+}
+.ws-chev {
+  font-size: 11px;
+  color: #6b7f96;
+  min-width: 12px;
+}
+.ws-sys-name {
+  color: #1a3a5e;
+  flex: 1;
+}
+.ws-sys-count {
+  font-size: 12px;
+  font-weight: 500;
+  color: #555;
+  background: #fff;
+  border: 1px solid #c0d4ea;
+  border-radius: 10px;
+  padding: 0 8px;
+}
+.ws-ap-bar {
+  width: 120px;
+  height: 8px;
+  border-radius: 4px;
+  background: #eee;
+  display: flex;
+  overflow: hidden;
+}
+.ws-ap-bar .h { background: #f35b4f; }
+.ws-ap-bar .m { background: #e4a13b; }
+.ws-ap-bar .l { background: #3ca863; }
+.ws-ap-bar .u { background: #ccc; }
+.ws-ap-label {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ws-ap-label .u { color: #aaa; }
+
+/* family 组 */
+.ws-fam {
+  margin-top: 4px;
+  margin-left: 18px;
+  border-left: 2px dashed #d4e2f2;
+  padding-left: 10px;
+}
+.ws-fam-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 10px;
+  border: 1px solid #e0e7ef;
+  border-radius: 5px;
+  background: #f7f9fc;
+  font-size: 13px;
+  width: 100%;
+}
+.ws-fam-head:hover {
+  background: #eef4fb;
+}
+.ws-fam-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: inherit;
+  text-align: left;
+}
+.ws-fam-act {
+  flex: none;
+  white-space: nowrap;
+}
+.ws-fam-code {
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  color: #2e5a8e;
+  background: #e0eaf4;
+  border-radius: 3px;
+  padding: 0 4px;
+}
+.ws-fam-name {
+  flex: 1;
+  font-weight: 500;
+  color: #1a3a5e;
+}
+.ws-fam-count {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ws-ap-mini {
+  display: flex;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.ws-ap-mini .h { color: #b03030; }
+.ws-ap-mini .m { color: #a86400; }
+.ws-ap-mini .l { color: #1f6b3a; }
+.ws-ap-mini .u { color: #aaa; }
+
+/* part 组 */
+.ws-parts {
+  margin-left: 14px;
+  margin-top: 4px;
+}
+.ws-part {
+  margin-bottom: 8px;
+  border: 1px solid #e6edf5;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.ws-part-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: #fff;
+  border-bottom: 1px solid #e6edf5;
+}
+.ws-part-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #1a3a5e;
+  flex: 1;
+}
+.ws-part-count {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ws-part-act {
+  flex: none;
+  font-size: 11px;
+  white-space: nowrap;
+  color: #2e5a8e;
+  text-decoration: underline dotted;
+}
+
+/* 词表归并预览弹窗 */
+.fmea-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(18, 34, 54, 0.36);
+  padding: 24px;
+}
+.fmea-modal {
+  width: min(760px, 100%);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(10, 30, 60, 0.28);
+  overflow: hidden;
+}
+.fmea-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e6edf5;
+  background: #f8fbff;
+}
+.fmea-modal-head h4 {
+  margin: 0;
+  font-size: 14px;
+  color: #1a3a5e;
+}
+.fmea-modal-tip {
+  margin: 0;
+  padding: 10px 16px;
+  font-size: 12px;
+  color: #4a5b6d;
+  background: #fffdf5;
+  border-bottom: 1px solid #f2e7c8;
+}
+.fmea-modal-tip b {
+  color: #a86400;
+}
+.fmea-modal-empty {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.fmea-merge-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 12px 10px;
+}
+.fmea-merge-row {
+  padding: 7px 4px;
+  border-bottom: 1px dashed #eaf0f7;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.fmea-merge-row:hover {
+  background: #f6faff;
+}
+.fmea-merge-row.off {
+  opacity: 0.42;
+}
+.fmea-merge-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  border-bottom: 1px solid #eef3f9;
+  background: #fbfdff;
+  font-size: 12px;
+}
+.fmea-merge-selectall {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  color: #2e5a8e;
+}
+.fmea-merge-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+.fmea-merge-row:last-child {
+  border-bottom: none;
+}
+.fmea-merge-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  color: #2e5a8e;
+  margin-bottom: 3px;
+}
+.fmea-merge-part {
+  font-family: inherit;
+  color: var(--muted);
+  font-size: 11px;
+}
+.fmea-merge-field {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-left: 2px;
+  line-height: 1.6;
+  color: #33475b;
+}
+.fmea-merge-field i {
+  font-style: normal;
+  font-size: 10px;
+  color: #fff;
+  background: #9db4cc;
+  border-radius: 3px;
+  padding: 0 4px;
+  flex: none;
+}
+.fmea-merge-field .from {
+  color: #7a8794;
+  text-decoration: line-through;
+}
+.fmea-merge-field .arrow {
+  color: #9db4cc;
+}
+.fmea-merge-field .to {
+  color: #1f6b3a;
+}
+.fmea-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid #e6edf5;
+  background: #f8fbff;
+}
+
+/* 工作表表格 */
+.ws-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.ws-table th,
+.ws-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #f0f3f7;
+  text-align: left;
+  vertical-align: top;
+}
+.ws-table thead th {
+  font-weight: 600;
+  color: var(--muted);
+  background: #f7f9fc;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ws-table tbody tr:hover {
+  background: #f3f8fe;
+}
+.ws-id {
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+  color: #555;
+}
+.ws-u {
+  color: #aaa;
+}
+
+@media (max-width: 900px) {
+  .ws-ap-bar {
+    display: none;
+  }
+}
+
+/* 工作表批量操作 */
+.ws-batchbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border: 1px solid #d4e2f2;
+  border-radius: 6px;
+  background: #f7fbff;
+  font-size: 12px;
+}
+.ws-check-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  color: #2e5a8e;
+  font-weight: 600;
+}
+.ws-batch-count {
+  color: var(--muted);
+}
+.ws-batch-count b {
+  color: var(--blue);
+  font-size: 13px;
+}
+.ws-busy {
+  color: #a86400;
+  font-size: 11.5px;
+}
+.ws-row-selected {
+  background: #eef6ff !important;
+}
+.ws-table tbody tr.ws-row-selected td:first-child {
+  box-shadow: inset 3px 0 0 var(--blue);
+}
 .fmea-hl {
   background: #fff1a8;
   color: inherit;
@@ -2663,40 +3499,69 @@ select {
 .fmea-similar {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+}
+.fmea-similar-hint {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
 }
 .fmea-sim-item {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   width: 100%;
   text-align: left;
   border: 1px solid #e6edf5;
   background: #fff;
   border-radius: 6px;
-  padding: 5px 8px;
+  padding: 8px 10px;
   font-size: 12px;
+  transition: border-color 0.15s;
 }
 .fmea-sim-item:hover {
   border-color: var(--blue);
   background: var(--blue-light);
 }
+.fmea-sim-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .fmea-sim-mode {
-  flex: 1;
   color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.3;
+}
+.fmea-sim-hits {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.fmea-sim-hit-chip {
+  background: #eef4fb;
+  color: #2e5a8e;
+  border: 1px solid #d4e2f2;
+  border-radius: 3px;
+  padding: 0 5px;
+  font-size: 10.5px;
+  line-height: 15px;
+}
+.fmea-sim-more {
+  font-size: 10.5px;
+  color: var(--muted);
 }
 .fmea-sim-meta {
   color: var(--muted);
   font-size: 11px;
-  white-space: nowrap;
 }
 .fmea-sim-id {
   font-family: Consolas, monospace;
   font-size: 10.5px;
   color: #6b7f96;
+  margin-left: auto;
 }
 .fmea-image-note {
   display: inline-block;
@@ -2900,6 +3765,161 @@ body.col-resizing {
   font-size: 12px;
   padding: 4px 9px;
 }
+
+/* 结构树定位条 */
+.fmea-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 0 8px;
+  border-bottom: 1px dashed var(--border);
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.fmea-bc-label {
+  font-weight: 600;
+  color: var(--text);
+}
+.fmea-bc-sep {
+  color: var(--border);
+  font-weight: 700;
+}
+.fmea-bc-crumb {
+  color: #2e5a8e;
+  background: #eef4fb;
+  border: 1px solid #d4e2f2;
+  border-radius: 4px;
+  padding: 1px 7px;
+}
+.fmea-bc-curr {
+  color: var(--text);
+  background: #fff4e5;
+  border: 1px solid #f2d39a;
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-weight: 600;
+}
+
+/* 措施前后对比区 */
+.fmea-compare-block {
+  margin-bottom: 12px;
+}
+.fmea-compare-block h4 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.fmea-compare-badge {
+  font-size: 11px;
+  padding: 1px 9px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.fmea-compare-badge.improve {
+  background: #eaf5ec;
+  color: #1f6b3a;
+  border: 1px solid #b4dcc0;
+}
+.fmea-compare-badge.regress {
+  background: #fde8e6;
+  color: #b03030;
+  border: 1px solid #f5c6c1;
+}
+.fmea-compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 13px;
+}
+.fmea-compare-table th,
+.fmea-compare-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.fmea-compare-table th {
+  font-weight: 600;
+  color: var(--muted);
+  background: #f7f9fc;
+}
+.fmea-compare-table .col-before {
+  background: #fff9f9;
+  color: #b03030;
+}
+.fmea-compare-table .col-after {
+  background: #f2faf4;
+  color: #1f6b3a;
+  font-weight: 600;
+}
+.fmea-compare-table .row-label {
+  color: var(--muted);
+  font-size: 12px;
+  width: 100px;
+}
+.fmea-compare-table .delta {
+  text-align: center;
+  font-weight: 700;
+  min-width: 50px;
+  color: var(--muted);
+}
+.fmea-compare-table .delta.improve {
+  color: #1f6b3a;
+}
+.fmea-compare-table .delta.regress {
+  color: #b03030;
+}
+.fmea-compare-table .row-ap .col-before,
+.fmea-compare-table .row-ap .col-after {
+  padding-top: 8px;
+}
+.fmea-compare-table .risk-高 {
+  color: #b03030;
+  font-weight: 600;
+}
+.fmea-compare-table .risk-中 {
+  color: #a86400;
+  font-weight: 600;
+}
+.fmea-compare-table .risk-低 {
+  color: #1f6b3a;
+  font-weight: 600;
+}
+.fmea-compare-measures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
+}
+.fmea-measure-col {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.fmea-measure-col:first-child {
+  background: #fff9f9;
+}
+.fmea-measure-col:last-child {
+  background: #f2faf4;
+}
+.fmea-measure-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.fmea-measure-body {
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+@media (max-width: 768px) {
+  .fmea-compare-measures {
+    grid-template-columns: 1fr;
+  }
+}
+
 .fmea-chain {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr) 20px minmax(0, 1fr);
@@ -3140,6 +4160,36 @@ body.col-resizing {
 }
 .fmea-tree-row:hover {
   background: var(--blue-light);
+}
+/* 树分组节点上的「归并」小按钮：悬停显示 */
+.fmea-tree-row {
+  cursor: pointer;
+  user-select: none;
+}
+.fmea-tree-act {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: #2e5a8e;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+.fmea-tree-row:hover .fmea-tree-act,
+.fmea-tree-act:focus-visible {
+  opacity: 1;
+}
+.fmea-tree-act:hover {
+  background: #fff;
+  text-decoration: underline dotted;
+}
+.fmea-tree-act:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 .fmea-tree-row.system {
   font-weight: 700;

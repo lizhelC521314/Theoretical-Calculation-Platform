@@ -2,19 +2,23 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type CtrUser } from '../api';
 import { FmeaImageInput } from '../components/FmeaImageInput';
 import {
+  analyzeImportedRecords,
   buildFmeaRecord,
+  classifyProduct,
   emptyFmeaDraft,
+  fillMissingStructured,
   fmeaFileName,
   fmeaTemplateCsv,
   FMEA_FIELDS,
   FMEA_IMAGE_FIELDS,
-  nextFmeaId,
+  nextFmeaIdV2,
+  productCodes,
   normalizeRecordDate,
   parseFmeaCsv,
   parseFmeaXlsx,
-  recordYearForId,
   validateFmeaDraft,
   type FmeaDraft,
+  type FmeaImportAnalysis,
   type FmeaParseResult,
   type FmeaValidation,
 } from '../report/fmea';
@@ -32,10 +36,37 @@ interface FmeaEntry {
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
+/** 迁移提示清单里的分级指标 chip */
+function MetricChip({
+  level,
+  count,
+  total,
+  label,
+  hint,
+}: {
+  level: 'critical' | 'warn' | 'info' | 'good';
+  count: number;
+  total: number;
+  label: string;
+  hint?: string;
+}) {
+  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+  const cls = count === 0 ? 'good' : level;
+  return (
+    <div className={`ia-metric ia-metric-${cls}`} title={hint}>
+      <span className="ia-metric-count">{count}</span>
+      <span className="ia-metric-label">{label}</span>
+      <span className="ia-metric-pct">{pct}%</span>
+    </div>
+  );
+}
+
 /**
  * FMEA库导入
  * 批量导入技术中心的《FMEA 案例收集》Excel（多工作表自动合并），或手工录入一张卡片。
- * 入库时自动编号 FM-年份-序号，一张卡片一个 Parquet 文件。
+ * 入库时自动编号：FM-{产品族A~J}-{部件A~Jxx}-{三位序号}-v{版本}，
+ * 如 FM-A-A03-001-v01 = 空滤器总成 / 滤芯总成 / 第 1 条 / 第 1 版。
+ * 历史旧格式 FM-年份-序号 也能正常读取。
  */
 export function FmeaImportPage({ user }: Props) {
   const [draft, setDraft] = useState<FmeaDraft>(() => emptyFmeaDraft());
@@ -44,6 +75,8 @@ export function FmeaImportPage({ user }: Props) {
   const [detailIdx, setDetailIdx] = useState(-1);
   const [formIssues, setFormIssues] = useState<string[]>([]);
   const [importNote, setImportNote] = useState('');
+  const [importAnalysis, setImportAnalysis] = useState<FmeaImportAnalysis | null>(null);
+  const [showAnalysis, setShowAnalysis] = useState(false);
   const [busy, setBusy] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState('');
@@ -107,12 +140,13 @@ export function FmeaImportPage({ user }: Props) {
     showToast('已载入表单，修改后重新加入预览');
   };
 
-  /** 批量导入结果统一入预览 */
+  /** 批量导入结果统一入预览 + 生成迁移提示清单 */
   const queueParsed = (res: FmeaParseResult, hint: string) => {
     if (!res.rows.length) {
       const reason = res.warnings[0] || '没有读到有效数据行';
       showToast(`${hint}解析失败：${reason}`);
       setImportNote(`${hint}：${reason}`);
+      setImportAnalysis(null);
       return;
     }
     const added: FmeaEntry[] = res.rows.map((r) => {
@@ -131,6 +165,10 @@ export function FmeaImportPage({ user }: Props) {
         (res.skipped ? `，跳过 ${res.skipped} 行（空行 / 小节标题 / 示例行）` : '') +
         (res.warnings.length ? `；${res.warnings.join('；')}` : ''),
     );
+    // 生成迁移提示清单（即使所有数据都合格，也展示产品族分布）
+    const analysis = analyzeImportedRecords(res.rows, res.skipped);
+    setImportAnalysis(analysis);
+    setShowAnalysis(true);
     showToast(`${hint}：已加入 ${res.rows.length} 条待入库卡片`);
   };
 
@@ -206,8 +244,10 @@ export function FmeaImportPage({ user }: Props) {
           remain.push({ ...entry, validation: v });
           continue;
         }
-        const year = recordYearForId(entry.draft.recordDate, entry.sourceSheet);
-        const id = nextFmeaId(used, year);
+        // 新版编号：先自动归类 → 取产品族/部件代码 → 同桶内序号递增
+        const cls = classifyProduct(entry.draft.part || entry.draft.system);
+        const { family, part } = productCodes(cls.major, cls.minor);
+        const id = nextFmeaIdV2(used, family, part, 1);
         const fileName = fmeaFileName(id);
         const record = buildFmeaRecord(entry.draft, {
           id,
@@ -292,6 +332,140 @@ export function FmeaImportPage({ user }: Props) {
       {error && <div className="login-error">{error}</div>}
       {importNote && <div className="settings-hint small">{importNote}</div>}
 
+      {/* 导入迁移提示清单：Excel 解析后自动生成，帮助用户了解哪些条目需要补数据 */}
+      {importAnalysis && importAnalysis.totalRows > 0 && (
+        <div className="import-analysis">
+          <div className="ia-head">
+            <h4>
+              导入质量清单
+              <span className="ia-summary">共 {importAnalysis.totalRows} 条</span>
+              {importAnalysis.skippedRows > 0 && (
+                <span className="ia-summary muted">跳过 {importAnalysis.skippedRows} 行</span>
+              )}
+            </h4>
+            <button
+              type="button"
+              className="btn-ghost sm"
+              onClick={() => setShowAnalysis((v) => !v)}
+              aria-expanded={showAnalysis}
+            >
+              {showAnalysis ? '收起' : '展开'}
+            </button>
+          </div>
+
+          {/* 始终展示：产品族分布 */}
+          <div className="ia-family">
+            <span className="ia-family-label">产品族分布：</span>
+            {importAnalysis.familyBreakdown.map((fb) => (
+              <span
+                key={fb.major}
+                className={`ia-family-chip ${fb.major.startsWith('U') ? 'unclassified' : ''}`}
+                title={fb.major}
+              >
+                {fb.major.replace(/^[A-JU]\s+/, '')} {fb.count}
+              </span>
+            ))}
+          </div>
+
+          {showAnalysis && (
+            <>
+              {/* 分级提示：critical / warn / info */}
+              <div className="ia-metrics">
+                <MetricChip
+                  level="critical"
+                  count={importAnalysis.missingRatings}
+                  total={importAnalysis.totalRows}
+                  label="缺 S/O/D 评分"
+                  hint="缺失任一评分则无法自动算 AP 优先级，建议补全"
+                />
+                <MetricChip
+                  level="warn"
+                  count={importAnalysis.unclassifiedFamily}
+                  total={importAnalysis.totalRows}
+                  label="产品族未匹配"
+                  hint="归入 U 未分类桶，建议在部件名称里填写更标准的名称（如 '空滤器滤芯总成'）"
+                />
+                <MetricChip
+                  level="warn"
+                  count={importAnalysis.unclassifiedMinor}
+                  total={importAnalysis.totalRows}
+                  label="产品小类未匹配"
+                  hint="归入 XX 兜底桶，检索时会混入其他同大类的案例"
+                />
+                <MetricChip
+                  level="warn"
+                  count={importAnalysis.unmergedModeMaster}
+                  total={importAnalysis.totalRows}
+                  label="失效模式未归并"
+                  hint="原文未能匹配标准词表（FMEA 库建设方案 §3.2），检索时可能遗漏同义词"
+                />
+                <MetricChip
+                  level="warn"
+                  count={importAnalysis.unmergedCauseMaster}
+                  total={importAnalysis.totalRows}
+                  label="失效原因未归并"
+                  hint="同失效模式下因原因描述不同而分散，建议统一用词"
+                />
+                <MetricChip
+                  level="info"
+                  count={importAnalysis.missingRiskLevel}
+                  total={importAnalysis.totalRows}
+                  label="缺风险等级"
+                  hint="可根据后果 + AP 自动推导，不强制要求"
+                />
+                <MetricChip
+                  level="info"
+                  count={importAnalysis.missingAction}
+                  total={importAnalysis.totalRows}
+                  label="缺建议措施"
+                  hint="建议每条案例都补上，形成知识闭环"
+                />
+                <MetricChip
+                  level="info"
+                  count={importAnalysis.missingOwner}
+                  total={importAnalysis.totalRows}
+                  label="缺责任人"
+                />
+              </div>
+
+              {/* 前 20 行有问题的明细 */}
+              {importAnalysis.issues.length > 0 && (
+                <div className="ia-issues">
+                  <h5>问题行明细（前 {importAnalysis.issues.length} 条）</h5>
+                  <ul>
+                    {importAnalysis.issues.map((iss) => (
+                      <li key={`${iss.sourceSheet}-${iss.rowNumber}-${iss.failureMode}`}>
+                        <span className="ia-row-no">
+                          {iss.sourceSheet}:{iss.rowNumber}
+                        </span>
+                        <span className="ia-row-mode">{iss.failureMode}</span>
+                        <span className="ia-row-issues">
+                          {iss.issues.map((i) => (
+                            <span key={i} className="ia-row-tag">
+                              {i}
+                            </span>
+                          ))}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* 全部合格时的鼓励提示 */}
+              {importAnalysis.missingRatings === 0 &&
+                importAnalysis.unclassifiedFamily === 0 &&
+                importAnalysis.unmergedModeMaster === 0 &&
+                importAnalysis.unmergedCauseMaster === 0 && (
+                  <div className="ia-all-good">
+                    ✓ 全部 {importAnalysis.totalRows} 条都匹配到了产品族、标准词表和 S/O/D 评分，可以直接入库
+                  </div>
+                )}
+            </>
+          )}
+        </div>
+      )}
+
       <div className="settings-card">
         <div className="pc-head">
           <h3>单条录入 · 一张知识卡片</h3>
@@ -301,9 +475,10 @@ export function FmeaImportPage({ user }: Props) {
 
         <div className="fmea-form-grid">
           {FMEA_FIELDS.map((f) => {
-            const val = draft[f.key];
+            const rawVal = draft[f.key];
+            const val = String(rawVal ?? '');
             const opts = f.options;
-            const isCustom = f.allowCustom && opts && !opts.includes(val) && val !== '';
+            const isCustom = !!(f.allowCustom && opts && !opts.includes(val) && val);
             return (
               <label className={f.multiline ? 'field full' : 'field'} key={f.key}>
                 <span className="mat-field-label">
@@ -313,12 +488,12 @@ export function FmeaImportPage({ user }: Props) {
                 {opts ? (
                   <>
                     <select
-                      value={isCustom ? opts[opts.length - 1] : val}
+                      value={isCustom ? (opts ? opts[opts.length - 1] : '') : val}
                       onChange={(e) => {
                         const sel = e.target.value;
-                        if (f.allowCustom && sel === '自定义') {
+                        if (f.allowCustom && opts && sel === '自定义') {
                           // 切到自定义：保留原值做占位，操作者再在 text 框里改
-                          patch(f.key, val && !opts.includes(val) ? val : '');
+                          patch(f.key, isCustom ? val : '');
                         } else {
                           patch(f.key, sel);
                         }
@@ -331,7 +506,7 @@ export function FmeaImportPage({ user }: Props) {
                         </option>
                       ))}
                     </select>
-                    {f.allowCustom && (isCustom || val === '') && (
+                    {f.allowCustom && (isCustom || !val) && (
                       <input
                         className="mat-custom-input"
                         placeholder="自定义系统名称，如 燃油系统 / 进气歧管系统"
@@ -361,7 +536,7 @@ export function FmeaImportPage({ user }: Props) {
             <div className="field image" key={f.key}>
               <FmeaImageInput
                 label={f.label}
-                value={draft[f.key]}
+                value={String(draft[f.key] ?? '')}
                 onChange={(v) => patch(f.key, v)}
                 placeholder="支持导入图片或 Ctrl+V 粘贴"
               />
@@ -397,9 +572,43 @@ export function FmeaImportPage({ user }: Props) {
           <h3>待入库预览（{entries.length}）</h3>
           {errorCount > 0 && <span className="tag tag-danger">{errorCount} 张待补全</span>}
           {warnCount > 0 && <span className="tag light">提示 {warnCount} 条</span>}
+          {/* 一键补全：AP → 风险等级 → 结论 → 设计规避（只填空值） */}
+          <button
+            className="btn-ghost sm"
+            style={{ marginLeft: 'auto' }}
+            onClick={() => {
+              let patchedRisk = 0;
+              let patchedAp = 0;
+              let patchedConclusion = 0;
+              let patchedDesignGuide = 0;
+              setEntries((prev) =>
+                prev.map((e) => {
+                  const patched = fillMissingStructured(e.draft);
+                  if (patched.riskLevel && !e.draft.riskLevel) patchedRisk++;
+                  if (patched.apLevel && !e.draft.apLevel) patchedAp++;
+                  if (patched.conclusion && !e.draft.conclusion) patchedConclusion++;
+                  if (patched.designGuide && !e.draft.designGuide) patchedDesignGuide++;
+                  return { ...e, draft: patched, validation: validateFmeaDraft(patched) };
+                }),
+              );
+              const parts: string[] = [];
+              if (patchedAp) parts.push(`AP ${patchedAp}`);
+              if (patchedRisk) parts.push(`风险等级 ${patchedRisk}`);
+              if (patchedConclusion) parts.push(`结论 ${patchedConclusion}`);
+              if (patchedDesignGuide) parts.push(`设计规避 ${patchedDesignGuide}`);
+              if (!parts.length) {
+                showToast('全部条目已填齐，无需补全');
+              } else {
+                showToast(`已自动补全 ${parts.join(' · ')}`);
+              }
+            }}
+            disabled={archiving || entries.length === 0}
+            title="按 AP→RPN→关键词三级推导补全空的风险等级，同时补 AP/结论/设计规避。不覆写已填值。"
+          >
+            ⚡ 一键补全缺失字段
+          </button>
           <button
             className="btn-primary sm"
-            style={{ marginLeft: 'auto' }}
             onClick={archiveAll}
             disabled={archiving || entries.length === 0}
           >
@@ -411,8 +620,8 @@ export function FmeaImportPage({ user }: Props) {
           <div className="test-empty">
             <h3>还没有待入库的卡片</h3>
             <p className="settings-hint">
-              把《FMEA 案例收集》Excel 直接拖进「批量导入 Excel」，或在上面手工填写一条。入库后每张卡片自动编号
-              （FM-年份-序号），保存为共享盘「FMEA Library」目录下的独立 .parquet 文件，检索页即可按机种、部件、关键词查到。
+              把《FMEA 案例收集》Excel 直接拖进「批量导入 Excel」，或在上面手工填写一条。入库后每张卡片按产品族+部件自动编号
+              （FM-A-A03-001-v01 这样），保存为共享盘「FMEA Library」目录下的独立 .parquet 文件，检索页即可按机种、部件、关键词查到。
               导入时自动清理「填写示例 / 责任人填写 / 插入图片」等占位行，并合并同机种、同部件、同失效模式、同原因的重复案例。
             </p>
           </div>
@@ -483,9 +692,10 @@ export function FmeaImportPage({ user }: Props) {
             </div>
             <div className="fmea-form-grid">
               {FMEA_FIELDS.map((f) => {
-                const val = entries[detailIdx].draft[f.key];
+                const rawVal = entries[detailIdx].draft[f.key];
+                const val = String(rawVal ?? '');
                 const opts = f.options;
-                const isCustom = f.allowCustom && opts && !opts.includes(val) && val !== '';
+                const isCustom = !!(f.allowCustom && opts && !opts.includes(val) && val);
                 return (
                   <label className={f.multiline ? 'field full' : 'field'} key={f.key}>
                     <span className="mat-field-label">
@@ -495,11 +705,11 @@ export function FmeaImportPage({ user }: Props) {
                     {opts ? (
                       <>
                         <select
-                          value={isCustom ? opts[opts.length - 1] : val}
+                          value={isCustom ? (opts ? opts[opts.length - 1] : '') : val}
                           onChange={(e) => {
                             const sel = e.target.value;
-                            if (f.allowCustom && sel === '自定义') {
-                              patchEntry(detailIdx, f.key, val && !opts.includes(val) ? val : '');
+                            if (f.allowCustom && opts && sel === '自定义') {
+                              patchEntry(detailIdx, f.key, isCustom ? val : '');
                             } else {
                               patchEntry(detailIdx, f.key, sel);
                             }
@@ -512,7 +722,7 @@ export function FmeaImportPage({ user }: Props) {
                             </option>
                           ))}
                         </select>
-                        {f.allowCustom && (isCustom || val === '') && (
+                        {f.allowCustom && (isCustom || !val) && (
                           <input
                             className="mat-custom-input"
                             placeholder="自定义系统名称，如 燃油系统 / 进气歧管系统"
@@ -540,7 +750,7 @@ export function FmeaImportPage({ user }: Props) {
                 <div className="field image" key={f.key}>
                   <FmeaImageInput
                     label={f.label}
-                    value={entries[detailIdx].draft[f.key]}
+                    value={String(entries[detailIdx].draft[f.key] ?? '')}
                     onChange={(v) => patchEntry(detailIdx, f.key, v)}
                     placeholder="导入或 Ctrl+V 粘贴"
                   />

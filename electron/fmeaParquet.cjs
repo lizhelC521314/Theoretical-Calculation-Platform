@@ -26,12 +26,23 @@ const fmeaSchema = new ParquetSchema({
   failureCategory: { type: 'UTF8', optional: true }, // 失效分类
   causeCategory: { type: 'UTF8', optional: true }, // 原因分类
   causeCode: { type: 'UTF8', optional: true }, // 原因编码（D/M/P/Mf）
+  apLevel: { type: 'UTF8', optional: true }, // AIAG-VDA AP（H/M/L）
+  rpn: { type: 'INT32', optional: true }, // RPN 仅作参考
+  failureModeMaster: { type: 'UTF8', optional: true }, // 失效模式主词
+  failureCauseMaster: { type: 'UTF8', optional: true }, // 失效原因主词
+  failureEffectMaster: { type: 'UTF8', optional: true }, // 失效后果主词
   riskLevel: { type: 'UTF8', optional: true }, // 风险等级
   severity: { type: 'UTF8', optional: true }, // S
   occurrence: { type: 'UTF8', optional: true }, // O
   detection: { type: 'UTF8', optional: true }, // D
+  severityBefore: { type: 'UTF8', optional: true }, // 措施前 S
+  occurrenceBefore: { type: 'UTF8', optional: true }, // 措施前 O
+  detectionBefore: { type: 'UTF8', optional: true }, // 措施前 D
   action: { type: 'UTF8' }, // 建议的措施
+  measureActual: { type: 'UTF8', optional: true }, // 实际采取的措施
   measureType: { type: 'UTF8', optional: true }, // 措施类型
+  status: { type: 'UTF8', optional: true }, // draft / review / published / archived
+  statusHistory: { type: 'UTF8', optional: true }, // JSON 数组字符串
   verificationStatus: { type: 'UTF8', optional: true }, // 验证状态
   designGuide: { type: 'UTF8', optional: true }, // 设计规避
   conclusion: { type: 'UTF8', optional: true }, // 一句话结论
@@ -73,12 +84,23 @@ function rowFromRecord(record) {
     failureCategory: str(record.failureCategory),
     causeCategory: str(record.causeCategory),
     causeCode: str(record.causeCode),
+    apLevel: str(record.apLevel),
+    rpn: record.rpn == null ? null : Number(record.rpn),
+    failureModeMaster: str(record.failureModeMaster),
+    failureCauseMaster: str(record.failureCauseMaster),
+    failureEffectMaster: str(record.failureEffectMaster),
     riskLevel: str(record.riskLevel),
     severity: str(record.severity),
     occurrence: str(record.occurrence),
     detection: str(record.detection),
+    severityBefore: str(record.severityBefore),
+    occurrenceBefore: str(record.occurrenceBefore),
+    detectionBefore: str(record.detectionBefore),
     action: str(record.action),
+    measureActual: str(record.measureActual),
     measureType: str(record.measureType),
+    status: str(record.status),
+    statusHistory: record.statusHistory?.length ? JSON.stringify(record.statusHistory) : '',
     verificationStatus: str(record.verificationStatus),
     designGuide: str(record.designGuide),
     conclusion: str(record.conclusion),
@@ -128,12 +150,26 @@ function recordFromRow(row) {
     failureCategory: row.failureCategory || '',
     causeCategory: row.causeCategory || '',
     causeCode: row.causeCode || '',
+    apLevel: row.apLevel || '',
+    rpn: row.rpn == null ? null : Number(row.rpn),
+    failureModeMaster: row.failureModeMaster || '',
+    failureCauseMaster: row.failureCauseMaster || '',
+    failureEffectMaster: row.failureEffectMaster || '',
     riskLevel: row.riskLevel || '',
     severity: row.severity || '',
     occurrence: row.occurrence || '',
     detection: row.detection || '',
+    severityBefore: row.severityBefore || '',
+    occurrenceBefore: row.occurrenceBefore || '',
+    detectionBefore: row.detectionBefore || '',
     action: row.action || '',
+    measureActual: row.measureActual || '',
     measureType: row.measureType || '',
+    status: row.status || '',
+    statusHistory: (() => {
+      if (!row.statusHistory) return [];
+      try { return JSON.parse(row.statusHistory); } catch { return []; }
+    })(),
     verificationStatus: row.verificationStatus || '',
     designGuide: row.designGuide || '',
     conclusion: row.conclusion || '',

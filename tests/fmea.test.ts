@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  analyzeImportedRecords,
+  allowedNextStatuses,
+  applyMasterVocabulary,
   buildFmeaRecord,
+  bumpVersion,
   classifyProduct,
   deriveCauseCode,
   deriveConclusion,
@@ -10,20 +14,27 @@ import {
   deriveRiskLevel,
   emptyFmeaDraft,
   expandFmeaTerms,
+  fillMissingStructured,
   fmeaDedupeKey,
   fmeaTemplateCsv,
+  formatFmeaIdV1,
+  formatFmeaIdV2,
   isPlaceholderDraft,
-  nextFmeaId,
+  nextFmeaIdV1,
+  nextFmeaIdV2,
   normalizeRecordDate,
   parseFmeaCsv,
+  parseFmeaId,
   parseFmeaRecord,
   parseFmeaRows,
+  productCodes,
   productMajorOf,
   productMinorOf,
   recordYearForId,
   scoreFmeaRecord,
   serializeFmeaRecord,
   similarFmeaRecords,
+  tryTransitStatus,
   validateFmeaDraft,
   yearFromDate,
 } from '../src/report/fmea';
@@ -170,12 +181,65 @@ describe('normalizeRecordDate / yearFromDate', () => {
 });
 
 describe('编号', () => {
-  it('同年顺延，跨年重新从 001 开始', () => {
-    expect(nextFmeaId([], 2026)).toBe('FM-2026-001');
-    expect(nextFmeaId(['FM-2026-001.parquet', 'FM-2026-007.parquet', 'FM-2025-030.parquet'], 2026)).toBe(
+  it('旧版：同年顺延，跨年重新从 001 开始', () => {
+    expect(nextFmeaIdV1([], 2026)).toBe('FM-2026-001');
+    expect(nextFmeaIdV1(['FM-2026-001.parquet', 'FM-2026-007.parquet', 'FM-2025-030.parquet'], 2026)).toBe(
       'FM-2026-008',
     );
-    expect(nextFmeaId(['FM-2026-007.parquet'], 2027)).toBe('FM-2027-001');
+    expect(nextFmeaIdV1(['FM-2026-007.parquet'], 2027)).toBe('FM-2027-001');
+  });
+
+  it('新版：同一产品族+部件桶内递增', () => {
+    const used = [
+      'FM-A-A03-001-v01.parquet',
+      'FM-A-A03-002-v01.parquet',
+      'FM-A-A01-001-v01.parquet',
+      'FM-B-B01-005-v01.parquet',
+    ];
+    expect(nextFmeaIdV2(used, 'A', 'A03')).toBe('FM-A-A03-003-v01');
+    expect(nextFmeaIdV2(used, 'A', 'A01')).toBe('FM-A-A01-002-v01');
+    expect(nextFmeaIdV2(used, 'B', 'B01')).toBe('FM-B-B01-006-v01');
+    expect(nextFmeaIdV2([], 'A', 'A03')).toBe('FM-A-A03-001-v01');
+  });
+
+  it('新版：未分类产品族归入 U/U 桶', () => {
+    const used = ['FM-U-U-007-v01.parquet', 'FM-U-U-002-v01.parquet'];
+    expect(nextFmeaIdV2(used, 'U', 'U')).toBe('FM-U-U-008-v01');
+  });
+
+  it('新版：升版保持序号不变只加版本', () => {
+    expect(bumpVersion('FM-A-A03-001-v01')).toBe('FM-A-A03-001-v02');
+    expect(bumpVersion('FM-A-A03-001-v03')).toBe('FM-A-A03-001-v04');
+    // 旧格式升版保旧格式
+    expect(bumpVersion('FM-2026-015')).toBe('FM-2026-015');
+  });
+
+  it('formatFmeaIdV2 / formatFmeaIdV1 按规则生成', () => {
+    expect(formatFmeaIdV2('A', 'A03', 1)).toBe('FM-A-A03-001-v01');
+    expect(formatFmeaIdV2('U', 'U', 7, 3)).toBe('FM-U-U-007-v03');
+    expect(formatFmeaIdV1(2026, 15)).toBe('FM-2026-015');
+  });
+
+  it('parseFmeaId 区分新旧格式', () => {
+    const v2 = parseFmeaId('FM-A-A03-001-v01');
+    expect(v2.isV2).toBe(true);
+    expect(v2.family).toBe('A');
+    expect(v2.part).toBe('A03');
+    expect(v2.seq).toBe(1);
+    expect(v2.version).toBe(1);
+
+    const v1 = parseFmeaId('FM-2026-015');
+    expect(v1.isV2).toBe(false);
+    expect(v1.year).toBe(2026);
+    expect(v1.seq).toBe(15);
+    expect(v1.legacy).toBe('FM-2026-015');
+  });
+
+  it('productCodes 从产品大类/小类文本取代码', () => {
+    expect(productCodes('A 空气滤清器总成', 'A03 滤芯总成')).toEqual({ family: 'A', part: 'A03' });
+    expect(productCodes('U 未分类', '')).toEqual({ family: 'U', part: 'U' });
+    // 只有大类没有小类 → 用大类+XX 兜底
+    expect(productCodes('B 进气管道系统', '')).toEqual({ family: 'B', part: 'BXX' });
   });
 });
 
@@ -332,13 +396,22 @@ describe('引用记录与相似案例', () => {
     expect(back?.citations[0].projectName).toBe('客户A 空滤器');
   });
 
-  it('相似案例优先同部件', () => {
-    const base = { ...emptyFmeaDraft(), action: '加厚', failureMode: '开裂' };
-    const a = buildFmeaRecord({ ...base, part: '壳体', machine: 'A' }, { id: 'FM-2026-021', username: 'u1' });
-    const b = buildFmeaRecord({ ...base, part: '壳体', machine: 'B' }, { id: 'FM-2026-022', username: 'u1' });
-    const c = buildFmeaRecord({ ...base, part: '管路', machine: 'A' }, { id: 'FM-2026-023', username: 'u1' });
-    const list = similarFmeaRecords(a, [a, b, c], 2);
-    expect(list[0].id).toBe('FM-2026-022');
+  it('相似案例：同产品族 > 同失效编码 > 同 AP，同分时 AP 更紧急的排前', () => {
+    const base = { ...emptyFmeaDraft(), failureMode: '开裂', severity: '8', occurrence: '6', detection: '9' };
+    // A-A03 空滤器/滤芯 同产品族同部件
+    const target = buildFmeaRecord({ ...base, part: '滤芯总成', productCategory: 'A 空气滤清器总成', productSubCategory: 'A03 滤芯总成', failureCode: 'F03 结构失效', apLevel: 'H' }, { id: 'FM-A-A03-001-v01', username: 'u1' });
+    const sameFamilySamePart = buildFmeaRecord({ ...base, part: '滤芯总成', productCategory: 'A 空气滤清器总成', productSubCategory: 'A03 滤芯总成', failureCode: 'F03 结构失效', apLevel: 'M' }, { id: 'FM-A-A03-002-v01', username: 'u1' });
+    const sameFamilyDiffPart = buildFmeaRecord({ ...base, part: '上壳体', productCategory: 'A 空气滤清器总成', productSubCategory: 'A01 上壳体', failureCode: 'F02 外观失效', apLevel: 'L' }, { id: 'FM-A-A01-001-v01', username: 'u1' });
+    const diffFamily = buildFmeaRecord({ ...base, part: '谐振腔', productCategory: 'D 消声与谐振', productSubCategory: 'D01 Helmholtz 谐振腔', failureCode: 'F03 结构失效', apLevel: 'H' }, { id: 'FM-D-D01-001-v01', username: 'u1' });
+    const list = similarFmeaRecords(target, [target, sameFamilySamePart, sameFamilyDiffPart, diffFamily], 3);
+    // 同产品族+同部件+同失效编码 应该排在最前
+    expect(list[0].record.id).toBe('FM-A-A03-002-v01');
+    // 验证 hits 列表内容
+    expect(list[0].hits).toEqual(expect.arrayContaining(['同产品族', '同失效模式编码', '同产品小类', '同部件名称', '同失效模式主词']));
+    // diffFamily 虽然失效编码相同，但产品族不同，分数应该低于同产品族的
+    const sameFamilyScore = list.find((r) => r.record.id === 'FM-A-A01-001-v01')?.score ?? 0;
+    const diffFamilyScore = list.find((r) => r.record.id === 'FM-D-D01-001-v01')?.score ?? 0;
+    expect(sameFamilyScore).toBeGreaterThan(diffFamilyScore);
   });
 });
 
@@ -397,5 +470,312 @@ describe('三维分类（产品 / 失效模式 / 原因）', () => {
     expect(rec.productSubCategory).toBe('A01 上壳体');
     expect(rec.failureCode).toBe('F01 开裂/断裂');
     expect(rec.causeCode.startsWith('D')).toBe(true);
+  });
+});
+
+describe('导入质量清单 analyzeImportedRecords', () => {
+  type FmeaDraftLocal = ReturnType<typeof emptyFmeaDraft>;
+  const row = (overrides: { draft: Record<string, unknown>; sourceSheet?: string; rowNumber?: number }) => {
+    const base = emptyFmeaDraft();
+    const merged = { ...base, ...overrides.draft } as FmeaDraftLocal;
+    return {
+      draft: merged,
+      sourceSheet: overrides.sourceSheet || 'Sheet1',
+      rowNumber: overrides.rowNumber ?? 1,
+    };
+  };
+
+  it('完整数据 → 零问题 + 产品族分布', () => {
+    const rows = [
+      row({
+        rowNumber: 2,
+        sourceSheet: '空滤器',
+        draft: {
+          part: '滤芯总成',
+          machine: 'CT110',
+          failureMode: '高压下开裂',
+          failureCause: '壁厚不足',
+          failureEffect: '过滤效率下降',
+          severity: '8',
+          occurrence: '5',
+          detection: '6',
+          riskLevel: '高',
+          action: '加厚 0.5mm',
+          owner: '张三',
+          recordDate: '2026-05-01',
+          failureModeMaster: '开裂',
+          failureCauseMaster: '壁厚不足',
+          failureEffectMaster: '过滤性能下降',
+        },
+      }),
+      row({
+        rowNumber: 5,
+        sourceSheet: '消声器',
+        draft: {
+          part: '消声器',
+          machine: 'CT120',
+          failureMode: '内部异响',
+          failureCause: '焊接缺陷',
+          failureEffect: 'NVH 抱怨',
+          severity: '7',
+          occurrence: '4',
+          detection: '5',
+          riskLevel: '中',
+          action: '补焊',
+          owner: '李四',
+          recordDate: '2026-05-02',
+          failureModeMaster: '异响',
+          failureCauseMaster: '焊接缺陷',
+          failureEffectMaster: '抱怨',
+        },
+      }),
+    ];
+    const a = analyzeImportedRecords(rows);
+    expect(a.totalRows).toBe(2);
+    expect(a.missingRatings).toBe(0);
+    expect(a.unclassifiedFamily).toBe(0);
+    expect(a.unclassifiedMinor).toBe(0);
+    expect(a.missingAction).toBe(0);
+    expect(a.issues).toEqual([]);
+    // 产品族分布：滤芯总成归入 A，消声器归入 D
+    const famMajors = a.familyBreakdown.map((fb) => fb.major);
+    expect(famMajors).toContain('A 空气滤清器总成');
+    expect(famMajors).toContain('D 消声与谐振');
+  });
+
+  it('缺 S/O/D + 产品族未匹配 + 缺措施 → 正确计数 + 明细', () => {
+    const rows = [
+      row({
+        rowNumber: 12,
+        sourceSheet: '杂项',
+        draft: {
+          part: '奇怪部件', // 无法匹配 → 归入 U
+          failureMode: '有问题',
+          failureCause: '不知道为什么',
+          failureEffect: '会坏',
+          action: '', // 缺建议措施
+        },
+      }),
+    ];
+    const a = analyzeImportedRecords(rows);
+    expect(a.totalRows).toBe(1);
+    expect(a.missingRatings).toBe(1);
+    expect(a.unclassifiedFamily).toBe(1);
+    expect(a.missingAction).toBe(1);
+    expect(a.familyBreakdown.find((fb) => fb.major.startsWith('U'))?.count).toBe(1);
+    // 明细
+    expect(a.issues.length).toBe(1);
+    expect(a.issues[0].rowNumber).toBe(12);
+    expect(a.issues[0].sourceSheet).toBe('杂项');
+    expect(a.issues[0].issues).toEqual(
+      expect.arrayContaining([
+        '产品族未匹配',
+        '缺 S/O/D 评分',
+        '缺建议措施',
+      ]),
+    );
+  });
+
+  it('超过 20 条问题行 → issues 截断到前 20', () => {
+    const many: ReturnType<typeof row>[] = [];
+    for (let i = 0; i < 30; i++) {
+      many.push(row({
+        rowNumber: i + 1,
+        sourceSheet: '杂项',
+        draft: { part: '奇怪', failureMode: `模式${i}` },
+      }));
+    }
+    const a = analyzeImportedRecords(many);
+    expect(a.totalRows).toBe(30);
+    expect(a.issues.length).toBe(20); // 截断
+  });
+});
+
+describe('一键补全 fillMissingStructured', () => {
+  type LD = ReturnType<typeof emptyFmeaDraft>;
+  const make = (overrides: Partial<LD>) => ({ ...emptyFmeaDraft(), ...overrides });
+
+  it('有 AP H → 风险等级自动变"高"（AP 优先于 RPN）', () => {
+    const draft = make({
+      failureMode: '开裂',
+      failureEffect: '影响功能',
+      severity: '4', occurrence: '4', detection: '4',
+      apLevel: 'H' as LD['apLevel'],
+    });
+    const patched = fillMissingStructured(draft);
+    expect(patched.riskLevel).toBe('高');
+    expect(patched.conclusion).toBeTruthy();
+  });
+
+  it('有 S/O/D 但没 AP → 自动算 AP 再推风险等级', () => {
+    const draft = make({
+      failureMode: '断裂',
+      failureEffect: '安全风险',
+      severity: '10', occurrence: '9', detection: '8',
+    });
+    const patched = fillMissingStructured(draft);
+    expect(patched.apLevel).toBe('H');
+    expect(patched.riskLevel).toBe('高');
+  });
+
+  it('无 S/O/D 但有 RPN → 降级用 RPN 推（RPN>=100 高）', () => {
+    const draft = make({
+      failureMode: '开裂',
+      failureEffect: '影响外观',
+      severity: '8', occurrence: '8', detection: '2',
+    });
+    const patched = fillMissingStructured(draft);
+    expect(patched.riskLevel).toBe('高');
+  });
+
+  it('无 S/O/D 无 AP 但后果有"返修/抱怨" → 关键词推"中"', () => {
+    const draft = make({
+      failureMode: '异响',
+      failureEffect: '用户抱怨返修',
+    });
+    const patched = fillMissingStructured(draft);
+    expect(patched.riskLevel).toBe('中');
+  });
+
+  it('不覆写用户已填字段', () => {
+    const draft = make({
+      failureMode: '开裂',
+      severity: '10', occurrence: '10', detection: '10',
+      riskLevel: '低' as LD['riskLevel'],
+      conclusion: '用户自己填的结论',
+    });
+    const patched = fillMissingStructured(draft);
+    expect(patched.riskLevel).toBe('低');
+    expect(patched.conclusion).toBe('用户自己填的结论');
+  });
+
+  it('全空条目 → 风险等级兜底"中"，其他字段填空', () => {
+    const draft = make({});
+    const patched = fillMissingStructured(draft);
+    expect(patched.riskLevel).toBe('中');
+    expect(patched.apLevel).toBe('');
+    expect(patched.conclusion).toBe('');
+    expect(patched.designGuide).toBe('');
+  });
+});
+
+describe('标准词表归并 applyMasterVocabulary', () => {
+  const draft = () => ({
+    ...emptyFmeaDraft(),
+    failureMode: '开裂',
+    failureCause: '壁厚不足',
+    failureEffect: '功能失效',
+  });
+  const makeRec = () => buildFmeaRecord(draft(), { id: 'FM-A-A03-001-v01', username: 'u1' });
+  /** 模拟历史数据：原文有值但主词为空 */
+  const legacyRec = () => {
+    const base = makeRec();
+    return {
+      ...base,
+      failureModeMaster: '' as typeof base.failureModeMaster,
+      failureCauseMaster: '' as typeof base.failureCauseMaster,
+      failureEffectMaster: '' as typeof base.failureEffectMaster,
+    };
+  };
+
+  it('从原文归并出主词，且原文保持不变', () => {
+    const rec = legacyRec();
+    const { record, changedFields } = applyMasterVocabulary(rec);
+    expect(changedFields).toContain('failureModeMaster');
+    expect(record.failureModeMaster).toBe('破裂'); // 开裂 → 破裂
+    expect(record.failureMode).toBe('开裂'); // 原文不被覆写
+  });
+
+  it('匹配不到标准词时保留原主词，不产生变更', () => {
+    const baseRec = makeRec();
+    const rec = {
+      ...baseRec,
+      failureMode: '一种完全无法识别的奇怪描述XYZ',
+      failureModeMaster: '破裂' as typeof baseRec.failureModeMaster,
+    };
+    const { record, changedFields } = applyMasterVocabulary(rec);
+    expect(changedFields).not.toContain('failureModeMaster');
+    expect(record.failureModeMaster).toBe('破裂');
+  });
+
+  it('重复执行幂等：第二次不再产生变更', () => {
+    const first = applyMasterVocabulary(legacyRec()).record;
+    const second = applyMasterVocabulary(first);
+    expect(second.changedFields).toHaveLength(0);
+    expect(second.record.failureModeMaster).toBe(first.failureModeMaster);
+  });
+});
+
+describe('状态机 FmeaStatus', () => {
+  it('draft 可以去 review 或 archived', () => {
+    expect(allowedNextStatuses('draft').sort()).toEqual(['archived', 'review'].sort());
+  });
+  it('review 可以去 published / draft / archived', () => {
+    expect(allowedNextStatuses('review').sort()).toEqual(['archived', 'draft', 'published'].sort());
+  });
+  it('published 可以去 archived / review', () => {
+    expect(allowedNextStatuses('published').sort()).toEqual(['archived', 'review'].sort());
+  });
+  it('archived 只能去 review（重新发起评审）', () => {
+    expect(allowedNextStatuses('archived')).toEqual(['review']);
+  });
+
+  it('tryTransitStatus 成功返回 ok:true + entry', () => {
+    const r = tryTransitStatus('draft', 'review', '张三', '准备评审');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.newStatus).toBe('review');
+      expect(r.entry.from).toBe('draft');
+      expect(r.entry.to).toBe('review');
+      expect(r.entry.by).toBe('张三');
+      expect(r.entry.note).toBe('准备评审');
+      expect(r.entry.at).toMatch(/\d{4}-\d{2}-\d{2}T/); // ISO 时间格式
+    }
+  });
+
+  it('tryTransitStatus 不允许的跳转返回 ok:false + reason', () => {
+    const r = tryTransitStatus('draft', 'published', '张三');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('不允许');
+  });
+
+  it('tryTransitStatus 同状态返回失败', () => {
+    const r = tryTransitStatus('draft', 'draft', '张三');
+    expect(r.ok).toBe(false);
+  });
+
+  it('buildFmeaRecord 默认 status = draft，statusHistory 为空', () => {
+    const rec = buildFmeaRecord({ ...emptyFmeaDraft(), failureMode: 'X', action: 'Y' }, {
+      id: 'FM-TEST-001',
+      username: 'u1',
+    });
+    expect(rec.status).toBe('draft');
+    expect(rec.statusHistory).toEqual([]);
+  });
+
+  it('状态转换后追加历史记录，时间倒序查看最新操作', () => {
+    const rec = buildFmeaRecord({ ...emptyFmeaDraft(), failureMode: 'X', action: 'Y' }, {
+      id: 'FM-TEST-002',
+      username: 'u1',
+    });
+    const step1 = tryTransitStatus('draft', 'review', '张三', '提交评审');
+    expect(step1.ok).toBe(true);
+    let updated: typeof rec = {
+      ...rec,
+      status: (step1.ok ? step1.newStatus : rec.status),
+      statusHistory: [...rec.statusHistory, ...(step1.ok ? [step1.entry] : [])],
+    };
+    const step2 = tryTransitStatus('review', 'published', '李质量', '评审通过');
+    expect(step2.ok).toBe(true);
+    updated = {
+      ...updated,
+      status: (step2.ok ? step2.newStatus : updated.status),
+      statusHistory: [...updated.statusHistory, ...(step2.ok ? [step2.entry] : [])],
+    };
+    expect(updated.status).toBe('published');
+    expect(updated.statusHistory).toHaveLength(2);
+    expect(updated.statusHistory[0].to).toBe('review');
+    expect(updated.statusHistory[1].to).toBe('published');
+    expect(updated.statusHistory[1].note).toBe('评审通过');
   });
 });

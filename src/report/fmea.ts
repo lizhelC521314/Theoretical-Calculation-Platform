@@ -12,12 +12,92 @@
  */
 
 import { cleanFileName } from './db';
+import { computeAp, type ApLevel } from './fmeaRatings';
+import {
+  normalizeFailureMode,
+  normalizeFailureCause,
+  normalizeFailureEffect,
+  type FailureModeMaster,
+  type FailureCauseMaster,
+  type FailureEffectMaster,
+} from './fmeaWordTables';
+
+/** 方便 UI 层直接使用 SOD 锚点和 AP 徽标元数据 */
+export { S_SCALE, O_SCALE, D_SCALE, AP_META, type ApLevel } from './fmeaRatings';
+
+/** 主词类型别名（空字符串表示未能归并） */
+export type FmeaMasterWord = '' | FailureModeMaster | FailureCauseMaster | FailureEffectMaster;
 
 export const FMEA_SCHEMA = 'ctr-fmea-v1';
 
 /** 风险等级：历史案例没有 S/O/D 时按定性规则给出高/中/低 */
 export type RiskLevel = '' | '高' | '中' | '低';
 export const RISK_LEVELS: RiskLevel[] = ['高', '中', '低'];
+
+/** 状态机：草稿 → 评审 → 发布 → 归档；发布后可重新归档或回评审；评审可打回草稿 */
+export type FmeaStatus = 'draft' | 'review' | 'published' | 'archived';
+
+/** 状态机：各状态允许的下一个状态（显式枚举，不做隐式跳转） */
+const STATUS_TRANSITIONS: Record<FmeaStatus, FmeaStatus[]> = {
+  draft: ['review', 'archived'],          // 草稿可提交评审或直接归档（作废）
+  review: ['published', 'draft', 'archived'], // 评审可通过发布 / 打回草稿 / 归档
+  published: ['archived', 'review'],       // 发布后可归档或发起复审
+  archived: ['review'],                     // 归档后只能重新发起评审
+};
+
+/** 状态的人类可读标签 */
+export const FMEA_STATUS_META: Record<FmeaStatus, { label: string; hint: string }> = {
+  draft:     { label: '草稿',  hint: '编辑中，尚未提交评审' },
+  review:    { label: '评审中', hint: '等待专业组长与质量评审' },
+  published: { label: '已发布', hint: '评审通过，可被设计人员引用' },
+  archived:  { label: '已归档', hint: '作废、被证伪或长期不再使用' },
+};
+
+/** 状态变更历史（每次转换追加一条，不覆盖） */
+export interface FmeaStatusChange {
+  from: FmeaStatus;
+  to: FmeaStatus;
+  at: string; // ISO 时间
+  by: string; // 操作人（display name 或 username）
+  note?: string; // 变更原因 / 评审意见（可选）
+}
+
+/**
+ * 尝试把条目从 current 状态转到 target 状态。
+ * 成功返回 { ok: true, newStatus, historyEntry }；失败返回 { ok: false, reason }。
+ * 外部调用方需要自行把 historyEntry 追加到 record.statusHistory 数组。
+ */
+export function tryTransitStatus(
+  current: FmeaStatus,
+  target: FmeaStatus,
+  actor: string,
+  note?: string,
+  now = new Date().toISOString(),
+): { ok: true; newStatus: FmeaStatus; entry: FmeaStatusChange } | { ok: false; reason: string } {
+  if (current === target) return { ok: false, reason: '已是该状态' };
+  const allowed = STATUS_TRANSITIONS[current];
+  if (!allowed.includes(target)) {
+    return {
+      ok: false,
+      reason: `不允许从 ${FMEA_STATUS_META[current].label} 转到 ${FMEA_STATUS_META[target].label}`,
+    };
+  }
+  return {
+    ok: true,
+    newStatus: target,
+    entry: { from: current, to: target, at: now, by: actor, note },
+  };
+}
+
+/** 查询某个状态允许的下一个状态列表（用于 UI 渲染转换按钮） */
+export function allowedNextStatuses(status: FmeaStatus): FmeaStatus[] {
+  return STATUS_TRANSITIONS[status];
+}
+
+/** 状态元数据映射（供 UI 查表用） */
+export function statusMeta(s: FmeaStatus): { label: string; hint: string } {
+  return FMEA_STATUS_META[s];
+}
 
 /** 系统类别（固定值 + 自定义输入） */
 export const FMEA_SYSTEM_OPTIONS = ['进气系统', '热管理系统', '自定义'];
@@ -348,11 +428,20 @@ export interface FmeaDraft {
   failureCategory: string; // 失效分类（受控字典）
   causeCategory: string; // 原因分类（设计/材料/工艺/装配/使用）
   causeCode: string; // 原因编码（D/M/P/Mf + 细类）
-  riskLevel: RiskLevel; // 风险等级
-  severity: string; // S 严重度 1~10
+  riskLevel: RiskLevel; // 风险等级（历史：高/中/低；新：由 AP 自动推导）
+  apLevel: ApLevel | ''; // AIAG-VDA 行动优先级（H/M/L），由 S/O/D 自动计算
+  rpn: number | null; // RPN 仅作参考（AP 优先）
+  failureModeMaster: FailureModeMaster | ''; // 失效模式主词（归并后）
+  failureCauseMaster: FailureCauseMaster | ''; // 失效原因主词（归并后）
+  failureEffectMaster: FailureEffectMaster | ''; // 失效后果主词（归并后）
+  severity: string; // S 严重度 1~10（空串表示未填）
   occurrence: string; // O 频度 1~10
   detection: string; // D 探测度 1~10
+  severityBefore: string; // 措施前 S 评分（空串=未留痕，当前 severity 即为措施后值）
+  occurrenceBefore: string; // 措施前 O
+  detectionBefore: string; // 措施前 D
   action: string; // 建议的措施
+  measureActual: string; // 实际采取的措施（区别于建议措施；验证后回填）
   measureType: string; // 措施类型
   verificationStatus: string; // 验证状态
   designGuide: string; // 设计规避（逐条换行）
@@ -362,6 +451,8 @@ export interface FmeaDraft {
   remark: string; // 备注
   owner: string; // 责任人
   recordDate: string; // 记录时间（YYYY-MM-DD，识别不了时保留原文）
+  status: FmeaStatus; // 当前状态：草稿/评审/发布/归档
+  statusHistory: FmeaStatusChange[]; // 状态变更历史（按时间正序）
 }
 
 export interface FmeaRecord extends FmeaDraft {
@@ -408,7 +499,11 @@ export const FMEA_FIELDS: Array<{
   { key: 'occurrence', label: '频度 O', hint: '1~10，没有可留空', group: '风险' },
   { key: 'detection', label: '探测度 D', hint: '1~10，没有可留空', group: '风险' },
   { key: 'riskLevel', label: '风险等级', hint: '留空则按后果自动判定', options: RISK_LEVELS.filter(Boolean) as string[], group: '风险' },
+  { key: 'severityBefore', label: '措施前 S', hint: '留空则表示未留痕', group: '措施前评分' },
+  { key: 'occurrenceBefore', label: '措施前 O', hint: '留空则表示未留痕', group: '措施前评分' },
+  { key: 'detectionBefore', label: '措施前 D', hint: '留空则表示未留痕', group: '措施前评分' },
   { key: 'action', label: '建议的措施', hint: '可直接照做的对策', multiline: true, group: '措施' },
+  { key: 'measureActual', label: '实际采取的措施', hint: '验证后回填，区别于建议措施', multiline: true, group: '措施' },
   { key: 'measureType', label: '措施类型', hint: '设计/材料/工艺/检测', options: MEASURE_TYPES, group: '措施' },
   { key: 'verificationStatus', label: '验证状态', hint: '未验证 / 已验证 / 已验证有效', options: VERIFY_STATUSES, group: '措施' },
   { key: 'designGuide', label: '设计规避', hint: '2~3 条可直接执行的设计动作，逐条换行', multiline: true, group: '措施' },
@@ -441,10 +536,14 @@ const HEADER_ALIASES: Array<{ key: FmeaDraftKey; re: RegExp }> = [
   { key: 'failureCause', re: /失效起因|起因|机理|原因|根因/ },
   { key: 'causeCategory', re: /原因分类/ },
   { key: 'causeCode', re: /原因编码|原因细类|原因代码/ },
+  { key: 'severityBefore', re: /措施前.*S|前.*严重度|S.*前|基准.*S/i },
+  { key: 'occurrenceBefore', re: /措施前.*O|前.*频度|O.*前|基准.*O/i },
+  { key: 'detectionBefore', re: /措施前.*D|前.*探测度|D.*前|基准.*D/i },
   { key: 'severity', re: /严重度|^S$/i },
   { key: 'occurrence', re: /频度|发生度|频次|^O$/i },
   { key: 'detection', re: /探测度|^D$/i },
   { key: 'riskLevel', re: /风险等级|风险级别|^风险$/ },
+  { key: 'measureActual', re: /实际.*措施|实际.*对策|落地.*措施|整改.*实际/i },
   { key: 'measureType', re: /措施类型/ },
   { key: 'verificationStatus', re: /验证状态|验证结果/ },
   { key: 'conclusion', re: /一句话结论|结论/ },
@@ -474,10 +573,19 @@ export function emptyFmeaDraft(): FmeaDraft {
     causeCategory: '',
     causeCode: '',
     riskLevel: '',
+    apLevel: '',
+    rpn: null,
+    failureModeMaster: '',
+    failureCauseMaster: '',
+    failureEffectMaster: '',
     severity: '',
     occurrence: '',
     detection: '',
+    severityBefore: '',
+    occurrenceBefore: '',
+    detectionBefore: '',
     action: '',
+    measureActual: '',
     measureType: '',
     verificationStatus: '',
     designGuide: '',
@@ -487,6 +595,8 @@ export function emptyFmeaDraft(): FmeaDraft {
     remark: '',
     owner: '',
     recordDate: '',
+    status: 'draft',
+    statusHistory: [],
   };
 }
 
@@ -551,19 +661,110 @@ export function fmeaRpn(rec: Pick<FmeaDraft, 'severity' | 'occurrence' | 'detect
   return s * o * d;
 }
 
+/** 判断是否留痕了措施前的 S/O/D 完整评分 */
+export function hasBeforeRatings(rec: Pick<FmeaDraft, 'severityBefore' | 'occurrenceBefore' | 'detectionBefore'>): boolean {
+  return [rec.severityBefore, rec.occurrenceBefore, rec.detectionBefore].every((v) => {
+    const n = Number(v);
+    return Number.isInteger(n) && n >= 1 && n <= 10;
+  });
+}
+
+/** 判断是否留痕了措施后的 S/O/D 完整评分 */
+export function hasAfterRatings(rec: Pick<FmeaDraft, 'severity' | 'occurrence' | 'detection'>): boolean {
+  return [rec.severity, rec.occurrence, rec.detection].every((v) => {
+    const n = Number(v);
+    return Number.isInteger(n) && n >= 1 && n <= 10;
+  });
+}
+
+/** 比较两个 AP 字符串，返回 improve / same / regress */
+export function apDelta(before: string, after: string): 'improve' | 'same' | 'regress' | 'unknown' {
+  if (!before || !after) return 'unknown';
+  const rank: Record<string, number> = { H: 0, M: 1, L: 2 }; // H 最紧急（rank 小）
+  const b = rank[before];
+  const a = rank[after];
+  if (b == null || a == null) return 'unknown';
+  if (a < b) return 'improve'; // 例如 H→M
+  if (a > b) return 'regress'; // 例如 M→H（恶化，不应该发生）
+  return 'same';
+}
+
 /**
  * 风险等级：有 S/O/D 时按 RPN 分级；历史案例没有评分时按后果定性判定，不臆造数字。
  * 定性规则：安全/法规/召回/批量失效 → 高；抱怨/返修/功能下降 → 中；外观/舒适性 → 低。
  */
-export function deriveRiskLevel(draft: FmeaDraft): RiskLevel {
-  if (draft.riskLevel) return draft.riskLevel;
+/**
+ * 风险等级推导：**AP 优先于 RPN 优先于关键词**。
+ * 有 S/O/D → computeAp → AP H/M/L → 高/中/低
+ * 无 AP 但有 RPN → 按阈值推
+ * 都没有 → 后果/模式关键词兜底
+ */
+export function deriveRiskLevel(draft: FmeaDraft & { apLevel?: ApLevel | '' }): RiskLevel {
+  // 1. AP 优先：有 AP 直接映射
+  if (draft.apLevel === 'H') return '高';
+  if (draft.apLevel === 'M') return '中';
+  if (draft.apLevel === 'L') return '低';
+  // 2. RPN 兜底（有 S/O/D 但没算 apLevel 时）
   const rpn = fmeaRpn(draft);
   if (rpn !== null) return rpn >= 100 ? '高' : rpn >= 40 ? '中' : '低';
+  // 3. 关键词兜底（只有文本）
   const text = [draft.failureEffect, draft.failureMode, draft.remark, draft.conclusion].join(' ');
   if (/安全|法规|召回|人身|起火|冒烟|制动|转向|批量/.test(text)) return '高';
   if (/抱怨|返修|功能下降|异响|泄漏|漏油|开裂|断裂|变形|脱落/.test(text)) return '中';
   if (/外观|色差|喷霜|划伤|舒适|手感/.test(text)) return '低';
   return '中';
+}
+
+/**
+ * 一键补全缺失的结构化字段（导入页用）。
+ * 按 AP 优先原则推导：apLevel → riskLevel → conclusion → designGuide。
+ * 只覆盖空值，不覆写用户已填。
+ */
+export function fillMissingStructured(draft: FmeaDraft): FmeaDraft {
+  const out = { ...draft };
+  // AP：有 S/O/D 且当前 apLevel 为空 → 自动算
+  const hasSod = hasAfterRatings(draft);
+  if (hasSod && !out.apLevel) {
+    out.apLevel = computeAp(Number(out.severity), Number(out.occurrence), Number(out.detection));
+  }
+  // 风险等级：有 AP 按 AP，无 AP 按 RPN，无 RPN 按关键词
+  if (!out.riskLevel) {
+    out.riskLevel = deriveRiskLevel(out as typeof out & { apLevel?: ApLevel | '' });
+  }
+  // 一句话结论：空则推导
+  if (!out.conclusion) out.conclusion = deriveConclusion(out);
+  // 设计规避：空则推导
+  if (!out.designGuide) out.designGuide = deriveDesignGuide(out);
+  return out;
+}
+
+/**
+ * 用标准词表重新归并一条记录的主词（失效模式 / 失效原因 / 失效后果）。
+ * - 原文（failureMode 等）永不改写，只更新归并结果字段
+ * - 只有匹配到标准主词且与现值不同才更新，匹配不到时保留原主词
+ */
+export function applyMasterVocabulary(rec: FmeaRecord): {
+  record: FmeaRecord;
+  changedFields: string[];
+} {
+  const mode = normalizeFailureMode(rec.failureMode);
+  const cause = normalizeFailureCause(rec.failureCause);
+  const effect = normalizeFailureEffect(rec.failureEffect);
+  const updated: FmeaRecord = { ...rec };
+  const changedFields: string[] = [];
+  if (mode.master && mode.master !== rec.failureModeMaster) {
+    updated.failureModeMaster = mode.master;
+    changedFields.push('failureModeMaster');
+  }
+  if (cause.master && cause.master !== rec.failureCauseMaster) {
+    updated.failureCauseMaster = cause.master;
+    changedFields.push('failureCauseMaster');
+  }
+  if (effect.master && effect.master !== rec.failureEffectMaster) {
+    updated.failureEffectMaster = effect.master;
+    changedFields.push('failureEffectMaster');
+  }
+  return { record: changedFields.length ? updated : rec, changedFields };
 }
 
 /** 规范化风险等级：非法值退回空串 */
@@ -632,24 +833,53 @@ export function fmeaDedupeKey(draft: FmeaDraft): string {
   return [draft.machine, draft.part, draft.failureMode, draft.failureCause].map(norm).join('|');
 }
 
-/** 补齐结构化字段：分类、产品编码、风险、结论、设计规避（不改动手工填写的内容） */
+/**
+ * 补齐结构化字段：产品编码、分类、风险、AP、标准词归并（不改动手工填写的内容）。
+ * 方案要求：标准词表归并 + AIAG-VDA AP 优先于 RPN。
+ */
 export function applyStructuredDefaults(draft: FmeaDraft): FmeaDraft {
   const machine = String(draft.machine || '').trim() || '通用';
   const part = String(draft.part || '').trim() || '未分类';
   const product = classifyProduct(part || draft.system);
+
+  // ① 标准词表归并（自动，不覆写原文）
+  const fmN = normalizeFailureMode(draft.failureMode);
+  const fcN = normalizeFailureCause(draft.failureCause);
+  const feN = normalizeFailureEffect(draft.failureEffect);
+
+  // ② AP / RPN 自动计算
+  const s = Number(draft.severity);
+  const o = Number(draft.occurrence);
+  const d = Number(draft.detection);
+  const sodValid = [s, o, d].every((n) => Number.isInteger(n) && n >= 1 && n <= 10);
+  const apLevel: ApLevel | '' = sodValid ? computeAp(s, o, d) : '';
+  const rpn = sodValid ? s * o * d : null;
+
+  // ③ 风险等级：AP 优先（H→高, M→中, L→低），否则退回 RPN / 定性
+  let riskLevel: RiskLevel = draft.riskLevel || '';
+  if (apLevel === 'H') riskLevel = '高';
+  else if (apLevel === 'M') riskLevel = '中';
+  else if (apLevel === 'L') riskLevel = '低';
+  else riskLevel = draft.riskLevel || deriveRiskLevel(draft);
+
   const merged: FmeaDraft = {
     ...draft,
     machine,
     part,
     productCategory: draft.productCategory || product.major,
     productSubCategory: draft.productSubCategory || (draft.productCategory ? '' : product.minor),
+    failureModeMaster: draft.failureModeMaster || fmN.master || '',
+    failureCauseMaster: draft.failureCauseMaster || fcN.master || '',
+    failureEffectMaster: draft.failureEffectMaster || feN.master || '',
     failureCategory: draft.failureCategory || deriveFailureCategory(draft),
     failureCode: draft.failureCode || deriveFailureCode(draft),
     causeCategory: deriveCauseCategory(draft),
     causeCode: draft.causeCode || deriveCauseCode(draft),
+    apLevel,
+    rpn,
+    riskLevel,
     conclusion: deriveConclusion(draft),
     designGuide: deriveDesignGuide(draft),
-    riskLevel: draft.riskLevel || deriveRiskLevel(draft),
   };
   return merged;
 }
@@ -708,14 +938,17 @@ export function expandFmeaTerms(query: string): string[] {
   return Array.from(terms);
 }
 
-/** 字段加权（越大越先命中）：标题/失效模式权重最高 */
+/** 字段加权（越大越先命中）：标题/失效模式/主词权重最高 */
 const SEARCH_FIELD_WEIGHTS: Array<[number, (rec: FmeaRecord) => string]> = [
+  [9, (r) => r.failureModeMaster || ''],
   [8, (r) => r.failureMode],
   [6, (r) => r.keywords],
+  [6, (r) => r.failureCauseMaster || ''],
   [5, (r) => r.failureCode],
   [4, (r) => r.part],
   [4, (r) => r.productSubCategory],
   [4, (r) => r.failureCategory],
+  [4, (r) => r.failureEffectMaster || ''],
   [3, (r) => r.productCategory],
   [3, (r) => r.causeCode],
   [3, (r) => r.system],
@@ -749,23 +982,221 @@ export function scoreFmeaRecord(rec: FmeaRecord, query: string): { score: number
   return { score, terms: matched };
 }
 
-/** 相似案例：同部件 > 同材料 > 同失效分类 > 同机种/系统 */
-export function similarFmeaRecords(rec: FmeaRecord, list: FmeaRecord[], limit = 5): FmeaRecord[] {
+/** 相似案例的匹配维度及权重（权重按方案「同产品族 > 同失效编码 > 同 AP > 同材料/部件」排序） */
+const SIMILARITY_WEIGHTS: Array<{
+  key: keyof FmeaRecord | 'family' | 'minor';
+  weight: number;
+  label: string;
+}> = [
+  { key: 'family', weight: 12, label: '同产品族' },
+  { key: 'failureCode', weight: 10, label: '同失效模式编码' },
+  { key: 'minor', weight: 8, label: '同产品小类' },
+  { key: 'apLevel', weight: 7, label: '同 AP 级别' },
+  { key: 'causeCode', weight: 6, label: '同原因编码' },
+  { key: 'part', weight: 5, label: '同部件名称' },
+  { key: 'material', weight: 4, label: '同材料' },
+  { key: 'failureCategory', weight: 4, label: '同失效分类' },
+  { key: 'failureModeMaster', weight: 4, label: '同失效模式主词' },
+  { key: 'system', weight: 2, label: '同系统' },
+  { key: 'machine', weight: 1, label: '同机种' },
+];
+
+/** 计算两条案例的相似度分数 + 命中维度（用于可解释展示） */
+export function similarityOf(a: FmeaRecord, b: FmeaRecord): { score: number; hits: string[] } {
+  const hits: string[] = [];
+  let score = 0;
+  for (const dim of SIMILARITY_WEIGHTS) {
+    let av: string;
+    let bv: string;
+    if (dim.key === 'family') {
+      av = familyOfId(a.id);
+      bv = familyOfId(b.id);
+      // 旧格式 FM-年份-序号 familyOfId 返回 'U'，产品大类字段兜底
+      if (av === 'U' && a.productCategory) av = classCode(a.productCategory) || av;
+      if (bv === 'U' && b.productCategory) bv = classCode(b.productCategory) || bv;
+    } else if (dim.key === 'minor') {
+      av = partOfId(a.id);
+      bv = partOfId(b.id);
+      if (av === 'U' && a.productSubCategory) av = classCode(a.productSubCategory) || av;
+      if (bv === 'U' && b.productSubCategory) bv = classCode(b.productSubCategory) || bv;
+    } else {
+      av = String(((a as unknown as Record<string, unknown>)[dim.key as string]) || '').trim();
+      bv = String(((b as unknown as Record<string, unknown>)[dim.key as string]) || '').trim();
+    }
+    if (av && bv && av === bv) {
+      score += dim.weight;
+      hits.push(dim.label);
+    }
+  }
+  return { score, hits };
+}
+
+/** 导入后迁移提示清单的分析结果 */
+export interface FmeaImportAnalysis {
+  /** 本次解析的总行数 */
+  totalRows: number;
+  /** 解析时跳过的行数（空行 / 示例行 / 小节标题） */
+  skippedRows: number;
+  /** 缺 S/O/D 至少一项（无法自动算 AP） */
+  missingRatings: number;
+  /** 未匹配产品族（归入 'U 未分类' 桶） */
+  unclassifiedFamily: number;
+  /** 未匹配产品小类（归入 XX 兜底桶） */
+  unclassifiedMinor: number;
+  /** 失效模式原文未能归并到标准主词表（failureModeMaster === ''） */
+  unmergedModeMaster: number;
+  /** 失效原因原文未能归并到标准主词表 */
+  unmergedCauseMaster: number;
+  /** 失效后果原文未能归并到标准主词表 */
+  unmergedEffectMaster: number;
+  /** 缺风险等级（留空但后果可推导 → 会自动填） */
+  missingRiskLevel: number;
+  /** 缺建议措施（留空） */
+  missingAction: number;
+  /** 缺责任部门/责任人 */
+  missingOwner: number;
+  /** 缺记录时间 */
+  missingDate: number;
+  /** 产品族分布（产品大类 → 数量） */
+  familyBreakdown: Array<{ major: string; count: number }>;
+  /** 严重问题行的明细（前 20 行） */
+  issues: Array<{
+    rowNumber: number;
+    sourceSheet: string;
+    failureMode: string;
+    issues: string[];
+  }>;
+}
+
+/** 对解析后的 FMEA 行做一次扫描分析，给用户生成迁移提示清单 */
+export function analyzeImportedRecords(
+  rows: FmeaParsedRow[],
+  skipped = 0,
+): FmeaImportAnalysis {
+  const totalRows = rows.length;
+  let missingRatings = 0;
+  let unclassifiedFamily = 0;
+  let unclassifiedMinor = 0;
+  let unmergedModeMaster = 0;
+  let unmergedCauseMaster = 0;
+  let unmergedEffectMaster = 0;
+  let missingRiskLevel = 0;
+  let missingAction = 0;
+  let missingOwner = 0;
+  let missingDate = 0;
+  const familyCount = new Map<string, number>();
+  const issues: FmeaImportAnalysis['issues'] = [];
+
+  for (const r of rows) {
+    const d = r.draft;
+    const rowIssues: string[] = [];
+
+    // 1. 产品族 / 小类匹配
+    const cls = classifyProduct((d.part || d.system || '').trim());
+    if (cls.major === 'U 未分类') {
+      unclassifiedFamily++;
+      rowIssues.push('产品族未匹配');
+    }
+    // 小类未匹配 = minor 以 XX 结尾
+    const minorCode = cls.minor.match(/^([A-J])\d{2}/);
+    if (!minorCode && cls.major !== 'U 未分类') {
+      unclassifiedMinor++;
+      rowIssues.push('产品小类未匹配');
+    }
+    // 产品族分布
+    const famKey = cls.major || 'U 未分类';
+    familyCount.set(famKey, (familyCount.get(famKey) || 0) + 1);
+
+    // 2. S/O/D 评分
+    const hasS = /^[1-9]$|^10$/.test(String(d.severity || '').trim());
+    const hasO = /^[1-9]$|^10$/.test(String(d.occurrence || '').trim());
+    const hasD = /^[1-9]$|^10$/.test(String(d.detection || '').trim());
+    if (!hasS || !hasO || !hasD) {
+      missingRatings++;
+      const missing = [!hasS && 'S', !hasO && 'O', !hasD && 'D'].filter(Boolean).join('/');
+      rowIssues.push(`缺 ${missing} 评分`);
+    }
+
+    // 3. 标准词表归并（master 字段已在 parse 阶段自动填充）
+    if (!d.failureModeMaster) {
+      unmergedModeMaster++;
+      rowIssues.push('失效模式未归并');
+    }
+    if (!d.failureCauseMaster) {
+      unmergedCauseMaster++;
+      rowIssues.push('失效原因未归并');
+    }
+    if (!d.failureEffectMaster) {
+      unmergedEffectMaster++;
+    }
+
+    // 4. 其他可选字段缺失
+    if (!d.riskLevel) missingRiskLevel++;
+    if (!d.action) {
+      missingAction++;
+      rowIssues.push('缺建议措施');
+    }
+    if (!d.owner) {
+      missingOwner++;
+    }
+    if (!d.recordDate) missingDate++;
+
+    if (rowIssues.length && issues.length < 20) {
+      issues.push({
+        rowNumber: r.rowNumber,
+        sourceSheet: r.sourceSheet,
+        failureMode: d.failureMode || '(无失效模式)',
+        issues: rowIssues,
+      });
+    }
+  }
+
+  const familyBreakdown = Array.from(familyCount.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([major, count]) => ({ major, count }));
+
+  return {
+    totalRows,
+    skippedRows: skipped,
+    missingRatings,
+    unclassifiedFamily,
+    unclassifiedMinor,
+    unmergedModeMaster,
+    unmergedCauseMaster,
+    unmergedEffectMaster,
+    missingRiskLevel,
+    missingAction,
+    missingOwner,
+    missingDate,
+    familyBreakdown,
+    issues,
+  };
+}
+
+/**
+ * 相似案例：按多维度权重融合排序（产品族 > 失效编码 > AP > 部件/材料/分类 …）。
+ * 返回的每条案例携带 hits 列表，UI 可直接展示命中的相似原因。
+ */
+export function similarFmeaRecords(
+  rec: FmeaRecord,
+  list: FmeaRecord[],
+  limit = 5,
+): Array<{ record: FmeaRecord; score: number; hits: string[] }> {
   return list
     .filter((x) => x.id !== rec.id)
-    .map((x) => {
-      let score = 0;
-      if (rec.part && x.part === rec.part) score += 3;
-      if (rec.material && x.material === rec.material) score += 2;
-      if (rec.failureCategory && x.failureCategory === rec.failureCategory) score += 2;
-      if (rec.machine && x.machine === rec.machine) score += 1;
-      if (rec.system && x.system === rec.system) score += 1;
-      return { x, score };
-    })
+    .map((x) => ({ x, ...similarityOf(rec, x) }))
     .filter((p) => p.score > 0)
-    .sort((a, b) => b.score - a.score || b.x.id.localeCompare(a.x.id))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      // 同分时让 AP 级别更紧急的排前面（H > M > L）
+      const apRank: Record<string, number> = { H: 0, M: 1, L: 2 };
+      const ar = apRank[b.x.apLevel || ''] ?? 3;
+      const br = apRank[a.x.apLevel || ''] ?? 3;
+      if (ar !== br) return ar - br;
+      return b.x.id.localeCompare(a.x.id);
+    })
     .slice(0, limit)
-    .map((p) => p.x);
+    .map((p) => ({ record: p.x, score: p.score, hits: p.hits }));
 }
 
 /** 清洗单元格：去首尾空白，压缩连续空格（保留换行，便于阅读长文本） */
@@ -923,11 +1354,20 @@ export function parseFmeaRows(rows: string[][], sourceSheet = ''): FmeaParseResu
       failureCategory: get('failureCategory'),
       causeCategory: get('causeCategory'),
       causeCode: get('causeCode'),
+      apLevel: '',
+      rpn: null,
+      failureModeMaster: '',
+      failureCauseMaster: '',
+      failureEffectMaster: '',
       riskLevel: normalizeRiskLevel(get('riskLevel')),
       severity: get('severity'),
       occurrence: get('occurrence'),
       detection: get('detection'),
+      severityBefore: get('severityBefore'),
+      occurrenceBefore: get('occurrenceBefore'),
+      detectionBefore: get('detectionBefore'),
       action: get('action'),
+      measureActual: get('measureActual'),
       measureType: get('measureType'),
       verificationStatus: get('verificationStatus'),
       designGuide: get('designGuide'),
@@ -937,6 +1377,8 @@ export function parseFmeaRows(rows: string[][], sourceSheet = ''): FmeaParseResu
       remark: get('remark'),
       owner: get('owner'),
       recordDate: normalizeRecordDate(get('recordDate')),
+      status: 'draft',
+      statusHistory: [],
     };
     // R01：示例/占位行不入库；缺失效模式同样跳过
     if (!built.failureMode || isPlaceholderDraft(built)) {
@@ -1058,22 +1500,123 @@ export function validateFmeaDraft(draft: FmeaDraft): FmeaValidation {
   };
 }
 
-/** 编号：FM-年份-三位序号 */
-export function formatFmeaId(year: number, seq: number): string {
+/**
+ * 编号规则：方案 3.3 节
+ * 新版：FM-{产品族代码}-{部件代码}-{三位序号}-v{两位版本}
+ *       例：FM-A-A03-001-v01 = 空气滤清器总成 / 滤芯总成 / 第 1 条 / 第 1 版
+ *       例：FM-U-U-007-v03   = 未分类产品族 / 未分类部件 / 第 7 条 / 第 3 版
+ *
+ * 旧版（导入历史 Excel 时自动兼容）：FM-{年份}-{三位序号}
+ *       例：FM-2026-015
+ *       旧格式在读取时自动识别并标记为 legacy，下次编辑保存时按新规则重新编号。
+ */
+
+/** 从产品大类/小类文本取代码（如 "A 空气滤清器总成" → "A"；"A03 滤芯总成" → "A03"） */
+export function productCodes(major: string, minor: string): { family: string; part: string } {
+  const fam = String(major || '').match(/^([A-JU])/)?.[1] || 'U';
+  // 先用小类里的编码；没有小类编码时，未分类桶用 U，其余用大类+XX 兜底
+  const minorCode = String(minor || '').match(/^([A-J]\d{2})/)?.[1];
+  const part = minorCode || (fam === 'U' ? 'U' : `${fam}XX`);
+  return { family: fam, part };
+}
+
+/** 新版编号 */
+export function formatFmeaIdV2(family: string, part: string, seq: number, version = 1): string {
+  const f = (family || 'U').toUpperCase();
+  const p = (part || 'U').toUpperCase();
+  return `FM-${f}-${p}-${String(seq).padStart(3, '0')}-v${String(version).padStart(2, '0')}`;
+}
+
+/** 旧版编号（历史 Excel 迁移时使用，按当年连续编号） */
+export function formatFmeaIdV1(year: number, seq: number): string {
   return `FM-${year}-${String(seq).padStart(3, '0')}`;
 }
 
-/** 从已有文件名中取该年份已用的最大序号 */
-export function nextFmeaId(fileNames: string[], year: number): string {
+/** 编号解析：区分新旧格式 */
+export interface ParsedFmeaId {
+  isV2: boolean;
+  family?: string;
+  part?: string;
+  seq?: number;
+  version?: number;
+  year?: number;
+  legacy?: string; // 完整旧格式编号
+}
+
+export function parseFmeaId(id: string): ParsedFmeaId {
+  const s = String(id || '').toUpperCase();
+  const v2 = s.match(/^FM-([A-JU])-([A-J]\d{2}|U|UXX|XX)-(\d{3,})-V(\d{2})$/);
+  if (v2) {
+    return { isV2: true, family: v2[1], part: v2[2], seq: Number(v2[3]), version: Number(v2[4]) };
+  }
+  const v1 = s.match(/^FM-(\d{4})-(\d{3,})$/);
+  if (v1) {
+    return { isV2: false, year: Number(v1[1]), seq: Number(v1[2]), legacy: s };
+  }
+  return { isV2: false, legacy: s };
+}
+
+/** 取编号里的产品族代码（旧格式返回 U） */
+export function familyOfId(id: string): string {
+  const p = parseFmeaId(id);
+  return p.isV2 ? p.family || 'U' : 'U';
+}
+
+/** 取编号里的部件代码（旧格式返回 U） */
+export function partOfId(id: string): string {
+  const p = parseFmeaId(id);
+  return p.isV2 ? p.part || 'U' : 'U';
+}
+
+/** 取编号里的序号（两种格式都能取） */
+export function seqOfId(id: string): number {
+  const p = parseFmeaId(id);
+  return p.seq ?? 0;
+}
+
+/** 取编号里的版本（旧格式视为 v01） */
+export function versionOfId(id: string): number {
+  const p = parseFmeaId(id);
+  return p.isV2 && p.version ? p.version : 1;
+}
+
+/**
+ * 同一产品族+部件下取下一个可用序号（新版）
+ * 旧格式条目算在 "U/U" 桶里，迁移时会被重新编号
+ */
+export function nextFmeaIdV2(fileNames: string[], family: string, part: string, version = 1): string {
+  const F = (family || 'U').toUpperCase();
+  const P = (part || 'U').toUpperCase();
   let max = 0;
   for (const name of fileNames) {
-    const m = String(name || '').match(/FM-(\d{4})-(\d{3,})/i);
-    if (!m) continue;
-    if (Number(m[1]) !== year) continue;
-    max = Math.max(max, Number(m[2]));
+    const p = parseFmeaId(String(name).replace(/\.parquet$/i, ''));
+    if (p.isV2 && p.family === F && p.part === P) {
+      max = Math.max(max, p.seq ?? 0);
+    }
   }
-  return formatFmeaId(year, max + 1);
+  return formatFmeaIdV2(F, P, max + 1, version);
 }
+
+/** 向后兼容：旧版按年份顺序（Excel 迁移用） */
+export function nextFmeaIdV1(fileNames: string[], year: number): string {
+  let max = 0;
+  for (const name of fileNames) {
+    const p = parseFmeaId(String(name).replace(/\.parquet$/i, ''));
+    if (!p.isV2 && p.year === year) max = Math.max(max, p.seq ?? 0);
+  }
+  return formatFmeaIdV1(year, max + 1);
+}
+
+/** 同一卡片升版：序号不变，版本号 +1 */
+export function bumpVersion(id: string): string {
+  const p = parseFmeaId(id);
+  if (!p.isV2) return id; // 旧格式升版仍保旧格式
+  return formatFmeaIdV2(p.family!, p.part!, p.seq!, (p.version || 1) + 1);
+}
+
+/** 兼容别名（保留原名便于现有调用点逐步迁移） */
+export const formatFmeaId = formatFmeaIdV2;
+export const nextFmeaId = nextFmeaIdV2;
 
 /** 归档文件名即编号 */
 export function fmeaFileName(id: string): string {
@@ -1083,8 +1626,11 @@ export function fmeaFileName(id: string): string {
 /** 从归档文件名取编号 */
 export function parseFmeaFileName(name: string): string {
   const stem = String(name || '').replace(/\.(parquet|json|csv)$/i, '');
-  const m = stem.match(/FM-\d{4}-\d{3,}/i);
-  return m ? m[0].toUpperCase() : stem;
+  // 优先新格式
+  if (/^FM-[A-JU]-([A-J]\d{2}|U|UXX|XX)-\d{3,}-V\d{2}$/i.test(stem)) return stem.toUpperCase();
+  // 旧格式兜底
+  const legacy = stem.match(/FM-\d{4}-\d{3,}/i);
+  return legacy ? legacy[0].toUpperCase() : stem.toUpperCase();
 }
 
 /** 反序列化记录 */
@@ -1112,11 +1658,20 @@ export function parseFmeaRecord(text: string): FmeaRecord | null {
       failureCategory: str(raw.failureCategory),
       causeCategory: str(raw.causeCategory),
       causeCode: str(raw.causeCode),
+      apLevel: str(raw.apLevel) as ApLevel | '',
+      rpn: typeof raw.rpn === 'number' ? raw.rpn : null,
+      failureModeMaster: (str(raw.failureModeMaster) || '') as FailureModeMaster | '',
+      failureCauseMaster: (str(raw.failureCauseMaster) || '') as FailureCauseMaster | '',
+      failureEffectMaster: (str(raw.failureEffectMaster) || '') as FailureEffectMaster | '',
       riskLevel: normalizeRiskLevel(raw.riskLevel),
       severity: str(raw.severity),
       occurrence: str(raw.occurrence),
       detection: str(raw.detection),
+      severityBefore: str(raw.severityBefore),
+      occurrenceBefore: str(raw.occurrenceBefore),
+      detectionBefore: str(raw.detectionBefore),
       action: str(raw.action),
+      measureActual: str(raw.measureActual),
       measureType: str(raw.measureType),
       verificationStatus: str(raw.verificationStatus),
       designGuide: str(raw.designGuide),
@@ -1126,6 +1681,14 @@ export function parseFmeaRecord(text: string): FmeaRecord | null {
       remark: str(raw.remark),
       owner: str(raw.owner),
       recordDate: str(raw.recordDate),
+      status: (['draft', 'review', 'published', 'archived'] as const).includes(raw.status as FmeaStatus)
+        ? (raw.status as FmeaStatus)
+        : 'published', // 旧文件没 status 字段 → 默认已发布
+      statusHistory: Array.isArray(raw.statusHistory)
+        ? (raw.statusHistory as FmeaStatusChange[]).filter(
+            (e) => e && typeof e.from === 'string' && typeof e.to === 'string' && typeof e.at === 'string',
+          )
+        : [],
       sourceSheet: str(raw.sourceSheet),
       citations: parseFmeaCitations((raw as { citations?: unknown }).citations),
       createdAt: str(raw.createdAt),
@@ -1163,11 +1726,20 @@ export function draftFromRecord(rec: FmeaRecord): FmeaDraft {
     failureCategory: rec.failureCategory,
     causeCategory: rec.causeCategory,
     causeCode: rec.causeCode,
+    apLevel: rec.apLevel,
+    rpn: rec.rpn,
+    failureModeMaster: rec.failureModeMaster,
+    failureCauseMaster: rec.failureCauseMaster,
+    failureEffectMaster: rec.failureEffectMaster,
     riskLevel: rec.riskLevel,
     severity: rec.severity,
     occurrence: rec.occurrence,
     detection: rec.detection,
+    severityBefore: rec.severityBefore,
+    occurrenceBefore: rec.occurrenceBefore,
+    detectionBefore: rec.detectionBefore,
     action: rec.action,
+    measureActual: rec.measureActual,
     measureType: rec.measureType,
     verificationStatus: rec.verificationStatus,
     designGuide: rec.designGuide,
@@ -1177,6 +1749,8 @@ export function draftFromRecord(rec: FmeaRecord): FmeaDraft {
     remark: rec.remark,
     owner: rec.owner,
     recordDate: rec.recordDate,
+    status: rec.status,
+    statusHistory: rec.statusHistory,
   };
 }
 
@@ -1194,10 +1768,28 @@ export function buildFmeaRecord(
   const now = new Date().toISOString();
   // 入库前统一补齐分类 / 风险等级 / 结论 / 设计规避，检索与详情无需再兜底
   const structured = applyStructuredDefaults(draft);
+  // 状态：如果有 previous，保持 previous 的状态与历史；没有则用 draft.status + 初始化历史
+  const status: FmeaStatus = meta.previous?.status ?? draft.status ?? 'draft';
+  const baseHistory = meta.previous?.statusHistory ?? draft.statusHistory ?? [];
+  // 第一次入库时，如果不是 draft，需要有一条初始历史
+  const statusHistory: FmeaStatusChange[] =
+    baseHistory.length > 0 || status === 'draft'
+      ? baseHistory
+      : [
+          {
+            from: 'draft',
+            to: status,
+            at: now,
+            by: meta.displayName || meta.username,
+            note: '首次入库时继承状态',
+          },
+        ];
   return {
     schema: FMEA_SCHEMA,
     id: meta.id,
     ...structured,
+    status,
+    statusHistory,
     sourceSheet: meta.sourceSheet ?? meta.previous?.sourceSheet ?? '',
     citations: meta.previous?.citations ?? [],
     createdAt: meta.previous?.createdAt || now,
@@ -1228,8 +1820,12 @@ const CSV_HEADER = [
   '严重度S',
   '频度O',
   '探测度D',
+  '措施前S',
+  '措施前O',
+  '措施前D',
   '风险等级',
   '建议的措施',
+  '实际采取的措施',
   '措施类型',
   '验证状态',
   '设计规避',
@@ -1267,8 +1863,12 @@ export function fmeaRecordToCsv(rec: FmeaRecord): string {
       rec.severity,
       rec.occurrence,
       rec.detection,
+      rec.severityBefore,
+      rec.occurrenceBefore,
+      rec.detectionBefore,
       rec.riskLevel,
       rec.action,
+      rec.measureActual,
       rec.measureType,
       rec.verificationStatus,
       rec.designGuide,
@@ -1282,6 +1882,235 @@ export function fmeaRecordToCsv(rec: FmeaRecord): string {
       .map(csvCell)
       .join(','),
   ].join('\r\n');
+}
+
+/** 项目 FMEA 工作表：按系统→产品族→部件分组，每组带 AP 汇总 */
+export interface WorksheetItem {
+  rec: FmeaRecord;
+}
+
+export interface WorksheetPartGroup {
+  partKey: string;      // 部件名
+  part: string;
+  rows: WorksheetItem[]; // 该部件下的所有条目
+  h: number;
+  m: number;
+  l: number;
+  unknown: number;       // 缺 AP 评分
+}
+
+export interface WorksheetFamilyGroup {
+  majorKey: string;       // "A 空气滤清器总成"
+  majorLabel: string;     // "空气滤清器总成"（去掉大类编码）
+  parts: WorksheetPartGroup[];
+  h: number;
+  m: number;
+  l: number;
+  unknown: number;
+  totalRows: number;
+}
+
+export interface WorksheetSystemGroup {
+  systemKey: string;
+  systemLabel: string;
+  families: WorksheetFamilyGroup[];
+  h: number;
+  m: number;
+  l: number;
+  unknown: number;
+  totalRows: number;
+}
+
+export interface WorksheetSummary {
+  totalRecords: number;
+  published: number;
+  draft: number;
+  review: number;
+  archived: number;
+  h: number;
+  m: number;
+  l: number;
+  unknown: number;
+  families: Array<{ major: string; h: number; m: number; l: number; total: number }>;
+}
+
+export interface FmeaWorksheet {
+  systems: WorksheetSystemGroup[];
+  summary: WorksheetSummary;
+}
+
+/**
+ * 把 FMEA 记录列表聚合成"项目 FMEA 工作表"结构。
+ * 分组键：系统 → 产品大类 → 部件名；每一层都算 AP 分布（H/M/L/未知）。
+ */
+export function buildWorksheet(records: FmeaRecord[]): FmeaWorksheet {
+  // 状态统计
+  const summary: WorksheetSummary = {
+    totalRecords: records.length,
+    published: 0,
+    draft: 0,
+    review: 0,
+    archived: 0,
+    h: 0, m: 0, l: 0, unknown: 0,
+    families: [],
+  };
+
+  // families 统计辅助
+  const famStats = new Map<string, { major: string; h: number; m: number; l: number; total: number }>();
+
+  // 第一层：按系统
+  const sysMap = new Map<string, WorksheetSystemGroup>();
+  for (const r of records) {
+    // 状态计数
+    if (r.status === 'published') summary.published++;
+    else if (r.status === 'draft') summary.draft++;
+    else if (r.status === 'review') summary.review++;
+    else if (r.status === 'archived') summary.archived++;
+
+    // AP 计数（summary 全局 + 家庭分类）
+    const ap = r.apLevel;
+    const bump = (which: 'h' | 'm' | 'l' | 'unknown', famMajor?: string) => {
+      if (which === 'h') summary.h++;
+      else if (which === 'm') summary.m++;
+      else if (which === 'l') summary.l++;
+      else summary.unknown++;
+      if (famMajor) {
+        const s = famStats.get(famMajor) || { major: famMajor, h: 0, m: 0, l: 0, total: 0 };
+        if (which === 'h') s.h++;
+        else if (which === 'm') s.m++;
+        else if (which === 'l') s.l++;
+        s.total++;
+        famStats.set(famMajor, s);
+      }
+    };
+    if (!ap) bump('unknown', r.productCategory);
+    else if (ap === 'H') bump('h', r.productCategory);
+    else if (ap === 'M') bump('m', r.productCategory);
+    else if (ap === 'L') bump('l', r.productCategory);
+    else bump('unknown', r.productCategory);
+
+    // 构建分组键
+    const sys = (r.system || '未分组系统').trim() || '未分组系统';
+    const major = (r.productCategory || 'U 未分类').trim() || 'U 未分类';
+    const part = (r.part || '未分类部件').trim() || '未分类部件';
+
+    // 确保系统存在
+    let sg = sysMap.get(sys);
+    if (!sg) {
+      sg = {
+        systemKey: sys,
+        systemLabel: sys === '未分组系统' ? '（未指定系统）' : sys,
+        families: [],
+        h: 0, m: 0, l: 0, unknown: 0,
+        totalRows: 0,
+      };
+      sysMap.set(sys, sg);
+    }
+    sg.totalRows++;
+
+    // 在系统下找/建 family
+    let fg = sg.families.find((f) => f.majorKey === major);
+    if (!fg) {
+      fg = {
+        majorKey: major,
+        majorLabel: major.replace(/^[A-JU]\s+/, '').trim() || major,
+        parts: [],
+        h: 0, m: 0, l: 0, unknown: 0,
+        totalRows: 0,
+      };
+      sg.families.push(fg);
+    }
+    fg.totalRows++;
+
+    // family 的 AP 分布也同步
+    const fAp = ap || '';
+    if (!fAp) fg.unknown++;
+    else if (fAp === 'H') fg.h++;
+    else if (fAp === 'M') fg.m++;
+    else if (fAp === 'L') fg.l++;
+    else fg.unknown++;
+    sg.h += (fAp === 'H' ? 1 : 0);
+    sg.m += (fAp === 'M' ? 1 : 0);
+    sg.l += (fAp === 'L' ? 1 : 0);
+    sg.unknown += (!fAp || !['H', 'M', 'L'].includes(fAp) ? 1 : 0);
+
+    // 在 family 下找/建 part
+    let pg = fg.parts.find((p) => p.partKey === part);
+    if (!pg) {
+      pg = {
+        partKey: part,
+        part,
+        rows: [],
+        h: 0, m: 0, l: 0, unknown: 0,
+      };
+      fg.parts.push(pg);
+    }
+    pg.rows.push({ rec: r });
+    if (!fAp) pg.unknown++;
+    else if (fAp === 'H') pg.h++;
+    else if (fAp === 'M') pg.m++;
+    else if (fAp === 'L') pg.l++;
+    else pg.unknown++;
+  }
+
+  // 排序：系统按 totalRows 降序；family 按 majorKey；part 按 totalRows 降序；rows 按 AP 紧急度
+  for (const sg of sysMap.values()) {
+    sg.families.sort((a, b) => a.majorKey.localeCompare(b.majorKey));
+    for (const fg of sg.families) {
+      fg.parts.sort((a, b) => b.rows.length - a.rows.length);
+      for (const pg of fg.parts) {
+        pg.rows.sort((a, b) => {
+          const rank = (s: string) => (s === 'H' ? 0 : s === 'M' ? 1 : s === 'L' ? 2 : 3);
+          return rank(a.rec.apLevel || '') - rank(b.rec.apLevel || '');
+        });
+      }
+    }
+  }
+  const systems = Array.from(sysMap.values()).sort((a, b) => b.totalRows - a.totalRows);
+
+  summary.families = Array.from(famStats.values()).sort((a, b) => b.total - a.total);
+
+  return { systems, summary };
+}
+
+/** 七步法风格 CSV 导出（中文 + 英文双表头） */
+export function worksheetToCsv(ws: FmeaWorksheet): string {
+  const CN = ['系统', '产品族', '部件', '编号', '状态', '失效模式', '失效原因', '失效后果', 'S', 'O', 'D', 'AP', '风险', '建议措施', '实际措施', '责任人'];
+  const EN = ['system', 'family', 'part', 'id', 'status', 'failureMode', 'failureCause', 'failureEffect', 'S', 'O', 'D', 'AP', 'risk', 'action', 'measureActual', 'owner'];
+  const rows: string[][] = [CN, EN];
+  const esc = (v: unknown) => {
+    const s = String(v ?? '');
+    if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  for (const sg of ws.systems) {
+    for (const fg of sg.families) {
+      for (const pg of fg.parts) {
+        for (const item of pg.rows) {
+          const r = item.rec;
+          rows.push([
+            esc(sg.systemLabel),
+            esc(fg.majorLabel),
+            esc(pg.part),
+            esc(r.id),
+            esc(r.status),
+            esc(r.failureMode),
+            esc(r.failureCause),
+            esc(r.failureEffect),
+            esc(r.severity),
+            esc(r.occurrence),
+            esc(r.detection),
+            esc(r.apLevel),
+            esc(r.riskLevel),
+            esc(r.action),
+            esc(r.measureActual),
+            esc(r.owner),
+          ]);
+        }
+      }
+    }
+  }
+  return rows.map((r) => r.join(',')).join('\r\n');
 }
 
 export function fmeaCsvFileName(rec: FmeaRecord): string {
