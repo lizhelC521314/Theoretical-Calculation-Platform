@@ -673,7 +673,8 @@ export function MaterialsSearchPage({ user }: Props) {
             </button>
           )}
           <span className="lib-count">
-            {cacheBusy ? '正在读取材料详情… · ' : ''}筛选结果 {filtered.length} 条 · 双击行可用本地软件打开
+            {cacheBusy ? '正在读取材料详情… · ' : ''}筛选结果 {filtered.length} 条 ·{' '}
+            {IS_STANDARD ? '双击预览（禁止外部程序打开）' : '双击行可用本地软件打开'}
           </span>
         </div>
       </div>
@@ -729,7 +730,7 @@ export function MaterialsSearchPage({ user }: Props) {
                       if (selected?.fullPath !== file.fullPath) selectFile(file);
                     }}
                     onDoubleClick={() => openFile(file)}
-                    title="单击预览，双击用本地软件打开"
+                    title={IS_STANDARD ? '单击预览，双击预览（禁止外部程序打开）' : '单击预览，双击用本地软件打开'}
                   >
                     <td className="center">
                       <input
@@ -777,17 +778,19 @@ export function MaterialsSearchPage({ user }: Props) {
                     <td className="small">{formatSize(file.size)}</td>
                     <td className="mono">{file.name}</td>
                     <td className="center">
-                      <button
-                        className="btn-link danger"
-                        title="删除该材料记录"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeFile(file);
-                        }}
-                        onDoubleClick={(e) => e.stopPropagation()}
-                      >
-                        删除
-                      </button>
+                      {!IS_STANDARD && (
+                        <button
+                          className="btn-link danger"
+                          title="删除该材料记录"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeFile(file);
+                          }}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                        >
+                          删除
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, isDesktop, type CtrUser } from '../api';
+import { api, isDesktop, type CtrUser, type Project } from '../api';
 import { PdfViewer } from '../components/PdfViewer';
+import { IS_STANDARD } from '../edition';
 import {
   KBE_DOC_ACCEPT,
+  addKbeDocCitation,
   inferKbeDocCategory,
   parseKbeDocFileName,
   todayKbeDocDate,
@@ -428,7 +430,7 @@ export function KbeDocImportPage({ user, category }: Props) {
  * 知识经验库·资料检索页
  * 左侧按关键词、类别与专属字段筛选，右侧内置 PDF 阅读器预览，并支持元数据补录与删除。
  */
-export function KbeDocSearchPage({ category }: Props) {
+export function KbeDocSearchPage({ user, category }: Props) {
   const cfg = kbeDocConfig(category);
   const filterField = cfg.fields.find((f) => f.filterInList);
   const { records, dir, exists, error, setError, refresh } = useKbeRecords(category);
@@ -438,6 +440,10 @@ export function KbeDocSearchPage({ category }: Props) {
   const [fieldFilter, setFieldFilter] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [toast, setToast] = useState('');
+  /** 引用到项目：项目下拉与引用状态（与 FMEA 库同构） */
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [citeProjectId, setCiteProjectId] = useState('');
+  const [citing, setCiting] = useState(false);
   /** 元数据编辑草稿：null 表示未进入编辑 */
   const [draft, setDraft] = useState<{
     title: string;
@@ -451,6 +457,22 @@ export function KbeDocSearchPage({ category }: Props) {
     setToast(msg);
     window.setTimeout(() => setToast(''), 2800);
   };
+
+  // 项目列表供「引用到当前项目」选择（与 FMEA 检索页一致）
+  useEffect(() => {
+    let cancel = false;
+    api.project.list(user.id).then((list) => {
+      if (!cancel) setProjects(list || []);
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [user.id]);
+
+  // 所选项目默认取第一个，减少一次操作
+  useEffect(() => {
+    if (!citeProjectId && projects.length) setCiteProjectId(projects[0].id);
+  }, [projects, citeProjectId]);
 
   useEffect(() => {
     setKeyword('');
@@ -518,6 +540,45 @@ export function KbeDocSearchPage({ category }: Props) {
     }
   };
 
+  /** 引用到当前项目：写入引用记录，导出计算书时文末按分类列出（与 FMEA 库同构） */
+  const citeToProject = async () => {
+    if (!selected) return;
+    const project = projects.find((p) => p.id === citeProjectId);
+    if (!project) {
+      showToast('请先在「项目管理」中创建项目');
+      return;
+    }
+    setCiting(true);
+    try {
+      const next = addKbeDocCitation(selected, {
+        projectId: project.id,
+        projectName: project.name,
+        username: user.username,
+        displayName: user.displayName,
+        at: new Date().toISOString(),
+      });
+      const res = await api.kbe.docCite({
+        category,
+        id: selected.id,
+        citation: (next.citations || []).find((c) => c.projectId === project.id) || {
+          projectId: project.id,
+          projectName: project.name,
+          username: user.username,
+          displayName: user.displayName,
+          at: new Date().toISOString(),
+        },
+      });
+      if (!res.ok) {
+        setError(`引用失败：${res.message || '未知错误'}`);
+        return;
+      }
+      await refresh();
+      showToast(`已引用到「${project.name}」，导出计算书时将列在文末引用资料中`);
+    } finally {
+      setCiting(false);
+    }
+  };
+
   return (
     <div className="test-search fmea-page training-page">
       <div className="settings-card">
@@ -525,12 +586,15 @@ export function KbeDocSearchPage({ category }: Props) {
           <h3>{cfg.label} · 资料检索</h3>
           <div className="ts-status">
             <span className="chip">库内 {records.length}</span>
+            {IS_STANDARD && <span className="chip">只读浏览</span>}
             <button className="btn-ghost sm" onClick={refresh}>
               刷新
             </button>
-            <button className="btn-ghost sm" onClick={() => api.app.openPath(dir)}>
-              打开归档目录
-            </button>
+            {!IS_STANDARD && (
+              <button className="btn-ghost sm" onClick={() => api.app.openPath(dir)}>
+                打开归档目录
+              </button>
+            )}
           </div>
         </div>
         <div className="ts-toolbar">
@@ -614,7 +678,9 @@ export function KbeDocSearchPage({ category }: Props) {
               <div className="fmea-list-empty">
                 {records.length === 0
                   ? exists
-                    ? `${cfg.label}暂无资料，请到「${cfg.label}导入」页上传 PPT / Word / PDF`
+                    ? IS_STANDARD
+                      ? `${cfg.label}暂无资料，请联系管理员在科研版中导入`
+                      : `${cfg.label}暂无资料，请到「${cfg.label}导入」页上传 PPT / Word / PDF`
                     : `共享目录中还没有「${cfg.label}」文件夹，请先创建后再导入`
                   : '没有匹配的资料，换个关键词或清除筛选'}
               </div>
@@ -655,21 +721,48 @@ export function KbeDocSearchPage({ category }: Props) {
                       ) : null;
                     })}
                     {selected.createdByDisplay && <span className="chip">导入人：{selected.createdByDisplay}</span>}
-                    <button className="btn-ghost sm" onClick={() => startEdit(selected)}>
-                      编辑元数据
-                    </button>
-                    <button className="btn-ghost sm" onClick={() => api.app.openPath(selected.pdfPath || '')}>
-                      用默认程序打开
-                    </button>
-                    <button
-                      className="btn-ghost sm"
-                      onClick={() => api.app.openPath((selected.pdfPath || '').replace(/[^\\/]+$/, ''))}
-                    >
-                      打开所在目录
-                    </button>
-                    <button className="btn-link danger sm" onClick={() => removeRecord(selected)}>
-                      删除
-                    </button>
+                    <span className="chip">被引用 {(selected.citations || []).length} 次</span>
+                    <span className="fmea-cite">
+                      <select
+                        className="tu-project"
+                        value={citeProjectId}
+                        onChange={(e) => setCiteProjectId(e.target.value)}
+                        disabled={!projects.length || citing}
+                      >
+                        {projects.length === 0 && <option value="">暂无项目</option>}
+                        {projects.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="btn-primary sm"
+                        onClick={citeToProject}
+                        disabled={citing || !projects.length}
+                      >
+                        引用到当前项目
+                      </button>
+                    </span>
+                    {!IS_STANDARD && (
+                      <>
+                        <button className="btn-ghost sm" onClick={() => startEdit(selected)}>
+                          编辑元数据
+                        </button>
+                        <button className="btn-ghost sm" onClick={() => api.app.openPath(selected.pdfPath || '')}>
+                          用默认程序打开
+                        </button>
+                        <button
+                          className="btn-ghost sm"
+                          onClick={() => api.app.openPath((selected.pdfPath || '').replace(/[^\\/]+$/, ''))}
+                        >
+                          打开所在目录
+                        </button>
+                        <button className="btn-link danger sm" onClick={() => removeRecord(selected)}>
+                          删除
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 

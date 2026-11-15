@@ -1505,13 +1505,15 @@ export function FmeaSearchPage({ user, onOpenImport }: Props) {
                       编辑
                     </button>
                   )}
-                  <button
-                    className="btn-link danger sm"
-                    onClick={() => selected && removeRecord(selected.file)}
-                    disabled={busy}
-                  >
-                    删除
-                  </button>
+                  {!IS_STANDARD && (
+                    <button
+                      className="btn-link danger sm"
+                      onClick={() => selected && removeRecord(selected.file)}
+                      disabled={busy}
+                    >
+                      删除
+                    </button>
+                  )}
                 </div>
               </div>
 

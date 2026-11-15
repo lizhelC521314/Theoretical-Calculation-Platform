@@ -80,14 +80,14 @@ describe('计算书结构化输出', () => {
     expect(chapter.materialBindings[0].material).toContain('滤纸 A');
   });
 
-  it('PDF 计算书包含计算依据、SI 值、材料来源与假设小节', () => {
+  it('PDF 计算书包含计算依据、SI 值与材料来源，且不导出「适用条件与假设」', () => {
     const html = buildPdfHtml(model);
     expect(html).toContain('计算依据');
     expect(html).toContain('标准依据');
     expect(html).toContain('ISO 5011');
     expect(html).toContain('SI 值');
     expect(html).toContain('材料来源');
-    expect(html).toContain('适用条件与假设');
+    expect(html).not.toContain('适用条件与假设');
     expect(html).toContain('公式编号');
     expect(html).toContain('v1.0.0（已发布）');
   });
@@ -119,5 +119,44 @@ describe('计算书结构化输出', () => {
     // docx 是 zip 容器，base64 解码后应以 PK 开头
     const head = Buffer.from(b64.slice(0, 8), 'base64').toString('latin1');
     expect(head.startsWith('PK')).toBe(true);
+  });
+});
+
+describe('计算书只导出主公式 + 过滤空结果', () => {
+  it('仅保留 label 含「主公式」的 latex；其余辅助式/曲线不导出', () => {
+    const e = makeEntry();
+    const m = buildReportModel([e], project, user);
+    const fxs = m.chapters[0].formulas;
+    expect(fxs.length).toBeGreaterThan(0);
+    // 全部都应为主公式（如果该公式有主公式标注）
+    const hasMain = (airFilterElement.latex ?? []).some((fx) => /主公式/.test(fx.label));
+    if (hasMain) {
+      expect(fxs.every((fx) => /主公式/.test(fx.label))).toBe(true);
+    } else {
+      // 回退：保留第一条 latex
+      expect(fxs.length).toBe(1);
+    }
+  });
+
+  it('空 value（"—"）的输出参数被过滤，不在结果表中导出', () => {
+    const e = makeEntry();
+    // 人为构造：solve 未产出某个 output（key 不在结果中）
+    const f = airFilterElement;
+    const missingKey = f.outputs[0].key;
+    delete (e.outputs as Record<string, number>)[missingKey];
+    const m = buildReportModel([e], project, user);
+    const out = m.chapters[0].outputs;
+    expect(out.some((o) => o.symbol === f.outputs[0].symbol && o.value === '—')).toBe(false);
+    // 至少还保留一个有数值的输出（数据本身有值，没被全部过滤）
+    expect(out.some((o) => o.value !== '—' && o.value !== '')).toBe(true);
+  });
+
+  it('PDF 中「理论公式」小节只出现主公式标签', () => {
+    const e = makeEntry();
+    const m = buildReportModel([e], project, user);
+    const html = buildPdfHtml(m);
+    // 不应出现「辅助式」「TL 曲线」等辅助公式标签
+    expect(html).not.toMatch(/fx-label">辅助式/);
+    expect(html).not.toMatch(/fx-label">TL 曲线/);
   });
 });

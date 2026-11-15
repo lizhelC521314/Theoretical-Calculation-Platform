@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type CtrUser } from '../api';
+import { PdfViewer } from '../components/PdfViewer';
 import { IS_STANDARD } from '../edition';
 import { KBE_DESIGN, UNC_CALC_LIB, UNC_TEST_LIB, UNC_TRUSTED, buildTrustedXlsxBase64, extractKeywords, parseArchiveName, productKey, trustedFileName } from '../report/db';
 
@@ -104,6 +105,9 @@ export function DatabasePage({ user, onNavigate }: Props) {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
+  /** 右侧内置预览选中的文件（PDF 用 PdfViewer，xlsx 用表格预览） */
+  const [preview, setPreview] = useState<DbFile | null>(null);
+  const [sheet, setSheet] = useState<{ rows: string[][]; error: string } | null>(null);
 
   const showToast = (t: string) => {
     setToast(t);
@@ -126,6 +130,28 @@ export function DatabasePage({ user, onNavigate }: Props) {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // xlsx 归档（计算书 / 试验表 / 可信资产）不经过 PDF 阅读器，直接读行数据做表格预览
+  useEffect(() => {
+    setSheet(null);
+    if (!preview || /\.pdf$/i.test(preview.name)) return;
+    let cancel = false;
+    (async () => {
+      try {
+        const res = await api.db.read({ fullPath: preview.fullPath });
+        if (cancel) return;
+        if (!res.ok) {
+          setSheet({ rows: [], error: res.message || '读取归档文件失败' });
+          return;
+        }
+        const rows = (res.rows || []).map((r) => (r || []).map((c) => (c == null ? '' : String(c))));
+        setSheet({ rows, error: '' });
+      } catch (e) {
+        if (!cancel) setSheet({ rows: [], error: e instanceof Error ? e.message : String(e) });
+      }
+    })();
+    return () => { cancel = true; };
+  }, [preview]);
 
   /** 从归档文件名生成 productKey，跳过 PDF（仅 xlsx 可用于可信资产匹配） */
   const genKeys = useMemo(
@@ -189,8 +215,12 @@ export function DatabasePage({ user, onNavigate }: Props) {
     }
   };
 
-  /** 双击文件卡片：调用系统默认程序打开原文 */
+  /** 双击文件卡片：标准版走内置预览，科研版调用系统默认程序打开原文 */
   const openFile = useCallback(async (f: DbFile) => {
+    if (IS_STANDARD) {
+      setPreview(f);
+      return;
+    }
     const res = await api.app.openPath(f.fullPath);
     if (!res.ok) showToast(`无法打开：${res.message || '未知错误'}`);
   }, []);
@@ -211,7 +241,7 @@ export function DatabasePage({ user, onNavigate }: Props) {
         </div>
         <div className="kv"><span>计算库</span><b style={{ fontSize: 12 }}>{UNC_CALC_LIB}</b></div>
         <div className="kv"><span>试验库</span><b style={{ fontSize: 12 }}>{UNC_TEST_LIB}</b></div>
-        <div className="kv"><span>产品设计库</span><b style={{ fontSize: 12 }}>{KBE_DESIGN}</b></div>
+        <div className="kv"><span>设计档案库</span><b style={{ fontSize: 12 }}>{KBE_DESIGN}</b></div>
         {!IS_STANDARD && (
           <div className="kv"><span>可信资产库</span><b style={{ fontSize: 12 }}>{UNC_TRUSTED}</b></div>
         )}
@@ -245,52 +275,129 @@ export function DatabasePage({ user, onNavigate }: Props) {
         )}
       </div>
 
-      {tab === 'design' && (
-        <FileList
-          files={designFiles}
-          busy={busy}
-          onOpen={openFile}
-          hint="型号设计档案由「产品定义库」发布型号时自动导出：包含型号概况、需求清单、关键参数、计算记录引用与版本基线。"
-          emptyActions={
-            onNavigate ? [{ label: '去产品定义库', onClick: () => onNavigate('productLib') }] : undefined
-          }
-        />
-      )}
+      <div className="db-split">
+        <div className="db-file-col">
+          {tab === 'design' && (
+            <FileList
+              files={designFiles}
+              busy={busy}
+              onOpen={openFile}
+              onSelect={setPreview}
+              selectedPath={preview?.fullPath}
+              hint="型号设计档案由「产品定义库」发布型号时自动导出：包含型号概况、需求清单、关键参数、计算记录引用与版本基线。"
+              emptyActions={
+                onNavigate ? [{ label: '去产品定义库', onClick: () => onNavigate('productLib') }] : undefined
+              }
+            />
+          )}
 
-      {tab === 'calc' && (
-        <FileList
-          files={calcFiles}
-          onBuildTrusted={IS_STANDARD ? undefined : buildTrustedFor}
-          busy={busy}
-          onOpen={openFile}
-          hint="计算书来自「项目管理」：在项目卡片上点「导出到数据库」后即归档到计算库。"
-          emptyActions={
-            onNavigate ? [{ label: '去项目管理', onClick: () => onNavigate('projects') }] : undefined
-          }
-        />
-      )}
-      {tab === 'test' && (
-        <FileList
-          files={testFiles}
-          busy={busy}
-          onOpen={openFile}
-          hint="试验测试库来自「试验报告导入」：导入报告并在检索页归档后，这里会列出对应测试表。"
-          emptyActions={
-            onNavigate ? [{ label: '去试验报告导入', onClick: () => onNavigate('testsImport') }] : undefined
-          }
-        />
-      )}
-      {!IS_STANDARD && tab === 'trusted' && (
-        <FileList
-          files={trustedFiles}
-          busy={busy}
-          onOpen={openFile}
-          hint="可信资产由计算书与试验测试表自动匹配生成：先在「项目管理」导出计算书，再在计算书卡片上点「生成可信资产」。"
-          emptyActions={
-            onNavigate ? [{ label: '去项目管理', onClick: () => onNavigate('projects') }] : undefined
-          }
-        />
-      )}
+          {tab === 'calc' && (
+            <FileList
+              files={calcFiles}
+              onBuildTrusted={IS_STANDARD ? undefined : buildTrustedFor}
+              busy={busy}
+              onOpen={openFile}
+              onSelect={setPreview}
+              selectedPath={preview?.fullPath}
+              hint="计算书来自「项目管理」：在项目卡片上点「导出到数据库」后即归档到计算库。"
+              emptyActions={
+                onNavigate ? [{ label: '去项目管理', onClick: () => onNavigate('projects') }] : undefined
+              }
+            />
+          )}
+          {tab === 'test' && (
+            <FileList
+              files={testFiles}
+              busy={busy}
+              onOpen={openFile}
+              onSelect={setPreview}
+              selectedPath={preview?.fullPath}
+              hint="试验测试库来自「试验报告导入」：导入报告并在检索页归档后，这里会列出对应测试表。"
+              emptyActions={
+                onNavigate ? [{ label: '去试验报告导入', onClick: () => onNavigate('testsImport') }] : undefined
+              }
+            />
+          )}
+          {!IS_STANDARD && tab === 'trusted' && (
+            <FileList
+              files={trustedFiles}
+              busy={busy}
+              onOpen={openFile}
+              onSelect={setPreview}
+              selectedPath={preview?.fullPath}
+              hint="可信资产由计算书与试验测试表自动匹配生成：先在「项目管理」导出计算书，再在计算书卡片上点「生成可信资产」。"
+              emptyActions={
+                onNavigate ? [{ label: '去项目管理', onClick: () => onNavigate('projects') }] : undefined
+              }
+            />
+          )}
+        </div>
+
+        <div className="preview-area">
+          {!preview ? (
+            <div className="preview-empty">
+              <div className="pe-icon">📄</div>
+              <div className="pe-title">选择左侧文件预览</div>
+              <div className="pe-sub">
+                {IS_STANDARD ? '标准版仅支持在软件内预览，预览已禁止截屏' : '单击文件卡片即可在此预览'}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="preview-head">
+                <h3>{preview.name}</h3>
+                <div className="preview-meta">
+                  {(() => {
+                    const p = parseArchiveName(preview.name);
+                    return (
+                      <>
+                        {p.project && <span className="chip">{p.project}</span>}
+                        {p.product && <span className="chip">{p.product}</span>}
+                        {p.version && <span className="chip">{p.version}</span>}
+                        <span className="chip">{(preview.size / 1024).toFixed(1)} KB</span>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+              {/\.pdf$/i.test(preview.name) ? (
+                <PdfViewer filePath={preview.fullPath} />
+              ) : (
+                <div className="sheet-preview">
+                  {!sheet ? (
+                    <div className="preview-loading">正在读取表格…</div>
+                  ) : sheet.error ? (
+                    <div className="preview-empty">
+                      <div className="pe-icon">📊</div>
+                      <div className="pe-title">该表格无法预览</div>
+                      <div className="pe-sub">{sheet.error}</div>
+                    </div>
+                  ) : sheet.rows.length === 0 ? (
+                    <div className="preview-empty">
+                      <div className="pe-title">表格为空</div>
+                    </div>
+                  ) : (
+                    <table>
+                      <tbody>
+                        {sheet.rows.slice(0, 80).map((r, i) => (
+                          <tr key={i}>
+                            {r.map((c, j) => (
+                              <td key={j} title={c}>{c}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  {sheet && sheet.rows.length > 80 && (
+                    <div className="sheet-more">仅显示前 80 行（共 {sheet.rows.length} 行）</div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
 
       {toast && <div className="toast">{toast}</div>}
     </div>
@@ -302,6 +409,8 @@ function FileList({
   onBuildTrusted,
   busy,
   onOpen,
+  onSelect,
+  selectedPath,
   hint,
   emptyActions,
 }: {
@@ -309,6 +418,9 @@ function FileList({
   onBuildTrusted?: (f: DbFile) => void;
   busy: string;
   onOpen?: (f: DbFile) => void;
+  /** 单击卡片：在右侧内置预览中打开 */
+  onSelect?: (f: DbFile) => void;
+  selectedPath?: string;
   hint?: string;
   emptyActions?: Array<{ label: string; onClick: () => void }>;
 }) {
@@ -338,9 +450,10 @@ function FileList({
         const p = parseArchiveName(f.name);
         return (
           <div
-            className="settings-card file-card"
+            className={`settings-card file-card${selectedPath === f.fullPath ? ' selected' : ''}`}
             key={f.fullPath}
-            title="双击用本地软件打开"
+            title={IS_STANDARD ? '单击预览，双击预览（标准版禁止用外部程序打开）' : '单击预览，双击用本地软件打开'}
+            onClick={() => onSelect?.(f)}
             onDoubleClick={() => onOpen?.(f)}
           >
             <div className="pc-head">

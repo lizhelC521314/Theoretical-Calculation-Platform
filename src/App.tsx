@@ -20,7 +20,6 @@ import { LabPage } from './pages/LabPage';
 import { DatabasePage } from './pages/DatabasePage';
 import { MaterialsImportPage } from './pages/MaterialsImportPage';
 import { MaterialsSearchPage } from './pages/MaterialsSearchPage';
-import { KnowledgeBasePage } from './pages/KnowledgeBasePage';
 import { FmeaImportPage } from './pages/FmeaImportPage';
 import { FmeaSearchPage } from './pages/FmeaSearchPage';
 import { TrainingImportPage } from './pages/TrainingImportPage';
@@ -31,7 +30,7 @@ import { KbeDocImportPage, KbeDocSearchPage } from './pages/KbeDocPage';
 import { ProductLibraryPage } from './pages/ProductLibraryPage';
 import { SettingsPage } from './pages/SettingsPage';
 
-type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'projectCheck' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'materialImport' | 'materialSearch' | 'fmeaImport' | 'fmeaSearch' | 'trainingImport' | 'trainingSearch' | 'theoryImport' | 'theorySearch' | 'productLib' | 'kbeStdImport' | 'kbeStdSearch' | 'kbeGdImport' | 'kbeGdSearch' | 'kbeLlImport' | 'kbeLlSearch' | 'kbePtImport' | 'kbePtSearch' | 'db' | 'kbe' | 'compare' | 'settings';
+type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'projectCheck' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'materialImport' | 'materialSearch' | 'fmeaImport' | 'fmeaSearch' | 'trainingImport' | 'trainingSearch' | 'theoryImport' | 'theorySearch' | 'productLib' | 'kbeStdImport' | 'kbeStdSearch' | 'kbeGdImport' | 'kbeGdSearch' | 'kbeLlImport' | 'kbeLlSearch' | 'kbePtImport' | 'kbePtSearch' | 'db' | 'compare' | 'settings';
 
 interface NavLeaf { key: Page; label: string; icon?: string }
 /** 分组可嵌套：如「产品验证」下的「试验报告」子分组 */
@@ -99,7 +98,6 @@ const NAV: NavItem[] = [
           { key: 'productLib', label: '产品定义库', icon: '📦' },
         ],
       },
-      { key: 'kbe', label: '产品设计库', icon: '📂' },
       {
         key: 'kbeStandards',
         label: '标准&规范',
@@ -159,8 +157,8 @@ const NAV: NavItem[] = [
   { key: 'settings', label: '设置', icon: '⚙' },
 ];
 
-/** 标准版不提供的导入 / 校准类页面 */
-const STANDARD_HIDDEN_PAGES = new Set<Page>(['testsImport', 'lab', 'caeImport', 'materialImport', 'fmeaImport', 'trainingImport', 'theoryImport']);
+/** 标准版不提供的导入 / 校准类页面（知识经验库四类资料在标准版只读，保护原始资料） */
+const STANDARD_HIDDEN_PAGES = new Set<Page>(['testsImport', 'lab', 'caeImport', 'materialImport', 'fmeaImport', 'trainingImport', 'theoryImport', 'kbeStdImport', 'kbeGdImport', 'kbeLlImport', 'kbePtImport']);
 
 /** 标准版导航：剔除导入类页面，并把只剩检索项的子分组上提为直接的检索入口 */
 function standardNav(items: NavItem[]): NavItem[] {
@@ -210,6 +208,35 @@ export function App() {
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   // 启动时所有模块分组默认折叠，仅一级入口可见，便于操作者快速定位
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // 审批弹窗（李华东收到新请求时弹出）
+  const [approvalRequest, setApprovalRequest] = useState<{
+    requestId: string;
+    fileName: string;
+    operator: string;
+    createdAt: number;
+  } | null>(null);
+  const [approvalMsg, setApprovalMsg] = useState('');
+  // 导出方等待审批时的全屏提示（避免点了导出却像没反应）
+  const [approvalWaiting, setApprovalWaiting] = useState<string | null>(null);
+
+  // 监听审批请求（仅标准版 + 审批人账号生效）
+  useEffect(() => {
+    if (!IS_STANDARD || !user || user.username !== '李华东') return;
+    const un = api.approval.onNewRequest((req) => {
+      setApprovalRequest(req);
+      setApprovalMsg('');
+    });
+    return un;
+  }, [user]);
+
+  // 监听「等待审批」进度（所有标准版账号可见）
+  useEffect(() => {
+    if (!IS_STANDARD || !user) return;
+    const un = api.approval.onProgress((p) => {
+      setApprovalWaiting(p.phase === 'waiting' ? p.fileName : null);
+    });
+    return un;
+  }, [user]);
 
   // 标准版兜底：隐藏页面（如旧状态残留）统一回到工作台
   useEffect(() => {
@@ -318,7 +345,6 @@ export function App() {
     theorySearch: '知识理论检索',
     productLib: '产品定义库',
     db: '产品数据库',
-    kbe: '产品设计库',
     kbeStdImport: '标准&规范 · 资料导入',
     kbeStdSearch: '标准&规范 · 资料检索',
     kbeGdImport: '设计指南 · 资料导入',
@@ -484,7 +510,6 @@ export function App() {
           {page === 'theorySearch' && <TheorySearchPage user={user} onOpenImport={() => setPage('theoryImport')} />}
           {page === 'productLib' && <ProductLibraryPage user={user} />}
           {page === 'db' && <DatabasePage user={user} onNavigate={setPage} />}
-          {page === 'kbe' && <KnowledgeBasePage user={user} />}
           {page === 'kbeStdImport' && <KbeDocImportPage user={user} category="standards" />}
           {page === 'kbeStdSearch' && <KbeDocSearchPage user={user} category="standards" />}
           {page === 'kbeGdImport' && <KbeDocImportPage user={user} category="guidelines" />}
@@ -499,6 +524,81 @@ export function App() {
           {page === 'settings' && <SettingsPage user={user} />}
         </main>
       </div>
+
+      {approvalWaiting && (
+        <div className="modal-overlay">
+          <div className="modal approval-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>正在等待李华东审批</h3>
+            <p className="approval-filename">{approvalWaiting}</p>
+            <p className="approval-hint">
+              已向审批服务发出请求，请让李华东在「设置 → 审批服务」中点击「解密」。
+              审批通过后文件会自动加密保存（最长等待 60 秒）。
+            </p>
+          </div>
+        </div>
+      )}
+
+      {approvalRequest && (
+        <div
+          className="modal-overlay"
+          onClick={() => setApprovalRequest(null)}
+        >
+          <div
+            className="modal approval-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>审批请求</h3>
+            <p className="approval-info">
+              <b>{approvalRequest.operator}</b> 请求导出：
+            </p>
+            <p className="approval-filename">{approvalRequest.fileName}</p>
+            <p className="approval-hint">
+              解密令牌 5 分钟内有效，过期后无法解密 .ctre 文件。
+            </p>
+            <div className="approval-actions">
+              <button
+                className="btn-primary sm"
+                onClick={async () => {
+                  const res = await api.approval.resolve({
+                    requestId: approvalRequest.requestId,
+                    action: 'approve',
+                  });
+                  if (res.ok) {
+                    setApprovalMsg('已解密，令牌已返回导出方');
+                    setApprovalRequest(null);
+                  } else {
+                    setApprovalMsg(res.message ?? '操作失败');
+                  }
+                }}
+              >
+                解密（批准）
+              </button>
+              <button
+                className="btn-danger sm"
+                onClick={async () => {
+                  const res = await api.approval.resolve({
+                    requestId: approvalRequest.requestId,
+                    action: 'reject',
+                  });
+                  if (res.ok) {
+                    setApprovalMsg('已拒绝，导出方将收到拒绝提示');
+                    setApprovalRequest(null);
+                  } else {
+                    setApprovalMsg(res.message ?? '操作失败');
+                  }
+                }}
+                style={{ marginLeft: 8 }}
+              >
+                拒绝
+              </button>
+            </div>
+            {approvalMsg && <div className="license-msg">{approvalMsg}</div>}
+            <p className="approval-timestamp">
+              申请时间：{new Date(approvalRequest.createdAt).toLocaleString()}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

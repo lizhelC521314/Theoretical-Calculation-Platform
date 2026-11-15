@@ -19,6 +19,7 @@ export async function exportReport(
   user: CtrUser,
   format: ReportFormat,
   fmeaRecords?: unknown[],
+  kbeDocs?: unknown[],
 ): Promise<{ ok: boolean; canceled?: boolean }> {
   const model = buildReportModel(records, project, user);
   // 关键：所有公式统一在渲染进程中用 KaTeX + html2canvas 转成 PNG，
@@ -26,10 +27,10 @@ export async function exportReport(
   await preRenderFormulaImages(model);
   const name = reportFileName(project);
   if (format === 'docx') {
-    const base64 = await buildDocxBase64(model, fmeaRecords);
+    const base64 = await buildDocxBase64(model, fmeaRecords, kbeDocs);
     return api.file.saveDocx({ defaultName: `${name}.docx`, base64 });
   }
-  const html = buildPdfHtml(model, fmeaRecords);
+  const html = buildPdfHtml(model, fmeaRecords, kbeDocs);
   return api.file.savePdf({ defaultName: `${name}.pdf`, html });
 }
 

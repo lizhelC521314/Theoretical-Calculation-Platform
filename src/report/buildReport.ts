@@ -159,18 +159,21 @@ export function buildReportModel(
       };
     });
 
-    const outputs = (f?.outputs ?? []).map((o) => {
-      const raw = (r.outputs as Record<string, number>)[o.key];
-      const disp = o.unitGroup ? autoUnit(raw, o.unitGroup) : { value: raw, unit: o.unit };
-      return {
-        label: o.label,
-        symbol: o.symbol,
-        value: typeof disp.value === 'number' ? formatNumber(disp.value, o.digits ?? 3) : '—',
-        unit: disp.unit,
-        si: typeof raw === 'number' ? formatNumber(raw, 6) : '—',
-        primary: !!o.primary,
-      };
-    });
+    const outputs = (f?.outputs ?? [])
+      .map((o) => {
+        const raw = (r.outputs as Record<string, number>)[o.key];
+        const disp = o.unitGroup ? autoUnit(raw, o.unitGroup) : { value: raw, unit: o.unit };
+        return {
+          label: o.label,
+          symbol: o.symbol,
+          value: typeof disp.value === 'number' ? formatNumber(disp.value, o.digits ?? 3) : '—',
+          unit: disp.unit,
+          si: typeof raw === 'number' ? formatNumber(raw, 6) : '—',
+          primary: !!o.primary,
+        };
+      })
+      // 计算结果中只保留有内容的参数；空值（'—'）不导出，表格更简洁
+      .filter((o) => o.value !== '—' && o.value !== '');
 
     const conclusion = outputs
       .filter((o) => o.primary)
@@ -202,11 +205,17 @@ export function buildReportModel(
           material: b.material,
         }))
         .filter((b) => !!b.material),
-      formulas: (f?.latex ?? []).map((fx) => ({
-        label: fx.label,
-        tex: fx.tex,
-        katexHtml: renderLatex(fx.tex),
-      })),
+      // 计算书只导出主公式：优先取 label 含「主公式」的项；
+      // 若一条主公式都没有（部分旧数据 label 未标），回退保留第一条 latex。
+      formulas: (() => {
+        const all = (f?.latex ?? []).map((fx) => ({
+          label: fx.label,
+          tex: fx.tex,
+          katexHtml: renderLatex(fx.tex),
+        }));
+        const mains = all.filter((fx) => /主公式/.test(fx.label));
+        return mains.length > 0 ? mains : all.slice(0, 1);
+      })(),
       inputs,
       outputs,
       conclusion,
@@ -855,7 +864,7 @@ function sectionNumbers(c: Chapter): SectionNumbers {
   sn.inputs = ++n;
   if (c.materialBindings.length) sn.materials = ++n;
   sn.outputs = ++n;
-  if (c.assumptions.length) sn.assumptions = ++n;
+  // 「适用条件与假设」按用户要求不在计算书中导出，编号也不占用
   if (c.conclusion) sn.conclusion = ++n;
   return sn as SectionNumbers;
 }
@@ -877,8 +886,8 @@ function basisLines(c: Chapter): string[] {
   return lines;
 }
 
-/** 生成 Word 文档并打包为 base64（主进程负责保存）。可选传入 fmeaRecords，末尾加 FMEA 点检表章节 */
-export async function buildDocxBase64(m: ReportModel, fmeaRecords?: unknown[]): Promise<string> {
+/** 生成 Word 文档并打包为 base64（主进程负责保存）。可选传入 fmeaRecords（末尾加 FMEA 点检表章节）与 kbeDocs（文末按分类列引用资料） */
+export async function buildDocxBase64(m: ReportModel, fmeaRecords?: unknown[], kbeDocs?: unknown[]): Promise<string> {
   const infoLines = [`项目名称：${m.projectName ?? '（临时计算）'}`];
   if (m.product) infoLines.push(`产品名称：${m.product}`);
   if (m.productVersion) infoLines.push(`产品版本：${m.productVersion}`);
@@ -902,6 +911,9 @@ export async function buildDocxBase64(m: ReportModel, fmeaRecords?: unknown[]): 
     toc.push(p(`第 ${c.no} 章  ${c.title}（${c.domain}）`, { size: 24, spacing: 100 }));
   }
   toc.push(p('附表  全部计算汇总', { size: 24, spacing: 100 }));
+  if (Array.isArray(kbeDocs) && kbeDocs.length > 0) {
+    toc.push(p('附录  引用资料', { size: 24, spacing: 100 }));
+  }
   toc.push(new Paragraph({ children: [new PageBreak()] }));
 
   const body: (Paragraph | Table)[] = [];
@@ -980,11 +992,6 @@ export async function buildDocxBase64(m: ReportModel, fmeaRecords?: unknown[]): 
       ),
     );
 
-    if (sn.assumptions) {
-      body.push(h2(`${c.no}.${sn.assumptions} 适用条件与假设`));
-      for (const a of c.assumptions) body.push(p(`· ${a}`, { size: 22, spacing: 60 }));
-    }
-
     if (sn.conclusion) {
       body.push(h2(`${c.no}.${sn.conclusion} 结论`));
       body.push(p(`经计算，${c.conclusion}。`, { size: 24 }));
@@ -1046,6 +1053,16 @@ export async function buildDocxBase64(m: ReportModel, fmeaRecords?: unknown[]): 
     });
   }
 
+  /** 引用资料（知识经验库四个分类）作为文末最后一节 */
+  const kbeChildren = kbeRefDocxChildren(kbeDocs);
+  if (kbeChildren.length > 0) {
+    sections.push({
+      properties: { page: PORTRAIT_PAGE },
+      footers: defaultFooter,
+      children: kbeChildren,
+    });
+  }
+
   const doc = new Document({
     title: m.docName,
     creator: m.compiler,
@@ -1065,6 +1082,83 @@ function pdfTable(headers: string[], rows: string[][], widths?: number[]): strin
   const th = headers.map((h, i) => `<th${col(i)}>${esc(h)}</th>`).join('');
   const trs = rows.map((r) => `<tr>${r.map((c, i) => `<td${col(i)}>${esc(c)}</td>`).join('')}</tr>`).join('');
   return `<table><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>`;
+}
+
+/** 知识经验库四个分类在引用资料中的展示顺序与名称 */
+const KBE_REF_CATEGORIES: Array<{ key: string; label: string }> = [
+  { key: 'standards', label: '标准&规范' },
+  { key: 'guidelines', label: '设计指南' },
+  { key: 'lessons', label: '经验教训' },
+  { key: 'papers', label: '论文/专利' },
+];
+
+/** 把引用资料按分类分组（保持 standards → guidelines → lessons → papers 顺序） */
+function groupKbeByCategory(docs?: unknown[]): Array<{ key: string; label: string; items: Record<string, string>[] }> {
+  if (!Array.isArray(docs) || docs.length === 0) return [];
+  return KBE_REF_CATEGORIES.map(({ key, label }) => ({
+    key,
+    label,
+    items: docs
+      .filter((d) => String((d as Record<string, unknown>).category || '') === key)
+      .map((d) => {
+        const r = d as Record<string, unknown>;
+        return {
+          id: String(r.id || ''),
+          title: String(r.title || '未命名资料'),
+          author: String(r.author || ''),
+          publishedAt: String(r.publishedAt || ''),
+        };
+      }),
+  })).filter((g) => g.items.length > 0);
+}
+
+/** Word：文末「附录 引用资料」——按分类列出被本项目引用的资料名称 */
+function kbeRefDocxChildren(kbeDocs?: unknown[]): (Paragraph | Table)[] {
+  const groups = groupKbeByCategory(kbeDocs);
+  if (groups.length === 0) return [];
+  const children: (Paragraph | Table)[] = [h1('附录  引用资料')];
+  const total = groups.reduce((n, g) => n + g.items.length, 0);
+  children.push(p(`本项目编制过程中引用了知识经验库中 ${total} 份资料，按分类列示如下：`, { spacing: 120 }));
+  for (const g of groups) {
+    children.push(h2(g.label));
+    g.items.forEach((d, i) => {
+      const extra = d.author ? `（${d.author}${d.publishedAt ? `，${d.publishedAt}` : ''}）` : d.publishedAt ? `（${d.publishedAt}）` : '';
+      children.push(p(`${i + 1}. [${d.id}] ${d.title}${extra}`, { spacing: 80 }));
+    });
+  }
+  children.push(
+    p('注：以上资料来自知识经验库（标准&规范 / 设计指南 / 经验教训 / 论文专利），引用关系在该库中留痕可追溯。', {
+      size: 19,
+      spacing: 100,
+    }),
+  );
+  return children;
+}
+
+/** PDF：文末「附录 引用资料」section 字符串，分组与 Word 一致 */
+function kbePdfSection(kbeDocs?: unknown[]): string {
+  const groups = groupKbeByCategory(kbeDocs);
+  if (groups.length === 0) return '';
+  const total = groups.reduce((n, g) => n + g.items.length, 0);
+  const body = groups
+    .map(
+      (g) => `<h2>${esc(g.label)}</h2><ul>` +
+        g.items
+          .map((d) => {
+            const extra = d.author ? `（${esc(d.author)}${d.publishedAt ? `，${esc(d.publishedAt)}` : ''}）` : d.publishedAt ? `（${esc(d.publishedAt)}）` : '';
+            return `<li>[${esc(d.id)}] ${esc(d.title)}${extra}</li>`;
+          })
+          .join('') +
+        '</ul>',
+    )
+    .join('');
+  return `
+<section class="chapter">
+  <h1>附录　引用资料</h1>
+  <p>本项目编制过程中引用了知识经验库中 ${total} 份资料，按分类列示如下：</p>
+  ${body}
+  <p class="note">注：以上资料来自知识经验库（标准&规范 / 设计指南 / 经验教训 / 论文专利），引用关系在该库中留痕可追溯。</p>
+</section>`;
 }
 
 /** PDF：FMEA 点检表 section 字符串，列对齐与 FMEA_HEADERS 一致 */
@@ -1091,12 +1185,15 @@ function fmeaPdfSection(records?: unknown[]): string {
 </section>`;
 }
 
-/** 生成自包含 A4 HTML（内联样式，离线排版），主进程隐藏窗口加载后 printToPDF。可选传入 fmeaRecords，末尾加 FMEA 点检表 section */
-export function buildPdfHtml(m: ReportModel, fmeaRecords?: unknown[]): string {
-  const tocFmea = Array.isArray(fmeaRecords) && fmeaRecords.length > 0 ? '<div class="toc-item">附表　FMEA点检表</div>' : '';
+/** 生成自包含 A4 HTML（内联样式，离线排版），主进程隐藏窗口加载后 printToPDF。可选传入 fmeaRecords（末尾加 FMEA 点检表）与 kbeDocs（文末按分类列引用资料） */
+export function buildPdfHtml(m: ReportModel, fmeaRecords?: unknown[], kbeDocs?: unknown[]): string {
+  const hasFmea = Array.isArray(fmeaRecords) && fmeaRecords.length > 0;
+  const hasKbe = Array.isArray(kbeDocs) && kbeDocs.length > 0;
+  const tocFmea = hasFmea ? '<div class="toc-item">附表　FMEA点检表</div>' : '';
+  const tocKbe = hasKbe ? '<div class="toc-item">附录　引用资料</div>' : '';
   const tocItems = m.chapters
     .map((c) => `<div class="toc-item">第 ${c.no} 章　${esc(c.title)}（${esc(c.domain)}）</div>`)
-    .join('') + '<div class="toc-item">附表　全部计算汇总</div>' + tocFmea;
+    .join('') + '<div class="toc-item">附表　全部计算汇总</div>' + tocFmea + tocKbe;
 
   const chapters = m.chapters
     .map((c) => {
@@ -1123,12 +1220,6 @@ export function buildPdfHtml(m: ReportModel, fmeaRecords?: unknown[]): string {
             c.materialBindings.map((b) => [b.param, b.field, b.material]),
           )}`
         : '';
-      const assumptions =
-        sn.assumptions && c.assumptions.length
-          ? `<h2>${c.no}.${sn.assumptions} 适用条件与假设</h2><ul>${c.assumptions
-              .map((a) => `<li>${esc(a)}</li>`)
-              .join('')}</ul>`
-          : '';
       return `
 <section class="chapter">
   <h1>第 ${c.no} 章　${esc(c.title)}</h1>
@@ -1148,7 +1239,6 @@ export function buildPdfHtml(m: ReportModel, fmeaRecords?: unknown[]): string {
     ['结果名称', '符号', '数值', '单位', 'SI 值'],
     c.outputs.map((r) => [r.label, r.symbol, r.value, r.unit, r.si]),
   )}
-  ${assumptions}
   ${sn.conclusion ? `<h2>${c.no}.${sn.conclusion} 结论</h2><p>经计算，${esc(c.conclusion)}。</p>` : ''}
 </section>`;
     })
@@ -1225,5 +1315,6 @@ export function buildPdfHtml(m: ReportModel, fmeaRecords?: unknown[]): string {
   ${chapters}
   ${summary}
   ${fmeaPdfSection(fmeaRecords)}
+  ${kbePdfSection(kbeDocs)}
 </body></html>`;
 }

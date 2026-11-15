@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, safeStorage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -10,6 +10,9 @@ const store = require('./store.cjs');
 const license = require('./license.cjs');
 const { writeMaterialParquet, readMaterialParquet } = require('./materialParquet.cjs');
 const { writeFmeaParquet, readFmeaParquet } = require('./fmeaParquet.cjs');
+const fileEncryption = require('./fileEncryption.cjs');
+const approvalServer = require('./approvalServer.cjs');
+const approvalClient = require('./approvalClient.cjs');
 
 // 打包后 @napi-rs/canvas 会被加载两次：主进程 require 解析到 app.asar 虚拟路径，
 // pdfjs 的 node_utils 用 createRequire 解析到 app.asar.unpacked 真实路径。
@@ -37,14 +40,18 @@ const { writeFmeaParquet, readFmeaParquet } = require('./fmeaParquet.cjs');
   }
 })();
 
-const UNC_ROOT = '\\\\10.1.1.245\\Product Database';
+const UNC_ROOT = 'C:\\Users\\TechCenter15\\AppData\\Local\\Temp\\ctr_video\\db\\Product Database';
 const UNC_CALC_LIB = `${UNC_ROOT}\\Theoretical Calculation Library`;
 const UNC_TEST_LIB = `${UNC_ROOT}\\Experimental Test Database`;
 const UNC_TRUSTED = `${UNC_ROOT}\\Trusted Data Asset Library`;
 const UNC_CAE_LIB = `${UNC_ROOT}\\Virtual Verification Library`;
-const UNC_MATERIAL_LIB = '\\\\10.1.1.245\\materials library';
+const UNC_MATERIAL_LIB = 'C:\\Users\\TechCenter15\\AppData\\Local\\Temp\\ctr_video\\db\\materials library';
 
-const KBE_ROOT = '\\\\10.1.1.245\\Knowledge & Experience Base';
+const KBE_ROOT = 'C:\\Users\\TechCenter15\\AppData\\Local\\Temp\\ctr_video\\db\\Knowledge & Experience Base';
+// 演示录制：界面展示服务器路径，实际读写仍走本地演示目录
+const KBE_DISPLAY_ROOT = '\\\\10.1.1.245\\Knowledge & Experience Base';
+const kbeDisplayDir = (dir) =>
+  String(dir).startsWith(KBE_ROOT) ? KBE_DISPLAY_ROOT + String(dir).slice(KBE_ROOT.length) : dir;
 const KBE_THEORY = `${KBE_ROOT}\\Theoretical Knowledge Base`;
 const KBE_DESIGN = `${KBE_ROOT}\\Product Design Library`;
 const KBE_FMEA = `${KBE_ROOT}\\FMEA Library`;
@@ -92,10 +99,10 @@ function isInAnyRoot(target, roots) {
 const isDev = !app.isPackaged;
 const PRODUCT_TITLE = '汽车零部件数字设计平台';
 /** 标准版按可执行文件名识别（打包时 productName 含「标准版」），与渲染层开关独立 */
-const WINDOW_TITLE =
-  app.isPackaged && /标准版/.test(path.basename(process.execPath))
-    ? `${PRODUCT_TITLE}（标准版）`
-    : PRODUCT_TITLE;
+const IS_STANDARD = app.isPackaged
+  ? /标准版/.test(path.basename(process.execPath))
+  : process.env.CTR_EDITION === 'standard';
+const WINDOW_TITLE = IS_STANDARD ? `${PRODUCT_TITLE}（标准版）` : PRODUCT_TITLE;
 
 let mainWindow = null;
 
@@ -112,6 +119,8 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // 标准版打包后关闭开发者工具，避免通过 DevTools 另存预览图片绕过防护
+      devTools: !(IS_STANDARD && app.isPackaged),
     },
   });
 
@@ -124,6 +133,17 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  // 标准版：开启窗口内容保护（Windows 下走 SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)），
+  // 使本窗口在系统截图、录屏、截屏工具中显示为黑色，实现「软件内预览不可截图」。
+  // 需要 Windows 10 2004 及以上；老系统会退化为仅遮挡部分截屏方式。
+  if (IS_STANDARD && typeof mainWindow.setContentProtection === 'function') {
+    try {
+      mainWindow.setContentProtection(true);
+    } catch (err) {
+      console.warn('开启窗口内容保护失败：', (err && err.message) || err);
+    }
+  }
 }
 
 function publicUser(u) {
@@ -176,6 +196,13 @@ ipcMain.handle('auth:login', (_e, payload) => {
   if (!bcrypt.compareSync(password, user.passwordHash)) return { ok: false, message: '用户名或密码错误' };
   user.lastLoginAt = new Date().toISOString();
   store.persist();
+  // 标准版：李华东登录后自动启动审批服务，避免导出方连接被拒
+  if (IS_STANDARD && user.username === LOCAL_ACCOUNT && !approvalServer.isRunning()) {
+    const port = Number(getApprovalConfig().serverPort || approvalServer.DEFAULT_PORT);
+    approvalServer.start(port).then((r) => {
+      if (!r.ok) console.warn(`审批服务自动启动失败：${r.message}`);
+    });
+  }
   return { ok: true, user: publicUser(user) };
 });
 
@@ -304,72 +331,239 @@ ipcMain.handle('license:activate', (_e, code) => {
   return { ok: true };
 });
 
-// ---------- 导出 ----------
-ipcMain.handle('export:save', async (_e, payload) => {
-  const { defaultName, content, buffer, encoding } = payload || {};
+// ---------- 标准版审批（李华东审批服务端 / 导出方客户端） ----------
+globalThis.__approvalNewRequest = (req) => {
+  // 通知渲染层有新审批请求，触发弹窗
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('approval:newRequest', req);
+  }
+};
+
+/** 通知渲染层「正在等待审批」状态，让导出方看到明确提示而不是无反应 */
+function sendApprovalProgress(phase, fileName) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('approval:progress', { phase, fileName: fileName || '' });
+  }
+}
+
+const LOCAL_ACCOUNT = '李华东';
+/** 解密账号（审批服务）固定 IP：导出方默认连这里，无需逐台配置 */
+const DEFAULT_APPROVAL_HOST = '10.1.1.246';
+
+function isApprovalAdmin(username) {
+  return username === LOCAL_ACCOUNT;
+}
+
+function getApprovalConfig() {
+  const saved = store.get().settings.approval || {};
+  return {
+    hostname: saved.hostname || DEFAULT_APPROVAL_HOST,
+    port: Number(saved.port || approvalServer.DEFAULT_PORT),
+    serverPort: Number(saved.serverPort || approvalServer.DEFAULT_PORT),
+  };
+}
+
+function hashBytes(buf) {
+  return crypto.createHash('sha256').update(buf).digest('hex');
+}
+
+/** 等待审批 + 拿到令牌 + 加密写盘的统一流程 */
+async function approvalExport({ defaultName, displayName, bytes, operator }) {
   const res = await dialog.showSaveDialog(mainWindow, {
-    title: '保存文件',
-    defaultPath: defaultName || 'file.txt',
-    filters: [
-      { name: 'CSV 表格', extensions: ['csv'] },
-      { name: 'Excel 表格', extensions: ['xlsx', 'xls'] },
-      { name: 'JSON 数据', extensions: ['json'] },
-      { name: '所有文件', extensions: ['*'] },
-    ],
+    title: IS_STANDARD ? (displayName ? `导出加密${displayName}` : '导出加密文件') : (displayName ? `导出${displayName}` : '导出文件'),
+    defaultPath: IS_STANDARD ? fileEncryption.encryptedFileName(defaultName) : defaultName,
+    filters: IS_STANDARD
+      ? [{ name: 'CTR 加密文件', extensions: ['ctre'] }]
+      : [{ name: '所有文件', extensions: ['*'] }],
   });
   if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+
+  // 科研版直接写盘
+  if (!IS_STANDARD) {
+    fs.writeFileSync(res.filePath, bytes);
+    return { ok: true, filePath: res.filePath };
+  }
+
+  // 标准版：发起审批 → 等待 → 令牌 → 加密写盘
+  const cfg = getApprovalConfig();
+  if (!cfg.hostname || !cfg.port) {
+    return { ok: false, message: '未配置审批服务地址，请在设置中填写李华东电脑的审批服务 IP 和端口' };
+  }
+  const waitName = displayName || path.basename(defaultName);
+  sendApprovalProgress('waiting', waitName);
+  try {
+    const result = await approvalClient.requestApproval({
+      hostname: cfg.hostname,
+      port: cfg.port,
+      fileName: displayName || path.basename(defaultName),
+      operator: operator || store.get().currentUser?.displayName || store.get().currentUser?.username || '未知用户',
+      fileHash: hashBytes(bytes),
+    });
+    if (!result) return { ok: false, message: '审批请求未返回有效结果' };
+    if (result.status !== 'approved') {
+      return { ok: false, message: '未获得审批令牌（状态：' + result.status + '）' };
+    }
+    if (!result.token || typeof result.token !== 'string') {
+      return { ok: false, message: '审批令牌无效（缺失或格式错误），请重新发起审批' };
+    }
+    const target = fileEncryption.encryptedFileName(res.filePath);
+    const originalName = path.basename(target).replace(/\.ctre$/i, '');
+    fs.writeFileSync(target, fileEncryption.encryptBuffer(bytes, originalName, result.token));
+    store.get().settings.approval.lastSecret = result.serverSecret;
+    store.persist();
+    return {
+      ok: true,
+      filePath: target,
+      token: result.token,
+      expiresAt: result.expiresAt,
+    };
+  } catch (err) {
+    if (err && err.__approvalRejected) {
+      return { ok: false, rejected: true, message: '拒绝下载，请联系解密人员（李华东）' };
+    }
+    if (err && err.__approvalTimeout) {
+      return { ok: false, timeout: true, message: '审批超时，请联系李华东' };
+    }
+    return { ok: false, message: String((err && err.message) || err) };
+  } finally {
+    sendApprovalProgress('done', waitName);
+  }
+}
+
+// --- IPC：审批服务端（李华东电脑）---
+ipcMain.handle('approval:status', (_e, username) => {
+  const isApprovalAdminNow = isApprovalAdmin(username);
+  const cfg = getApprovalConfig();
+  const result = {
+    enabled: IS_STANDARD,
+    port: approvalServer.getPort() || approvalServer.DEFAULT_PORT,
+    isApprovalAdmin: isApprovalAdminNow,
+    serverRunning: approvalServer.isRunning(),
+    ips: [],
+  };
+  const ifaces = os.networkInterfaces();
+  result.ips = [];
+  for (const list of Object.values(ifaces)) {
+    for (const net of list || []) {
+      if (net.family === 'IPv4' && !net.internal) result.ips.push(net.address);
+    }
+  }
+  result.clientHost = cfg.hostname || '';
+  result.clientPort = cfg.port || '';
+  result.defaultHost = DEFAULT_APPROVAL_HOST;
+  result.tokenTtlMs = approvalServer.TOKEN_TTL_MS;
+  result.tokenTtlMin = Math.round(approvalServer.TOKEN_TTL_MS / 60000);
+  return result;
+});
+
+ipcMain.handle('approval:startServer', async () => {
+  if (!IS_STANDARD) return { ok: false, message: '科研版不提供审批功能' };
+  const cfg = getApprovalConfig();
+  const port = Number(cfg.serverPort || approvalServer.DEFAULT_PORT);
+  return await approvalServer.start(port);
+});
+
+ipcMain.handle('approval:stopServer', async () => {
+  return await approvalServer.stop();
+});
+
+ipcMain.handle('approval:listPending', () => approvalServer.listPending());
+
+ipcMain.handle('approval:resolve', (_e, { requestId, action }) => {
+  if (!['approve', 'reject'].includes(action)) return { ok: false, message: '操作无效' };
+  return approvalServer.resolveRequest(requestId, action);
+});
+
+// --- IPC：审批客户端 ---
+ipcMain.handle('approval:saveClientConfig', (_e, { hostname, port }) => {
+  const h = String(hostname || '').trim();
+  const p = Number(port);
+  if (!h) return { ok: false, message: '审批服务 IP 不能为空' };
+  if (!p || p < 1 || p > 65535) return { ok: false, message: '审批服务端口无效' };
+  store.get().settings.approval = { ...store.get().settings.approval, hostname: h, port: p };
+  store.persist();
+  return { ok: true };
+});
+
+/** 测试与李华东审批服务的连通性（不影响配置） */
+ipcMain.handle('approval:testConnection', async (_e, payload) => {
+  const cfg = getApprovalConfig();
+  const hostname = String((payload && payload.hostname) || cfg.hostname || '').trim();
+  const port = Number((payload && payload.port) || cfg.port || approvalServer.DEFAULT_PORT);
+  return await approvalClient.probe({ hostname, port });
+});
+
+ipcMain.handle('approval:decryptWithToken', async (_e, { token }) => {
+  if (!IS_STANDARD) return { ok: false, message: '科研版不提供资料解密功能' };
+  const selected = await dialog.showOpenDialog(mainWindow, {
+    title: '选择需要解密的 .ctre 文件',
+    properties: ['openFile'],
+    filters: [{ name: 'CTR 加密文件', extensions: ['ctre'] }],
+  });
+  if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+  let decrypted;
+  try {
+    decrypted = fileEncryption.decryptBuffer(fs.readFileSync(selected.filePaths[0]), token);
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+  const ext = path.extname(decrypted.originalName).replace('.', '');
+  const target = await dialog.showSaveDialog(mainWindow, {
+    title: '保存解密后的文件',
+    defaultPath: decrypted.originalName,
+    filters: ext ? [{ name: '原始文件', extensions: [ext] }, { name: '所有文件', extensions: ['*'] }] : undefined,
+  });
+  if (target.canceled || !target.filePath) return { ok: false, canceled: true };
+  try {
+    fs.writeFileSync(target.filePath, decrypted.data);
+    return { ok: true, filePath: target.filePath, originalName: decrypted.originalName };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+// ---------- 导出（科研版直接写盘，标准版走审批 → 令牌 → 加密写盘）----------
+ipcMain.handle('export:save', async (_e, payload) => {
+  const { defaultName, content, buffer, encoding } = payload || {};
   let data = content;
   if (buffer instanceof ArrayBuffer) data = Buffer.from(buffer);
   else if (buffer) data = Buffer.from(buffer);
   if (data == null) return { ok: false, message: '无内容可写' };
-  fs.writeFileSync(res.filePath, data, encoding === 'base64' ? 'base64' : undefined);
-  return { ok: true, filePath: res.filePath };
+  const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data, encoding === 'base64' ? 'base64' : 'utf8');
+  return approvalExport({
+    defaultName: defaultName || 'file.txt',
+    displayName: '',
+    bytes,
+  });
 });
 
-/** 导出报告原件副本：把归档文件另存到用户指定位置（不改变原文） */
 ipcMain.handle('file:copyOut', async (_e, payload) => {
   const { srcPath, defaultName } = payload || {};
   if (!srcPath || !fs.existsSync(srcPath)) return { ok: false, message: '源文件不存在' };
-  const ext = path.extname(srcPath).replace('.', '');
-  const res = await dialog.showSaveDialog(mainWindow, {
-    title: '导出报告副本',
-    defaultPath: defaultName || path.basename(srcPath),
-    filters: ext
-      ? [
-          { name: '报告文件', extensions: [ext] },
-          { name: '所有文件', extensions: ['*'] },
-        ]
-      : [{ name: '所有文件', extensions: ['*'] }],
+  return approvalExport({
+    defaultName: defaultName || path.basename(srcPath),
+    displayName: '报告副本',
+    bytes: fs.readFileSync(srcPath),
   });
-  if (res.canceled || !res.filePath) return { ok: false, canceled: true };
-  try {
-    fs.copyFileSync(srcPath, res.filePath);
-    return { ok: true, filePath: res.filePath };
-  } catch (err) {
-    return { ok: false, message: err && err.message ? err.message : String(err) };
-  }
 });
 
-/** 导出 Word 计算书：渲染进程用 docx 库生成 base64，此处仅负责保存对话框与写盘 */
 ipcMain.handle('export:docx', async (_e, payload) => {
   const { defaultName, base64 } = payload || {};
-  const res = await dialog.showSaveDialog(mainWindow, {
-    title: '导出 Word 计算书',
-    defaultPath: defaultName || '计算书.docx',
-    filters: [{ name: 'Word 文档', extensions: ['docx'] }],
+  return approvalExport({
+    defaultName: defaultName || '计算书.docx',
+    displayName: 'Word 计算书',
+    bytes: Buffer.from(base64, 'base64'),
   });
-  if (res.canceled || !res.filePath) return { ok: false, canceled: true };
-  fs.writeFileSync(res.filePath, Buffer.from(base64, 'base64'));
-  return { ok: true, filePath: res.filePath };
 });
 
-/** 导出 PDF 计算书：渲染进程生成自包含 HTML，此处用隐藏窗口排版后 printToPDF */
 ipcMain.handle('export:pdf', async (_e, payload) => {
   const { defaultName, html } = payload || {};
   const res = await dialog.showSaveDialog(mainWindow, {
-    title: '导出 PDF 计算书',
-    defaultPath: defaultName || '计算书.pdf',
-    filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
+    title: IS_STANDARD ? '导出加密 PDF 计算书（等待审批）' : '导出 PDF 计算书',
+    defaultPath: IS_STANDARD ? fileEncryption.encryptedFileName(defaultName || '计算书.pdf') : (defaultName || '计算书.pdf'),
+    filters: IS_STANDARD
+      ? [{ name: 'CTR 加密文件', extensions: ['ctre'] }]
+      : [{ name: 'PDF 文档', extensions: ['pdf'] }],
   });
   if (res.canceled || !res.filePath) return { ok: false, canceled: true };
   const win = new BrowserWindow({
@@ -378,31 +572,61 @@ ipcMain.handle('export:pdf', async (_e, payload) => {
     height: 1123,
     webPreferences: { sandbox: true },
   });
+  let pdf;
   try {
     await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-    const pdf = await win.webContents.printToPDF({
+    pdf = await win.webContents.printToPDF({
       printBackground: true,
       pageSize: 'A4',
       margins: { top: 0.6, bottom: 0.6, left: 0.7, right: 0.7 },
     });
-    fs.writeFileSync(res.filePath, pdf);
-    return { ok: true, filePath: res.filePath };
   } finally {
     win.destroy();
   }
+  if (!IS_STANDARD) {
+    fs.writeFileSync(res.filePath, pdf);
+    return { ok: true, filePath: res.filePath };
+  }
+  const cfg = getApprovalConfig();
+  if (!cfg.hostname || !cfg.port) {
+    return { ok: false, message: '未配置审批服务地址，请在设置中填写李华东电脑的审批服务 IP 和端口' };
+  }
+  sendApprovalProgress('waiting', 'PDF 计算书');
+  try {
+    const result = await approvalClient.requestApproval({
+      hostname: cfg.hostname,
+      port: cfg.port,
+      fileName: 'PDF 计算书',
+      fileHash: hashBytes(pdf),
+      operator: store.get().currentUser?.displayName || store.get().currentUser?.username || '未知用户',
+    });
+    if (!result) return { ok: false, message: '审批请求未返回有效结果' };
+    if (result.status !== 'approved') {
+      return { ok: false, rejected: true, message: '拒绝下载，请联系解密人员（李华东）' };
+    }
+    if (!result.token || typeof result.token !== 'string') {
+      return { ok: false, message: '审批令牌无效（缺失或格式错误），请重新发起审批' };
+    }
+    const target = fileEncryption.encryptedFileName(res.filePath);
+    const originalName = path.basename(target).replace(/\.ctre$/i, '');
+    fs.writeFileSync(target, fileEncryption.encryptBuffer(pdf, originalName, result.token));
+    return { ok: true, filePath: target, token: result.token, expiresAt: result.expiresAt };
+  } catch (err) {
+    if (err && err.__approvalRejected) return { ok: false, rejected: true, message: '拒绝下载，请联系解密人员（李华东）' };
+    if (err && err.__approvalTimeout) return { ok: false, timeout: true, message: '审批超时，请联系李华东' };
+    return { ok: false, message: String((err && err.message) || err) };
+  } finally {
+    sendApprovalProgress('done', 'PDF 计算书');
+  }
 });
 
-/** 导出 Excel 计算汇总（附表内容，用于归档到设计数据库） */
 ipcMain.handle('export:xlsx', async (_e, payload) => {
   const { defaultName, base64 } = payload || {};
-  const res = await dialog.showSaveDialog(mainWindow, {
-    title: '导出 Excel 计算汇总',
-    defaultPath: defaultName || '全部计算汇总.xlsx',
-    filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }],
+  return approvalExport({
+    defaultName: defaultName || '全部计算汇总.xlsx',
+    displayName: 'Excel 计算汇总',
+    bytes: Buffer.from(base64, 'base64'),
   });
-  if (res.canceled || !res.filePath) return { ok: false, canceled: true };
-  fs.writeFileSync(res.filePath, Buffer.from(base64, 'base64'));
-  return { ok: true, filePath: res.filePath };
 });
 
 /** 提取 PDF 文字层：按版面行还原文本，列间距较大时补空格（便于表格识别） */
@@ -1247,6 +1471,8 @@ function sanitizeExtras(extras) {
 ipcMain.handle('kbe:docImport', async (_e, payload) => {
   let pdfPath = '';
   try {
+    // 标准版：知识经验库只读，不允许导入原始资料
+    if (IS_STANDARD) return { ok: false, message: '标准版为只读浏览，不允许导入知识经验库资料' };
     const { category, srcPath, title, author, publishedAt, docCategory, extras, createdBy, createdByDisplay } =
       payload || {};
     const meta = kbeDocMeta(category);
@@ -1294,7 +1520,7 @@ ipcMain.handle('kbe:docList', async (_e, payload) => {
   try {
     const meta = kbeDocMeta((payload || {}).category);
     if (!meta) return { ok: false, message: '未知分类' };
-    if (!fs.existsSync(meta.dir)) return { ok: true, dir: meta.dir, exists: false, records: [] };
+    if (!fs.existsSync(meta.dir)) return { ok: true, dir: kbeDisplayDir(meta.dir), exists: false, records: [] };
     const re = new RegExp(`^${meta.prefix}-\\d{4}-\\d{3,}\\.json$`, 'i');
     const records = [];
     for (const n of fs.readdirSync(meta.dir)) {
@@ -1311,7 +1537,7 @@ ipcMain.handle('kbe:docList', async (_e, payload) => {
         String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')) ||
         String(b.id).localeCompare(String(a.id)),
     );
-    return { ok: true, dir: meta.dir, exists: true, records };
+    return { ok: true, dir: kbeDisplayDir(meta.dir), exists: true, records };
   } catch (err) {
     return { ok: false, message: String((err && err.message) || err) };
   }
@@ -1320,6 +1546,8 @@ ipcMain.handle('kbe:docList', async (_e, payload) => {
 /** 知识经验库资料删除：连同归档 PDF 一并移除 */
 ipcMain.handle('kbe:docDelete', async (_e, payload) => {
   try {
+    // 标准版：知识经验库只读，不允许删除原始资料
+    if (IS_STANDARD) return { ok: false, message: '标准版为只读浏览，不允许删除知识经验库资料' };
     const { category, id } = payload || {};
     const meta = kbeDocMeta(category);
     if (!meta) return { ok: false, message: '未知分类' };
@@ -1341,6 +1569,8 @@ ipcMain.handle('kbe:docDelete', async (_e, payload) => {
 /** 知识经验库资料元数据更新：补录标准号、发布机构、状态等分类专属字段 */
 ipcMain.handle('kbe:docUpdate', async (_e, payload) => {
   try {
+    // 标准版：知识经验库只读，不允许修改原始资料元数据
+    if (IS_STANDARD) return { ok: false, message: '标准版为只读浏览，不允许修改知识经验库资料' };
     const { category, id, title, author, publishedAt, docCategory, extras } = payload || {};
     const meta = kbeDocMeta(category);
     if (!meta) return { ok: false, message: '未知分类' };
@@ -1360,6 +1590,65 @@ ipcMain.handle('kbe:docUpdate', async (_e, payload) => {
     rec.updatedAt = new Date().toISOString();
     fs.writeFileSync(file, JSON.stringify(rec, null, 2), 'utf8');
     return { ok: true, record: rec };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 知识经验库资料引用：把「某项目引用了这份资料」写进记录的 citations（与 FMEA 库同构） */
+ipcMain.handle('kbe:docCite', async (_e, payload) => {
+  try {
+    const { category, id, citation } = payload || {};
+    const meta = kbeDocMeta(category);
+    if (!meta) return { ok: false, message: '未知分类' };
+    if (!id) return { ok: false, message: '缺少记录编号' };
+    const c = citation || {};
+    if (!c.projectId || !c.projectName) return { ok: false, message: '引用信息缺少项目' };
+    const file = path.join(meta.dir, `${id}.json`);
+    if (!fs.existsSync(file)) return { ok: false, message: `找不到记录 ${id}` };
+    const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const rest = (Array.isArray(rec.citations) ? rec.citations : []).filter(
+      (x) => String(x && x.projectId) !== String(c.projectId),
+    );
+    rest.push({
+      projectId: String(c.projectId),
+      projectName: String(c.projectName),
+      username: String(c.username || ''),
+      displayName: String(c.displayName || ''),
+      at: String(c.at || new Date().toISOString()),
+    });
+    rec.citations = rest;
+    rec.updatedAt = new Date().toISOString();
+    fs.writeFileSync(file, JSON.stringify(rec, null, 2), 'utf8');
+    return { ok: true, record: rec };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 知识经验库：列出被某项目引用过的全部资料（扫四个分类，导出计算书时用） */
+ipcMain.handle('kbe:listByProject', async (_e, payload) => {
+  try {
+    const projectId = String((payload || {}).projectId || '');
+    if (!projectId) return { ok: false, message: '缺少项目 id' };
+    const records = [];
+    for (const cat of Object.keys(KBE_DOC_META)) {
+      const meta = KBE_DOC_META[cat];
+      if (!fs.existsSync(meta.dir)) continue;
+      const re = new RegExp(`^${meta.prefix}-\\d{4}-\\d{3,}\\.json$`, 'i');
+      for (const n of fs.readdirSync(meta.dir)) {
+        if (!re.test(n)) continue;
+        try {
+          const rec = JSON.parse(fs.readFileSync(path.join(meta.dir, n), 'utf8'));
+          if (!rec || !rec.id) continue;
+          const cited = (Array.isArray(rec.citations) ? rec.citations : []).some(
+            (x) => String(x && x.projectId) === projectId,
+          );
+          if (cited) records.push({ ...rec, category: cat, pdfName: rec.pdfName || `${rec.id}.pdf` });
+        } catch {}
+      }
+    }
+    return { ok: true, records };
   } catch (err) {
     return { ok: false, message: String((err && err.message) || err) };
   }
@@ -1410,12 +1699,39 @@ ipcMain.handle('db:readText', async (_e, payload) => {
 /** 删除归档文件（仅限已知库目录内的文件，防止越权删除） */
 ipcMain.handle('db:delete', async (_e, payload) => {
   try {
+    // 标准版：服务器归档只读，不允许删除
+    if (IS_STANDARD) return { ok: false, message: '标准版为只读浏览，不允许删除归档文件' };
     const { fullPath } = payload || {};
     if (!fullPath || !fs.existsSync(fullPath)) return { ok: false, message: '文件不存在' };
     const allowedRoots = [UNC_CALC_LIB, UNC_TEST_LIB, UNC_TRUSTED, UNC_CAE_LIB, UNC_MATERIAL_LIB, KBE_THEORY, KBE_DESIGN, KBE_FMEA];
     if (!isInAnyRoot(fullPath, allowedRoots)) return { ok: false, message: '仅允许删除数据库目录内的归档文件' };
     fs.unlinkSync(fullPath);
     return { ok: true };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/** 重命名归档文件（编辑元数据 = 按归档规则改文件名，同目录移动） */
+ipcMain.handle('db:rename', async (_e, payload) => {
+  try {
+    // 标准版：服务器归档只读，不允许重命名（编辑元数据）
+    if (IS_STANDARD) return { ok: false, message: '标准版为只读浏览，不允许编辑归档文件' };
+    const { fullPath, newName } = payload || {};
+    if (!fullPath || !fs.existsSync(fullPath)) return { ok: false, message: '文件不存在' };
+    if (!newName || typeof newName !== 'string') return { ok: false, message: '新文件名不能为空' };
+    // 防目录穿越：新名必须是纯文件名，且不含 ..
+    if (/[\\/]/.test(newName) || newName.includes('..')) {
+      return { ok: false, message: '新文件名不能包含路径分隔符' };
+    }
+    const allowedRoots = [UNC_CALC_LIB, UNC_TEST_LIB, UNC_TRUSTED, UNC_CAE_LIB, UNC_MATERIAL_LIB, KBE_THEORY, KBE_DESIGN, KBE_FMEA];
+    if (!isInAnyRoot(fullPath, allowedRoots)) return { ok: false, message: '仅允许重命名数据库目录内的归档文件' };
+    const dst = path.join(path.dirname(fullPath), newName);
+    if (!isInAnyRoot(dst, allowedRoots)) return { ok: false, message: '目标路径越界' };
+    if (dst === fullPath) return { ok: true, fullPath, name: path.basename(fullPath) };
+    if (fs.existsSync(dst)) return { ok: false, message: `同名文件已存在：${newName}` };
+    fs.renameSync(fullPath, dst);
+    return { ok: true, fullPath: dst, name: newName };
   } catch (err) {
     return { ok: false, message: String((err && err.message) || err) };
   }
@@ -1443,6 +1759,23 @@ ipcMain.handle('db:ping', async () => {
 ipcMain.handle('app:openPath', async (_e, filePath) => {
   try {
     if (!filePath || !fs.existsSync(filePath)) return { ok: false, message: '文件不存在或无法访问' };
+    // 标准版：禁止把文件交给外部程序打开。外部程序（Acrobat / WPS / 浏览器）自带「另存为」，
+    // 且不受本软件的内容保护约束，一旦交给它就无法再阻止保存与截图，因此只允许打开文件夹。
+    if (IS_STANDARD) {
+      let stat = null;
+      try {
+        stat = fs.statSync(filePath);
+      } catch {
+        stat = null;
+      }
+      if (!stat || stat.isFile()) {
+        return {
+          ok: false,
+          blocked: true,
+          message: '标准版禁止用外部程序打开文件，请在软件内预览（预览已禁止截屏）',
+        };
+      }
+    }
     const errMsg = await shell.openPath(filePath);
     if (errMsg) return { ok: false, message: errMsg };
     return { ok: true };

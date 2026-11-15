@@ -89,6 +89,38 @@ interface CtrApi {
     info(): Promise<LicenseInfo>;
     activate(code: string): Promise<{ ok: boolean; message?: string }>;
   };
+  approval: {
+    status(username: string): Promise<{
+      enabled: boolean;
+      port: number;
+      isApprovalAdmin: boolean;
+      serverRunning: boolean;
+      ips: string[];
+      clientHost: string;
+      clientPort: string;
+      /** 解密账号默认 IP */
+      defaultHost: string;
+      tokenTtlMs: number;
+      tokenTtlMin: number;
+    }>;
+    startServer(): Promise<{ ok: boolean; message?: string; port?: number; ips?: string[] }>;
+    stopServer(): Promise<{ ok: boolean; message?: string }>;
+    listPending(): Promise<{
+      requestId: string;
+      fileName: string;
+      operator: string;
+      createdAt: number;
+      fileHash: string;
+    }[]>;
+    resolve(p: { requestId: string; action: 'approve' | 'reject' }): Promise<{ ok: boolean; status?: string; message?: string }>;
+    saveClientConfig(p: { hostname: string; port: number }): Promise<{ ok: boolean; message?: string }>;
+    /** 测试与审批服务的连通性（GET /health） */
+    testConnection(p: { hostname: string; port: number }): Promise<{ ok: boolean; message?: string }>;
+    decryptWithToken(p: { token: string }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string; originalName?: string; message?: string }>;
+    onNewRequest(cb: (req: { requestId: string; fileName: string; operator: string; createdAt: number }) => void): () => void;
+    /** 导出方等待审批进度：phase = 'waiting' 表示已发出请求，'done' 表示流程结束 */
+    onProgress(cb: (p: { phase: 'waiting' | 'done'; fileName: string }) => void): () => void;
+  };
   file: {
     save(p: { defaultName: string; content?: string; buffer?: ArrayBuffer; encoding?: 'base64' | 'utf8' }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string; message?: string }>;
     saveDocx(p: { defaultName: string; base64: string }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string }>;
@@ -125,6 +157,8 @@ interface CtrApi {
     readText(p: { fullPath: string }): Promise<{ ok: boolean; text?: string; message?: string }>;
     pdfData(filePath: string): Promise<{ ok: boolean; fileUrl?: string; size?: number; message?: string }>;
     remove(p: { fullPath: string }): Promise<{ ok: boolean; message?: string }>;
+    /** 重命名归档文件（编辑元数据 = 按归档规则改文件名，同目录移动） */
+    rename(p: { fullPath: string; newName: string }): Promise<{ ok: boolean; fullPath?: string; name?: string; message?: string }>;
     ping(): Promise<{ reachable: boolean; root: string; calc: string; test: string; trusted: string; cae: string; material: string; kbeRoot: string; kbeTheory: string; kbeDesign: string; kbeFmea: string; kbeTraining: string }>;
   };
   material: {
@@ -256,6 +290,14 @@ interface CtrApi {
       ok: boolean;
       message?: string;
     }>;
+    /** 知识经验库资料：引用到项目（写入 citations，与 FMEA 库同构） */
+    docCite(p: {
+      category: 'standards' | 'guidelines' | 'lessons' | 'papers';
+      id: string;
+      citation: { projectId: string; projectName: string; username: string; displayName: string; at: string };
+    }): Promise<{ ok: boolean; record?: unknown; message?: string }>;
+    /** 知识经验库：列出被某项目引用过的全部资料（导出计算书时按分类列出） */
+    listByProject(p: { projectId: string }): Promise<{ ok: boolean; records?: unknown[]; message?: string }>;
   };
   app: {
     info(): Promise<{ version: string; dataDir: string }>;
@@ -351,6 +393,18 @@ const fallback: CtrApi = {
     info: async () => ({ machineCode: 'BROWSER-DEMO-00000-00000', activated: true, activatedAt: null }),
     activate: async () => ({ ok: true }),
   },
+  approval: {
+    status: async () => ({ enabled: false, port: 39125, isApprovalAdmin: false, serverRunning: false, ips: [], clientHost: '', clientPort: '', defaultHost: '10.1.1.246', tokenTtlMs: 300000, tokenTtlMin: 5 }),
+    startServer: async () => ({ ok: false, message: '浏览器调试模式不支持审批服务' }),
+    stopServer: async () => ({ ok: false, message: '浏览器调试模式不支持审批服务' }),
+    listPending: async () => [],
+    resolve: async () => ({ ok: false, message: '浏览器调试模式不支持审批操作' }),
+    saveClientConfig: async () => ({ ok: false, message: '浏览器调试模式不支持配置' }),
+    testConnection: async () => ({ ok: false, message: '浏览器调试模式不支持连接测试' }),
+    decryptWithToken: async () => ({ ok: false, message: '浏览器调试模式不支持解密' }),
+    onNewRequest: () => () => {},
+    onProgress: () => () => {},
+  },
   file: {
     save: async () => ({ ok: false, canceled: true }),
     saveDocx: async () => ({ ok: false, canceled: true }),
@@ -372,6 +426,7 @@ const fallback: CtrApi = {
     readText: async () => ({ ok: false, message: '浏览器调试模式无法读取 UNC 路径文件' }),
     pdfData: async () => ({ ok: false, message: '浏览器调试模式无法读取 UNC 路径 PDF' }),
     remove: async () => ({ ok: false, message: '浏览器调试模式无法删除服务器文件' }),
+    rename: async () => ({ ok: false, message: '浏览器调试模式无法重命名服务器文件' }),
     ping: async () => ({ reachable: false, root: '', calc: '', test: '', trusted: '', cae: '', material: '', kbeRoot: '', kbeTheory: '', kbeDesign: '', kbeFmea: '', kbeTraining: '' }),
   },
   material: {
@@ -404,6 +459,8 @@ const fallback: CtrApi = {
     docList: async () => ({ ok: false, records: [], message: '浏览器调试模式无法访问知识经验库共享目录' }),
     docUpdate: async () => ({ ok: false, message: '浏览器调试模式无法访问知识经验库共享目录' }),
     docDelete: async () => ({ ok: false, message: '浏览器调试模式无法访问知识经验库共享目录' }),
+    docCite: async () => ({ ok: false, message: '浏览器调试模式无法访问知识经验库共享目录' }),
+    listByProject: async () => ({ ok: false, records: [], message: '浏览器调试模式无法访问知识经验库共享目录' }),
   },
   app: {
     info: async () => ({ version: '0.1.0-browser', dataDir: '(浏览器调试)' }),

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { IS_STANDARD } from '../edition';
 
 interface Props {
   /** 服务器上的 PDF 完整路径（支持 UNC 路径） */
@@ -188,6 +189,7 @@ export function PdfViewer({ filePath }: Props) {
           适应宽度
         </button>
         {busy && <span className="pdf-hint">渲染中…</span>}
+        {IS_STANDARD && <span className="pdf-hint">· 已禁止截屏与外部打开</span>}
       </div>
 
       <div className="pdf-canvas-wrap" ref={wrapRef} onWheel={onWheel}>

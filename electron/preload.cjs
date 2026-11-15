@@ -22,6 +22,25 @@ const bridge = {
     info: () => ipcRenderer.invoke('license:info'),
     activate: (code) => ipcRenderer.invoke('license:activate', code),
   },
+  approval: {
+    status: (username) => ipcRenderer.invoke('approval:status', username),
+    startServer: () => ipcRenderer.invoke('approval:startServer'),
+    stopServer: () => ipcRenderer.invoke('approval:stopServer'),
+    listPending: () => ipcRenderer.invoke('approval:listPending'),
+    resolve: (p) => ipcRenderer.invoke('approval:resolve', p),
+    saveClientConfig: (p) => ipcRenderer.invoke('approval:saveClientConfig', p),
+    testConnection: (p) => ipcRenderer.invoke('approval:testConnection', p),
+    decryptWithToken: (p) => ipcRenderer.invoke('approval:decryptWithToken', p),
+    onNewRequest: (cb) => {
+      ipcRenderer.on('approval:newRequest', (_e, req) => cb(req));
+      return () => ipcRenderer.removeAllListeners('approval:newRequest');
+    },
+    /** 导出方等待审批的进度事件：phase = 'waiting' | 'done' */
+    onProgress: (cb) => {
+      ipcRenderer.on('approval:progress', (_e, p) => cb(p));
+      return () => ipcRenderer.removeAllListeners('approval:progress');
+    },
+  },
   file: {
     save: (payload) => ipcRenderer.invoke('export:save', payload),
     saveDocx: (payload) => ipcRenderer.invoke('export:docx', payload),
@@ -66,6 +85,7 @@ const bridge = {
     readText: (p) => ipcRenderer.invoke('db:readText', p),
     pdfData: (filePath) => ipcRenderer.invoke('db:pdfData', filePath),
     remove: (p) => ipcRenderer.invoke('db:delete', p),
+    rename: (p) => ipcRenderer.invoke('db:rename', p),
     ping: () => ipcRenderer.invoke('db:ping'),
   },
   ppt: {

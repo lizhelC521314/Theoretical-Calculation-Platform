@@ -14,7 +14,7 @@ import type { Baseline, ProductFamily, ProductModel } from './types';
 
 export { buildDesignArchiveBase64 } from './archiveWorkbook';
 
-/** 归档型号设计档案到产品设计库目录 */
+/** 归档型号设计档案到设计档案库目录 */
 export async function archiveDesignArchive(
   model: ProductModel,
   family: ProductFamily | null,

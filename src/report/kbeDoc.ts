@@ -35,9 +35,26 @@ export interface KbeDocRecord {
   createdBy: string;
   createdByDisplay: string;
   updatedAt?: string;
+  /** 引用记录：哪些项目引用了这份资料（导出计算书时按分类列出） */
+  citations?: KbeDocCitation[];
   /** 由主进程列表接口补充 */
   pdfPath?: string;
   pdfExists?: boolean;
+}
+
+/** 引用记录：与 FMEA 库的 FmeaCitation 同构，形成「资料被哪些项目引用」的可追溯链路 */
+export interface KbeDocCitation {
+  projectId: string;
+  projectName: string;
+  username: string;
+  displayName: string;
+  at: string;
+}
+
+/** 追加一条引用记录：同一项目重复引用时覆盖旧记录（保留最近一次） */
+export function addKbeDocCitation(rec: KbeDocRecord, citation: KbeDocCitation): KbeDocRecord {
+  const rest = (rec.citations || []).filter((c) => c.projectId !== citation.projectId);
+  return { ...rec, citations: [...rest, citation], updatedAt: new Date().toISOString() };
 }
 
 export interface KbeDocDraft {

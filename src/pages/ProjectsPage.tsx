@@ -73,14 +73,28 @@ export function ProjectsPage({ user, projects, currentProject, onSelectProject, 
     }
     setExporting(`${project?.id ?? 'temp'}-${format}`);
     try {
-      // 查项目引用过的 FMEA，Word/PDF 计算书末尾加 FMEA 点检表
+      // 查项目引用过的 FMEA 与知识经验库资料，Word/PDF 计算书末尾分别附 FMEA 点检表与「附录 引用资料」
       let fmeaRecords: unknown[] = [];
+      let kbeDocs: unknown[] = [];
       if (project?.id) {
-        const fmeaRes = await api.fmea.listByProject({ projectId: project.id });
+        const [fmeaRes, kbeRes] = await Promise.all([
+          api.fmea.listByProject({ projectId: project.id }),
+          api.kbe.listByProject({ projectId: project.id }),
+        ]);
         if (fmeaRes.ok && Array.isArray(fmeaRes.records)) fmeaRecords = fmeaRes.records;
+        if (kbeRes.ok && Array.isArray(kbeRes.records)) kbeDocs = kbeRes.records;
       }
-      const res = await exportReport(records, project, user, format, fmeaRecords);
-      if (res.ok) showToast(fmeaRecords.length ? `${format === 'docx' ? 'Word' : 'PDF'} 计算书已导出（含 ${fmeaRecords.length} 条引用 FMEA）` : `${format === 'docx' ? 'Word' : 'PDF'} 计算书已导出`);
+      const res = await exportReport(records, project, user, format, fmeaRecords, kbeDocs);
+      if (res.ok) {
+        const parts: string[] = [];
+        if (fmeaRecords.length) parts.push(`${fmeaRecords.length} 条 FMEA`);
+        if (kbeDocs.length) parts.push(`${kbeDocs.length} 份引用资料`);
+        showToast(
+          parts.length
+            ? `${format === 'docx' ? 'Word' : 'PDF'} 计算书已导出（含 ${parts.join('、')}）`
+            : `${format === 'docx' ? 'Word' : 'PDF'} 计算书已导出`,
+        );
+      }
     } finally {
       setExporting('');
     }
@@ -101,8 +115,12 @@ export function ProjectsPage({ user, projects, currentProject, onSelectProject, 
         if (fmeaRes.ok && Array.isArray(fmeaRes.records)) fmeaRecords = fmeaRes.records;
       }
       const res = await archiveSummaryExcel(records, project, user, fmeaRecords);
-      if (res.ok) showToast(fmeaRecords.length ? `已归档到产品数据库（含 ${fmeaRecords.length} 条引用 FMEA）` : '已归档到产品数据库');
-      else showToast(`归档失败：${res.message || '请检查 UNC 路径'}`);
+      if (res.ok) {
+        // 显示完整归档路径，方便核对文件确实写入了服务器计算库（而非本地保存）
+        showToast(`已归档到产品数据库：${res.filePath || ''}${fmeaRecords.length ? `（含 ${fmeaRecords.length} 条引用 FMEA）` : ''}`);
+      } else {
+        showToast(`归档失败：${res.message || '请检查 UNC 路径'}`);
+      }
     } finally {
       setExporting('');
     }

@@ -391,7 +391,7 @@ export function ProductLibraryPage({ user }: Props) {
     patchModel(() => released);
     setBaselineNote('');
     showToast(`已发布，生成基线 ${label}，正在归档设计档案…`);
-    // 发布即归档：设计档案落到产品设计库，避免只在应用内留痕
+    // 发布即归档：设计档案落到产品数据库的设计档案库，避免只在应用内留痕
     const res = await archiveDesignArchive(released, family ?? null, baseline);
     showToast(
       res.ok
@@ -1416,7 +1416,7 @@ export function ProductLibraryPage({ user }: Props) {
                                 className="btn-link sm"
                                 onClick={() => void reexportArchive(b)}
                                 disabled={exportingId === b.id}
-                                title="重新生成该版本的设计档案并归档到产品设计库"
+                                title="重新生成该版本的设计档案并归档到产品数据库的设计档案库"
                               >
                                 {exportingId === b.id ? '导出中…' : '导出档案'}
                               </button>

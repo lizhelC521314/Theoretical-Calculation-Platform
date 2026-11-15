@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type CtrUser } from '../api';
 import { IS_STANDARD } from '../edition';
 import { PdfViewer } from '../components/PdfViewer';
-import { archiveDateInRange, parseArchiveName } from '../report/db';
+import { archiveDateInRange, archiveFileName, archivePdfFileName, parseArchiveName } from '../report/db';
 
 interface Props {
   user: CtrUser;
@@ -60,6 +60,34 @@ function isPdf(f: DbFile): boolean {
   return /\.pdf$/i.test(f.name);
 }
 
+/** 编辑态：元数据各字段（date 为 input[type=date] 需要的 YYYY-MM-DD） */
+interface EditState {
+  customer: string;
+  project: string;
+  testItem: string;
+  flow: string;
+  flowUnit: string;
+  product: string;
+  version: string;
+  date: string;
+}
+
+/** 从文件名解析出的元数据 → 编辑表单初始值 */
+function metaToEdit(p: ReturnType<typeof parseArchiveName>): EditState {
+  return {
+    customer: p.customer,
+    project: p.project,
+    testItem: p.testItem,
+    flow: p.flow,
+    flowUnit: p.flowUnit,
+    product: p.product,
+    version: p.version,
+    date: /^\d{8}$/.test(p.date)
+      ? `${p.date.slice(0, 4)}-${p.date.slice(4, 6)}-${p.date.slice(6, 8)}`
+      : '',
+  };
+}
+
 export function TestsSearchPage({ user: _user }: Props) {
   const [files, setFiles] = useState<DbFile[]>([]);
   const [reachable, setReachable] = useState<boolean | null>(null);
@@ -73,8 +101,11 @@ export function TestsSearchPage({ user: _user }: Props) {
   const [readBusy, setReadBusy] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
+  /** 元数据编辑态：非 null 时预览区头部切换为编辑表单 */
+  const [editing, setEditing] = useState<EditState | null>(null);
+  const [saveBusy, setSaveBusy] = useState(false);
 
-  // 列表区 / 预览区 高度比例（0.15 ~ 0.85，默认 0.4）
+  // 列表分 上方列表 / 下方预览 的高度比例（0.15 ~ 0.85，默认 0.4）
   const [listRatio, setListRatio] = useState<number>(() => {
     const v = window.localStorage.getItem('ctr.searchListRatio');
     const n = v ? Number(v) : 0.4;
@@ -147,6 +178,7 @@ export function TestsSearchPage({ user: _user }: Props) {
     setSelected(f);
     setItems([]);
     setError('');
+    setEditing(null); // 切换选中文件时退出编辑态
     setReadBusy(!isPdf(f));
     const stale = () => seq !== reqSeq.current;
     try {
@@ -219,7 +251,66 @@ export function TestsSearchPage({ user: _user }: Props) {
     [refresh, selected],
   );
 
-  // 列表/预览水平拖动
+  /** 进入编辑态：列表按钮或预览区按钮触发；未选中该行时先选中 */
+  const startEditFor = useCallback(
+    (f: DbFile) => {
+      if (selected?.fullPath !== f.fullPath) selectFile(f);
+      setError('');
+      setEditing(metaToEdit(parseArchiveName(f.name)));
+    },
+    [selected, selectFile],
+  );
+
+  /** 保存编辑：按归档命名规则生成新文件名 → 主进程同目录重命名 → 刷新列表并更新选中态 */
+  const saveEdit = useCallback(async () => {
+    if (!editing || !selected) return;
+    const isP = isPdf(selected);
+    // 必填校验：项目、产品通用必填；PDF 还需要客户与试验项目（否则文件名出现「未命名」段）
+    if (!editing.project.trim() || !editing.product.trim()) {
+      setError('项目和产品不能为空');
+      return;
+    }
+    if (isP && (!editing.customer.trim() || !editing.testItem.trim())) {
+      setError('PDF 报告的客户和试验项目不能为空');
+      return;
+    }
+    const newName = isP
+      ? archivePdfFileName(
+          editing.customer,
+          editing.project,
+          editing.testItem,
+          editing.product,
+          editing.version,
+          editing.date,
+          editing.flow,
+          editing.flowUnit,
+        )
+      : archiveFileName(editing.project, editing.product, editing.version, editing.date);
+    if (newName === selected.name) {
+      setEditing(null);
+      return;
+    }
+    setSaveBusy(true);
+    setError('');
+    try {
+      const res = await api.db.rename({ fullPath: selected.fullPath, newName });
+      if (res.ok) {
+        setSelected({ ...selected, name: res.name || newName, fullPath: res.fullPath || selected.fullPath });
+        setEditing(null);
+        await refresh();
+        setToast(`已保存，文件重命名为：${res.name || newName}`);
+        window.setTimeout(() => setToast(''), 4000);
+      } else {
+        setError(`保存失败：${res.message || '未知错误'}`);
+      }
+    } catch (e) {
+      setError(`保存失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSaveBusy(false);
+    }
+  }, [editing, selected, refresh]);
+
+  // 列表/预览 上下拖动
   const handleListResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const container = (e.currentTarget.parentElement as HTMLElement) || null;
@@ -247,6 +338,27 @@ export function TestsSearchPage({ user: _user }: Props) {
 
   const selectedMeta = selected ? parseArchiveName(selected.name) : null;
   const selectedIsPdf = selected ? isPdf(selected) : false;
+
+  /** 编辑表单字段变更 */
+  const patch = (k: keyof EditState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    setEditing((prev) => (prev ? { ...prev, [k]: e.target.value } : prev));
+
+  /** 保存前预览：按当前编辑值实时拼出的新归档文件名 */
+  const editPreviewName = (() => {
+    if (!editing || !selected) return '';
+    return selectedIsPdf
+      ? archivePdfFileName(
+          editing.customer,
+          editing.project,
+          editing.testItem,
+          editing.product,
+          editing.version,
+          editing.date,
+          editing.flow,
+          editing.flowUnit,
+        )
+      : archiveFileName(editing.project, editing.product, editing.version, editing.date);
+  })();
 
   return (
     <div className="test-search">
@@ -306,7 +418,10 @@ export function TestsSearchPage({ user: _user }: Props) {
               重置筛选
             </button>
           )}
-          <span className="lib-count">筛选结果 {filtered.length} 份 · 双击行可用本地软件打开</span>
+          <span className="lib-count">
+            筛选结果 {filtered.length} 份 ·{' '}
+            {IS_STANDARD ? '双击预览（禁止外部程序打开）' : '双击行可用本地软件打开'}
+          </span>
         </div>
       </div>
 
@@ -331,7 +446,7 @@ export function TestsSearchPage({ user: _user }: Props) {
                 <th style={{ width: '8%' }}>日期</th>
                 <th style={{ width: '8%' }}>大小</th>
                 <th>完整文件名</th>
-                <th style={{ width: 96 }}>操作</th>
+                <th style={{ width: 150 }}>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -347,7 +462,7 @@ export function TestsSearchPage({ user: _user }: Props) {
                       if (selected?.fullPath !== f.fullPath) selectFile(f);
                     }}
                     onDoubleClick={() => openFile(f)}
-                    title="单击预览，双击用本地软件打开"
+                    title={IS_STANDARD ? '单击预览，双击预览（禁止外部程序打开）' : '单击预览，双击用本地软件打开'}
                   >
                     <td>
                       {isP ? (
@@ -366,6 +481,19 @@ export function TestsSearchPage({ user: _user }: Props) {
                     <td>{(f.size / 1024).toFixed(1)} KB</td>
                     <td className="mono">{f.name}</td>
                     <td className="center">
+                      {!IS_STANDARD && (
+                        <button
+                          className="btn-link"
+                          title="编辑元数据（重命名归档文件）"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditFor(f);
+                          }}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                        >
+                          编辑
+                        </button>
+                      )}
                       <button
                         className="btn-link"
                         title="导出报告副本"
@@ -377,17 +505,19 @@ export function TestsSearchPage({ user: _user }: Props) {
                       >
                         导出
                       </button>
-                      <button
-                        className="btn-link danger"
-                        title="删除该报告"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeFile(f);
-                        }}
-                        onDoubleClick={(e) => e.stopPropagation()}
-                      >
-                        删除
-                      </button>
+                      {!IS_STANDARD && (
+                        <button
+                          className="btn-link danger"
+                          title="删除该报告"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeFile(f);
+                          }}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                        >
+                          删除
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -427,22 +557,90 @@ export function TestsSearchPage({ user: _user }: Props) {
             <>
               <div className="preview-head">
                 <h3>{selected.name}</h3>
-                <div className="preview-meta">
-                  {selectedMeta.customer && <span className="chip">客户：{selectedMeta.customer}</span>}
-                  <span className="chip">项目：{selectedMeta.project || '—'}</span>
-                  {selectedMeta.testItem && <span className="chip">试验项目：{selectedMeta.testItem}</span>}
-                  {selectedMeta.flow && (
-                    <span className="chip">
-                      流量：{selectedMeta.flow} {selectedMeta.flowUnit}
-                    </span>
-                  )}
-                  <span className="chip">产品：{selectedMeta.product || '—'}</span>
-                  <span className="chip">版本：{selectedMeta.version || '—'}</span>
-                  <span className="chip">日期：{selectedMeta.date || '—'}</span>
-                  <span className="chip">
-                    {(selected.size / 1024).toFixed(1)} KB · {new Date(selected.mtime).toLocaleString('zh-CN')}
-                  </span>
-                </div>
+                {editing ? (
+                  <div className="edit-meta">
+                    <div className="em-grid">
+                      {selectedIsPdf && (
+                        <label>
+                          客户
+                          <input value={editing.customer} onChange={patch('customer')} placeholder="必填" />
+                        </label>
+                      )}
+                      <label>
+                        项目
+                        <input value={editing.project} onChange={patch('project')} placeholder="必填" />
+                      </label>
+                      {selectedIsPdf && (
+                        <label>
+                          试验项目
+                          <input value={editing.testItem} onChange={patch('testItem')} placeholder="必填，如 进气阻力" />
+                        </label>
+                      )}
+                      {selectedIsPdf && (
+                        <label>
+                          流量
+                          <input value={editing.flow} onChange={patch('flow')} placeholder="可空，如 370 或 260/240" />
+                        </label>
+                      )}
+                      {selectedIsPdf && (
+                        <label>
+                          流量单位
+                          <select value={editing.flowUnit} onChange={patch('flowUnit')}>
+                            <option value="">无</option>
+                            <option value="kg/h">kg/h</option>
+                            <option value="m³/h">m³/h</option>
+                          </select>
+                        </label>
+                      )}
+                      <label>
+                        产品
+                        <input value={editing.product} onChange={patch('product')} placeholder="必填" />
+                      </label>
+                      <label>
+                        版本
+                        <input value={editing.version} onChange={patch('version')} placeholder="默认 V0" />
+                      </label>
+                      <label>
+                        日期
+                        <input type="date" value={editing.date} onChange={patch('date')} />
+                      </label>
+                    </div>
+                    <div className="em-actions">
+                      <button className="btn-primary sm" onClick={saveEdit} disabled={saveBusy}>
+                        {saveBusy ? '保存中…' : '保存'}
+                      </button>
+                      <button className="btn-ghost sm" onClick={() => setEditing(null)} disabled={saveBusy}>
+                        取消
+                      </button>
+                      <span className="settings-hint">仅修改元数据（重命名归档文件），不改动文件内容</span>
+                    </div>
+                    <div className="settings-hint em-preview">保存后文件名为：{editPreviewName}</div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="preview-meta">
+                      {selectedMeta.customer && <span className="chip">客户：{selectedMeta.customer}</span>}
+                      <span className="chip">项目：{selectedMeta.project || '—'}</span>
+                      {selectedMeta.testItem && <span className="chip">试验项目：{selectedMeta.testItem}</span>}
+                      {selectedMeta.flow && (
+                        <span className="chip">
+                          流量：{selectedMeta.flow} {selectedMeta.flowUnit}
+                        </span>
+                      )}
+                      <span className="chip">产品：{selectedMeta.product || '—'}</span>
+                      <span className="chip">版本：{selectedMeta.version || '—'}</span>
+                      <span className="chip">日期：{selectedMeta.date || '—'}</span>
+                      <span className="chip">
+                        {(selected.size / 1024).toFixed(1)} KB · {new Date(selected.mtime).toLocaleString('zh-CN')}
+                      </span>
+                      {!IS_STANDARD && (
+                        <button className="btn-ghost sm" onClick={() => startEditFor(selected)}>
+                          编辑元数据
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
 
               {selectedIsPdf ? (
