@@ -1,18 +1,15 @@
 /** 计算书导出动作：组装模型 → 公式渲染为图片 → 生成 Word/PDF → 调主进程保存对话框 */
 import { api, type CtrUser, type HistoryEntry, type Project } from '../api';
 import { archiveFileName } from './db';
-import {
-  buildDocxBase64,
-  buildPdfHtml,
-  buildReportModel,
-  buildSummaryXlsxBase64,
-  preRenderFormulaImages,
-  reportFileName,
-} from './buildReport';
 
 export type ReportFormat = 'docx' | 'pdf';
 
-/** 导出某项目（或临时记录集合）的设计计算书。返回是否真正写盘。 */
+/**
+ * 导出某项目（或临时记录集合）的设计计算书。返回是否真正写盘。
+ *
+ * buildReport 会静态引入 docx / exceljs（合计约数 MB），只有点导出时才需要，
+ * 因此在函数内动态加载，避免进计算记录页就付出解析成本。
+ */
 export async function exportReport(
   records: HistoryEntry[],
   project: Project | null,
@@ -21,6 +18,8 @@ export async function exportReport(
   fmeaRecords?: unknown[],
   kbeDocs?: unknown[],
 ): Promise<{ ok: boolean; canceled?: boolean }> {
+  const { buildDocxBase64, buildPdfHtml, buildReportModel, preRenderFormulaImages, reportFileName } =
+    await import('./buildReport');
   const model = buildReportModel(records, project, user);
   // 关键：所有公式统一在渲染进程中用 KaTeX + html2canvas 转成 PNG，
   // Word 用 ImageRun 嵌入、PDF 用 <img> 嵌入，彻底规避 LaTeX 源码在导出时乱码的问题
@@ -44,6 +43,7 @@ export async function exportSummaryExcel(
   user: CtrUser,
   fmeaRecords?: unknown[],
 ): Promise<{ ok: boolean; canceled?: boolean }> {
+  const { buildReportModel, buildSummaryXlsxBase64, reportFileName } = await import('./buildReport');
   const model = buildReportModel(records, project, user);
   const base64 = await buildSummaryXlsxBase64(model, fmeaRecords);
   return api.file.saveXlsx({ defaultName: `${reportFileName(project)}.xlsx`, base64 });
@@ -59,6 +59,7 @@ export async function archiveSummaryExcel(
   user: CtrUser,
   fmeaRecords?: unknown[],
 ): Promise<{ ok: boolean; message?: string; filePath?: string }> {
+  const { buildReportModel, buildSummaryXlsxBase64 } = await import('./buildReport');
   const model = buildReportModel(records, project, user);
   const base64 = await buildSummaryXlsxBase64(model, fmeaRecords);
   const name = archiveFileName(model.projectName || '', model.product || '', model.productVersion, model.dateShort);

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef } from 'react';
-import * as echarts from 'echarts';
+import { memo, useEffect, useMemo, useRef } from 'react';
+import { echarts, type EChartsInstance } from './echarts';
 import type { CurveSpec } from '../formula/types';
 
 interface Props {
@@ -12,9 +12,12 @@ interface Props {
  * 结果曲线图：绘制公式在当前输入下随自变量变化的连续曲线
  * （如亥姆霍兹消音器的 TL - Frequency 曲线）。
  */
-export function CurveChart({ spec, inputsSI }: Props) {
+function CurveChartView({ spec, inputsSI }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
+  const chartRef = useRef<EChartsInstance | null>(null);
+  /** 首次绘制或清空后需要全量重建，之后只替换 series 数据 */
+  const needRebuild = useRef(true);
+
   const points = useMemo(() => {
     if (!inputsSI) return [];
     try {
@@ -31,50 +34,65 @@ export function CurveChart({ spec, inputsSI }: Props) {
 
     if (points.length === 0) {
       chart.clear();
+      needRebuild.current = true;
       return;
     }
 
-    chart.setOption(
-      {
-        grid: { left: 62, right: 18, top: 34, bottom: 42 },
-        tooltip: {
-          trigger: 'axis',
-          valueFormatter: (val: number) => `${val.toFixed(3)}`,
-        },
-        xAxis: {
-          type: 'value',
-          name: spec.xLabel,
-          nameLocation: 'middle',
-          nameGap: 26,
-          axisLabel: { fontSize: 11 },
-        },
-        yAxis: {
-          type: 'value',
-          name: spec.yLabel,
-          nameTextStyle: { fontSize: 11 },
-          axisLabel: { fontSize: 11 },
-        },
-        series: [
-          {
-            type: 'line',
-            smooth: true,
-            symbol: 'none',
-            data: points.map((p) => [p.x, p.y]),
-            lineStyle: { color: '#c0392b', width: 2 },
-            itemStyle: { color: '#c0392b' },
-            areaStyle: { color: 'rgba(192,57,43,0.06)' },
-          },
-        ],
+    const option = {
+      grid: { left: 62, right: 18, top: 34, bottom: 42 },
+      tooltip: {
+        trigger: 'axis' as const,
+        valueFormatter: (val: number) => `${val.toFixed(3)}`,
       },
-      true,
-    );
+      xAxis: {
+        type: 'value' as const,
+        name: spec.xLabel,
+        nameLocation: 'middle' as const,
+        nameGap: 26,
+        axisLabel: { fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value' as const,
+        name: spec.yLabel,
+        nameTextStyle: { fontSize: 11 },
+        axisLabel: { fontSize: 11 },
+      },
+      series: [
+        {
+          type: 'line' as const,
+          smooth: true,
+          symbol: 'none',
+          data: points.map((p) => [p.x, p.y]),
+          lineStyle: { color: '#c0392b', width: 2 },
+          itemStyle: { color: '#c0392b' },
+          areaStyle: { color: 'rgba(192,57,43,0.06)' },
+        },
+      ],
+    };
+
+    // 数值变化时仅替换 series，避免整图重建（坐标轴与提示框配置保持不变）
+    if (needRebuild.current) {
+      chart.setOption(option, { notMerge: true });
+      needRebuild.current = false;
+    } else {
+      chart.setOption(option, { replaceMerge: ['series'] });
+    }
   }, [spec, points]);
 
   useEffect(() => {
-    const onResize = () => chartRef.current?.resize();
+    // 窗口尺寸变化用 rAF 合并，拖动窗口时不会每一帧都重排图表
+    let raf = 0;
+    const onResize = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        chartRef.current?.resize();
+      });
+    };
     window.addEventListener('resize', onResize);
     return () => {
       window.removeEventListener('resize', onResize);
+      if (raf) window.cancelAnimationFrame(raf);
       chartRef.current?.dispose();
       chartRef.current = null;
     };
@@ -92,3 +110,5 @@ export function CurveChart({ spec, inputsSI }: Props) {
     </div>
   );
 }
+
+export const CurveChart = memo(CurveChartView);

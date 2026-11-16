@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, type CtrUser, type LicenseInfo } from '../api';
+import { api, type BackupFile, type CtrUser, type LicenseInfo } from '../api';
 import { BRAND } from '../branding';
 import { EDITION_LABEL, IS_STANDARD } from '../edition';
 
@@ -8,6 +8,52 @@ export function SettingsPage({ user }: { user: CtrUser }) {
   const [code, setCode] = useState('');
   const [msg, setMsg] = useState('');
   const [appInfo, setAppInfo] = useState<{ version: string; dataDir: string } | null>(null);
+
+  // 本地数据备份
+  const [backups, setBackups] = useState<BackupFile[]>([]);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMsg, setBackupMsg] = useState('');
+
+  const loadBackups = async () => {
+    try {
+      const res = await api.maintenance.backups();
+      setBackups(res.files || []);
+    } catch (e) {
+      setBackupMsg(`读取备份列表失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  useEffect(() => {
+    loadBackups();
+  }, []);
+
+  const backupNow = async () => {
+    setBackupBusy(true);
+    setBackupMsg('');
+    try {
+      const res = await api.maintenance.backupNow();
+      setBackupMsg(res.ok ? '备份完成' : res.message || '备份失败');
+      await loadBackups();
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const restoreBackup = async (name: string) => {
+    if (!window.confirm(`确定用「${name}」覆盖当前数据？\n恢复前会自动备份当前数据，恢复后需重启软件。`)) return;
+    setBackupBusy(true);
+    setBackupMsg('');
+    try {
+      const res = await api.maintenance.restore(name);
+      setBackupMsg(res.ok ? res.message || '恢复完成，请重启软件' : res.message || '恢复失败');
+      await loadBackups();
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const sizeText = (n: number) =>
+    n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 
   // 审批服务端（李华东电脑）状态
   const [approvalStatus, setApprovalStatus] = useState<{
@@ -58,6 +104,30 @@ export function SettingsPage({ user }: { user: CtrUser }) {
       api.approval.listPending().then(setPending).catch(() => {});
     }
   }, [pendingRefresh, approvalStatus?.serverRunning, approvalStatus?.isApprovalAdmin]);
+
+  // 审批服务允许访问的网段
+  const [cidrText, setCidrText] = useState('');
+  const [cidrMsg, setCidrMsg] = useState('');
+
+  useEffect(() => {
+    api.approval
+      .getServerConfig()
+      .then((res) => {
+        if (res.ok) setCidrText(res.allowedCidrs || res.effectiveCidrs.join(','));
+      })
+      .catch(() => {});
+  }, []);
+
+  const saveCidrs = async () => {
+    setCidrMsg('');
+    const res = await api.approval.setAllowedCidrs({ cidrs: cidrText });
+    if (res.ok) {
+      setCidrText((res.cidrs || []).join(','));
+      setCidrMsg(`已保存并生效：${(res.cidrs || []).join(', ')}`);
+    } else {
+      setCidrMsg(res.message || '保存失败');
+    }
+  };
 
   // 审批服务运行期间每 3 秒自动刷新待办，李华东无需手动点「刷新待办」
   useEffect(() => {
@@ -193,6 +263,48 @@ export function SettingsPage({ user }: { user: CtrUser }) {
         {msg && <div className="license-msg">{msg}</div>}
       </section>
 
+      <section className="settings-card">
+        <h3>数据备份</h3>
+        <p className="settings-hint">
+          每天首次启动自动备份一次本地数据，保留最近 7 天；恢复前会先自动备份当前数据。
+        </p>
+        <div style={{ display: 'flex', gap: 8, margin: '8px 0' }}>
+          <button className="btn-primary sm" onClick={backupNow} disabled={backupBusy}>
+            {backupBusy ? '处理中…' : '立即备份'}
+          </button>
+          <button className="btn-link" onClick={loadBackups} disabled={backupBusy}>
+            刷新列表
+          </button>
+        </div>
+        {backups.length === 0 ? (
+          <p className="settings-hint">暂无备份文件</p>
+        ) : (
+          <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {backups.map((b) => (
+              <div
+                key={b.name}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '5px 0',
+                  borderBottom: '1px solid rgba(0,0,0,0.06)',
+                }}
+              >
+                <span className="mono" style={{ flex: 1, fontSize: 12 }}>{b.name}</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  {sizeText(b.size)} · {new Date(b.mtime).toLocaleString('zh-CN')}
+                </span>
+                <button className="btn-link" onClick={() => restoreBackup(b.name)} disabled={backupBusy}>
+                  恢复
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {backupMsg && <div className="license-msg">{backupMsg}</div>}
+      </section>
+
       {IS_STANDARD && (
         <>
           {/* 审批服务端（仅解密账号李华东可见） */}
@@ -225,6 +337,20 @@ export function SettingsPage({ user }: { user: CtrUser }) {
               <span>令牌有效期</span>
               <b>{approvalStatus?.tokenTtlMin ?? 5} 分钟</b>
             </div>
+            <div className="license-form">
+              <input
+                value={cidrText}
+                onChange={(e) => setCidrText(e.target.value)}
+                placeholder="10.1.1.0/24,10.1.2.0/24"
+              />
+              <button className="btn-secondary sm" onClick={saveCidrs}>
+                保存网段
+              </button>
+            </div>
+            <p className="settings-hint">
+              仅这些网段的电脑可访问审批服务，多个网段用逗号分隔；保存后立即生效，也会在下次启动时自动套用。
+            </p>
+            {cidrMsg && <div className="license-msg">{cidrMsg}</div>}
             <div className="license-form">
               {!approvalStatus?.serverRunning ? (
                 <button className="btn-primary sm" onClick={startServer}>

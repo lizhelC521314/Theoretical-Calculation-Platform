@@ -1,34 +1,40 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, type CtrUser, type HistoryEntry, type Project } from './api';
 import { getFormula } from './formula/registry';
 import { recordRecent } from './formula/library';
 import type { FormulaSpec } from './formula/types';
 import { BRAND } from './branding';
 import { IS_STANDARD } from './edition';
+// 登录页保持同步加载（首屏必须立即可用）；其余页面统一懒加载，见 pages/lazyPages.tsx
 import { LoginPage } from './pages/LoginPage';
-import { HomePage } from './pages/HomePage';
-import { LibraryPage } from './pages/LibraryPage';
-import { CalculatorPage } from './pages/CalculatorPage';
-import { ComparePanel, HistoryPage } from './pages/HistoryPage';
-import { ProjectsPage } from './pages/ProjectsPage';
-import { ProjectCheckPage } from './pages/ProjectCheckPage';
-import { TestReportsPage } from './pages/TestReportsPage';
-import { TestsSearchPage } from './pages/TestsSearchPage';
-import { CaeReportsPage } from './pages/CaeReportsPage';
-import { CaeSearchPage } from './pages/CaeSearchPage';
-import { LabPage } from './pages/LabPage';
-import { DatabasePage } from './pages/DatabasePage';
-import { MaterialsImportPage } from './pages/MaterialsImportPage';
-import { MaterialsSearchPage } from './pages/MaterialsSearchPage';
-import { FmeaImportPage } from './pages/FmeaImportPage';
-import { FmeaSearchPage } from './pages/FmeaSearchPage';
-import { TrainingImportPage } from './pages/TrainingImportPage';
-import { TrainingSearchPage } from './pages/TrainingSearchPage';
-import { TheoryImportPage } from './pages/TheoryImportPage';
-import { TheorySearchPage } from './pages/TheorySearchPage';
-import { KbeDocImportPage, KbeDocSearchPage } from './pages/KbeDocPage';
-import { ProductLibraryPage } from './pages/ProductLibraryPage';
-import { SettingsPage } from './pages/SettingsPage';
+import {
+  CaeReportsPage,
+  CaeSearchPage,
+  CalculatorPage,
+  ComparePanel,
+  DatabasePage,
+  FmeaImportPage,
+  FmeaSearchPage,
+  HistoryPage,
+  HomePage,
+  KbeDocImportPage,
+  KbeDocSearchPage,
+  LabPage,
+  LibraryPage,
+  MaterialsImportPage,
+  MaterialsSearchPage,
+  PageLoading,
+  ProductLibraryPage,
+  ProjectCheckPage,
+  ProjectsPage,
+  SettingsPage,
+  TestReportsPage,
+  TestsSearchPage,
+  TheoryImportPage,
+  TheorySearchPage,
+  TrainingImportPage,
+  TrainingSearchPage,
+} from './pages/lazyPages';
 
 type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'projectCheck' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'materialImport' | 'materialSearch' | 'fmeaImport' | 'fmeaSearch' | 'trainingImport' | 'trainingSearch' | 'theoryImport' | 'theorySearch' | 'productLib' | 'kbeStdImport' | 'kbeStdSearch' | 'kbeGdImport' | 'kbeGdSearch' | 'kbeLlImport' | 'kbeLlSearch' | 'kbePtImport' | 'kbePtSearch' | 'db' | 'compare' | 'settings';
 
@@ -288,20 +294,31 @@ export function App() {
     if (f) openFormula(f);
   }, [openFormula]);
 
-  // 侧边栏宽度拖动
+  // 侧边栏宽度拖动（用 requestAnimationFrame 合并高频 mousemove，避免每像素一次渲染）
   const handleSidebarResize = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       const startX = e.clientX;
       const startW = sidebarWidth;
       const minW = 160, maxW = 420;
+      let pending = startW;
+      let raf = 0;
+      const flush = () => {
+        raf = 0;
+        setSidebarWidth(pending);
+      };
       const onMove = (ev: MouseEvent) => {
-        const next = Math.min(maxW, Math.max(minW, startW + (ev.clientX - startX)));
-        setSidebarWidth(next);
+        pending = Math.min(maxW, Math.max(minW, startW + (ev.clientX - startX)));
+        if (!raf) raf = window.requestAnimationFrame(flush);
       };
       const onUp = () => {
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
+        if (raf) {
+          window.cancelAnimationFrame(raf);
+          raf = 0;
+        }
+        setSidebarWidth(pending);
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
       };
@@ -449,7 +466,15 @@ export function App() {
           </div>
         </header>
 
-        <main className="content">
+        <main
+          className={
+            'content' +
+            (page === 'home' || page === 'projects' || page === 'history'
+              ? ''
+              : ' content-inner-scroll')
+          }
+        >
+          <Suspense fallback={<PageLoading />}>
           {page === 'home' && (
             <HomePage
               user={user}
@@ -522,6 +547,7 @@ export function App() {
             <ComparePanel a={compare.a} b={compare.b} onBack={() => setPage('history')} />
           )}
           {page === 'settings' && <SettingsPage user={user} />}
+          </Suspense>
         </main>
       </div>
 

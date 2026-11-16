@@ -68,6 +68,13 @@ export interface LicenseInfo {
   activatedAt: string | null;
 }
 
+/** 本地数据备份文件（名称、大小、最后修改时间） */
+export interface BackupFile {
+  name: string;
+  size: number;
+  mtime: string;
+}
+
 interface CtrApi {
   auth: {
     status(): Promise<{ hasAdmin: boolean; userCount: number }>;
@@ -88,6 +95,12 @@ interface CtrApi {
   license: {
     info(): Promise<LicenseInfo>;
     activate(code: string): Promise<{ ok: boolean; message?: string }>;
+  };
+  /** 本地数据备份与恢复（设置页） */
+  maintenance: {
+    backups(): Promise<{ ok: boolean; dir: string; files: BackupFile[] }>;
+    backupNow(): Promise<{ ok: boolean; name?: string; message?: string }>;
+    restore(name: string): Promise<{ ok: boolean; message?: string }>;
   };
   approval: {
     status(username: string): Promise<{
@@ -114,6 +127,15 @@ interface CtrApi {
     }[]>;
     resolve(p: { requestId: string; action: 'approve' | 'reject' }): Promise<{ ok: boolean; status?: string; message?: string }>;
     saveClientConfig(p: { hostname: string; port: number }): Promise<{ ok: boolean; message?: string }>;
+    /** 读取审批服务端配置（端口与允许网段） */
+    getServerConfig(): Promise<{
+      ok: boolean;
+      serverPort: number;
+      allowedCidrs: string;
+      effectiveCidrs: string[];
+    }>;
+    /** 保存允许访问审批服务的网段（立即生效） */
+    setAllowedCidrs(p: { cidrs: string }): Promise<{ ok: boolean; message?: string; cidrs?: string[] }>;
     /** 测试与审批服务的连通性（GET /health） */
     testConnection(p: { hostname: string; port: number }): Promise<{ ok: boolean; message?: string }>;
     decryptWithToken(p: { token: string }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string; originalName?: string; message?: string }>;
@@ -142,12 +164,12 @@ interface CtrApi {
     ): Promise<{ ok: boolean; text?: string; testItem?: string; flow?: string; flowUnit?: string; message?: string }>;
     /** 桌面版：内置阅读器——页数与首页尺寸（scale=1） */
     pageInfo(filePath: string): Promise<{ ok: boolean; pageCount?: number; width?: number; height?: number; message?: string }>;
-    /** 桌面版：内置阅读器——渲染指定页为 PNG data URL */
+    /** 桌面版：内置阅读器——渲染指定页为 PNG（打包后返回临时文件 url，开发模式返回 dataUrl） */
     renderPage(p: {
       filePath: string;
       page: number;
       scale: number;
-    }): Promise<{ ok: boolean; pageCount?: number; page?: number; width?: number; height?: number; dataUrl?: string; message?: string }>;
+    }): Promise<{ ok: boolean; pageCount?: number; page?: number; width?: number; height?: number; url?: string; dataUrl?: string; message?: string }>;
   };
   db: {
     archive(p: { base64: string; fileName: string; libType: 'calc' | 'test' | 'trusted' | 'cae' | 'material' | 'theory' | 'design' | 'fmea'; overwrite?: boolean }): Promise<{ ok: boolean; filePath?: string; targetDir?: string; message?: string }>;
@@ -393,6 +415,11 @@ const fallback: CtrApi = {
     info: async () => ({ machineCode: 'BROWSER-DEMO-00000-00000', activated: true, activatedAt: null }),
     activate: async () => ({ ok: true }),
   },
+  maintenance: {
+    backups: async () => ({ ok: true, dir: '浏览器调试模式不提供本地备份', files: [] }),
+    backupNow: async () => ({ ok: false, message: '浏览器调试模式不支持备份' }),
+    restore: async () => ({ ok: false, message: '浏览器调试模式不支持恢复' }),
+  },
   approval: {
     status: async () => ({ enabled: false, port: 39125, isApprovalAdmin: false, serverRunning: false, ips: [], clientHost: '', clientPort: '', defaultHost: '10.1.1.246', tokenTtlMs: 300000, tokenTtlMin: 5 }),
     startServer: async () => ({ ok: false, message: '浏览器调试模式不支持审批服务' }),
@@ -400,6 +427,8 @@ const fallback: CtrApi = {
     listPending: async () => [],
     resolve: async () => ({ ok: false, message: '浏览器调试模式不支持审批操作' }),
     saveClientConfig: async () => ({ ok: false, message: '浏览器调试模式不支持配置' }),
+    getServerConfig: async () => ({ ok: false, serverPort: 39125, allowedCidrs: '', effectiveCidrs: [] }),
+    setAllowedCidrs: async () => ({ ok: false, message: '浏览器调试模式不支持配置' }),
     testConnection: async () => ({ ok: false, message: '浏览器调试模式不支持连接测试' }),
     decryptWithToken: async () => ({ ok: false, message: '浏览器调试模式不支持解密' }),
     onNewRequest: () => () => {},

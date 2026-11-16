@@ -53,6 +53,7 @@ export function MaterialsSearchPage({ user }: Props) {
   const [stateFilter, setStateFilter] = useState<'all' | MaterialState>('all');
   const [tempFilter, setTempFilter] = useState('23'); // 温度筛选默认 23℃
   const [modulusMin, setModulusMin] = useState(''); // 弹性模量 ≥ 输入值
+  const [supplierFilter, setSupplierFilter] = useState(''); // 供应商筛选（逗号分隔多关键词 OR 匹配）
   const [selected, setSelected] = useState<MaterialFile | null>(null);
   const [record, setRecord] = useState<MaterialRecord | null>(null);
   const [busy, setBusy] = useState(false);
@@ -148,6 +149,10 @@ export function MaterialsSearchPage({ user }: Props) {
     const kw = keyword.trim().toLowerCase();
     const temp = tempFilter.trim() === '' ? null : Number(tempFilter);
     const eMin = modulusMin.trim() === '' ? null : Number(modulusMin);
+    const suppKw = supplierFilter
+      .split(/[,，]/)
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
     return files
       .map((f) => {
         // 记录读回后以记录为准（新命名不含类型/状态段，文件名反解仅作加载前兜底）
@@ -179,16 +184,23 @@ export function MaterialsSearchPage({ user }: Props) {
         const rec = recCache[r.file.fullPath];
         return rec != null && rec.elasticModulus != null && rec.elasticModulus >= eMin;
       })
+      // 供应商：逗号分隔多关键词 OR 匹配，任一命中即保留；留空表示不限
+      .filter((r) => {
+        if (!suppKw.length) return true;
+        const s = (r.meta.supplier || '').toLowerCase();
+        return suppKw.some((k) => s.includes(k));
+      })
       .filter((r) =>
         kw
           ? r.meta.grade.toLowerCase().includes(kw) ||
             r.meta.series.toLowerCase().includes(kw) ||
             r.meta.name.toLowerCase().includes(kw) ||
+            (r.meta.supplier || '').toLowerCase().includes(kw) ||
             r.file.name.toLowerCase().includes(kw)
           : true,
       )
       .sort((a, b) => b.file.mtime.localeCompare(a.file.mtime));
-  }, [files, keyword, typeFilter, stateFilter, tempFilter, modulusMin, recCache]);
+  }, [files, keyword, typeFilter, stateFilter, tempFilter, modulusMin, supplierFilter, recCache]);
 
   const typeOf = (f: MaterialFile) =>
     recCache[f.fullPath]?.type ?? parseMaterialFileName(f.name).type;
@@ -658,7 +670,21 @@ export function MaterialsSearchPage({ user }: Props) {
             />
             <span className="small muted">MPa</span>
           </label>
-          {(keyword || stateFilter !== 'all' || tempFilter !== '23' || modulusMin) && (
+          <label className="mat-filter-inline" title="供应商筛选，逗号分隔多关键词 OR 匹配，留空表示不限">
+            <span>供应商</span>
+            <input
+              className="search-input sm"
+              type="text"
+              value={supplierFilter}
+              onChange={(e) => setSupplierFilter(e.target.value)}
+              placeholder="如 杜邦, 陶氏"
+            />
+          </label>
+          {(keyword ||
+            stateFilter !== 'all' ||
+            tempFilter !== '23' ||
+            modulusMin ||
+            supplierFilter) && (
             <button
               className="btn-link"
               onClick={() => {
@@ -667,6 +693,7 @@ export function MaterialsSearchPage({ user }: Props) {
                 setStateFilter('all');
                 setTempFilter('23');
                 setModulusMin('');
+                setSupplierFilter('');
               }}
             >
               重置筛选

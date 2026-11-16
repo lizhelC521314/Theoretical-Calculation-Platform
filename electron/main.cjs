@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell, safeStorage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const fsp = require('node:fs/promises');
 const os = require('node:os');
 const { execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
@@ -40,16 +41,17 @@ const approvalClient = require('./approvalClient.cjs');
   }
 })();
 
-const UNC_ROOT = 'C:\\Users\\TechCenter15\\AppData\\Local\\Temp\\ctr_video\\db\\Product Database';
+const UNC_ROOT = '\\\\10.1.1.245\\Product Database';
 const UNC_CALC_LIB = `${UNC_ROOT}\\Theoretical Calculation Library`;
 const UNC_TEST_LIB = `${UNC_ROOT}\\Experimental Test Database`;
 const UNC_TRUSTED = `${UNC_ROOT}\\Trusted Data Asset Library`;
 const UNC_CAE_LIB = `${UNC_ROOT}\\Virtual Verification Library`;
-const UNC_MATERIAL_LIB = 'C:\\Users\\TechCenter15\\AppData\\Local\\Temp\\ctr_video\\db\\materials library';
+// 材料库位于共享盘根目录下，独立于 Product Database
+const UNC_MATERIAL_LIB = '\\\\10.1.1.245\\materials library';
 
-const KBE_ROOT = 'C:\\Users\\TechCenter15\\AppData\\Local\\Temp\\ctr_video\\db\\Knowledge & Experience Base';
-// 演示录制：界面展示服务器路径，实际读写仍走本地演示目录
-const KBE_DISPLAY_ROOT = '\\\\10.1.1.245\\Knowledge & Experience Base';
+const KBE_ROOT = '\\\\10.1.1.245\\Knowledge & Experience Base';
+// 展示路径与实际路径一致（本地映射仅在演示录制时临时启用）
+const KBE_DISPLAY_ROOT = KBE_ROOT;
 const kbeDisplayDir = (dir) =>
   String(dir).startsWith(KBE_ROOT) ? KBE_DISPLAY_ROOT + String(dir).slice(KBE_ROOT.length) : dir;
 const KBE_THEORY = `${KBE_ROOT}\\Theoretical Knowledge Base`;
@@ -79,6 +81,91 @@ function libDir(libType) {
   }
 }
 function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
+
+/**
+ * 并发受限的批量异步任务：UNC 共享盘上一次性发起几十个 stat 会互相拖慢，
+ * 用固定并发窗口既能提速又不会打爆网络。
+ */
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await fn(items[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+// —— 共享盘可达性探测 ——
+// UNC 共享盘离线时，Windows 对子目录同样返回 ENOENT，无法与"目录不存在"区分，
+// 因此失败后统一探测共享盘根目录（\\server\share\），并缓存 5 秒避免反复等待。
+const shareProbeCache = new Map();
+
+/** 取路径所在共享盘根（UNC 下为 \\server\share\） */
+function shareRootOf(dir) {
+  try {
+    return path.parse(dir).root || '';
+  } catch {
+    return '';
+  }
+}
+
+/** 探测共享盘是否可达；超时 3 秒即判定不可达，避免界面长时间空等 */
+async function probeShare(root, timeoutMs = 3000) {
+  if (!root) return true;
+  const now = Date.now();
+  const hit = shareProbeCache.get(root);
+  // 可达结果缓存 30 秒（避免每个页面都探测一次）；不可达只缓存 3 秒，网络恢复后能很快重新尝试
+  if (hit && now - hit.at < (hit.ok ? 30000 : 3000)) return hit.ok;
+  let timer = null;
+  let ok = false;
+  try {
+    await Promise.race([
+      fsp.stat(root),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('timeout')), timeoutMs);
+      }),
+    ]);
+    ok = true;
+  } catch {
+    ok = false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  shareProbeCache.set(root, { ok, at: now });
+  return ok;
+}
+
+function offlineMessage(dir) {
+  return `无法访问共享盘 ${shareRootOf(dir)}，请检查网络连接或共享盘是否在线`;
+}
+
+/**
+ * 读取目录并区分三种状态：
+ *   ok           目录存在，返回条目
+ *   missing      共享盘可达，但该子目录尚未创建（视为空库）
+ *   unreachable  共享盘不可达（断网 / 无权限 / 超时）
+ */
+async function readdirStatus(dir) {
+  try {
+    return { state: 'ok', names: await fsp.readdir(dir) };
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
+      return (await probeShare(shareRootOf(dir)))
+        ? { state: 'missing', names: [] }
+        : { state: 'unreachable', names: [], message: offlineMessage(dir) };
+    }
+    const reason = (err && (err.code || err.message)) || '未知错误';
+    return {
+      state: 'unreachable',
+      names: [],
+      message: `无法访问共享盘 ${shareRootOf(dir)}（${reason}），请检查网络或访问权限`,
+    };
+  }
+}
 
 /** 路径安全：判断 target 是否位于某个允许的根目录下（兼容 UNC 与盘符路径） */
 function isInAnyRoot(target, roots) {
@@ -129,6 +216,14 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
+
+  // 安全加固：禁止页面自行打开新窗口或跳转到外部地址，
+  // 防止被注入的内容（如资料预览里的链接）把窗口导航到远程页面后获得 bridge 能力
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const allowed = isDev ? url.startsWith('http://localhost:5173') : url.startsWith('file://');
+    if (!allowed) event.preventDefault();
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -363,6 +458,15 @@ function getApprovalConfig() {
   };
 }
 
+/** 解析网段白名单文本（逗号/空格分隔），非法项忽略 */
+function parseCidrList(input) {
+  return String(input || '')
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter((s) => /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/.test(s))
+    .map((s) => (s.includes('/') ? s : `${s}/32`));
+}
+
 function hashBytes(buf) {
   return crypto.createHash('sha256').update(buf).digest('hex');
 }
@@ -460,6 +564,9 @@ ipcMain.handle('approval:startServer', async () => {
   if (!IS_STANDARD) return { ok: false, message: '科研版不提供审批功能' };
   const cfg = getApprovalConfig();
   const port = Number(cfg.serverPort || approvalServer.DEFAULT_PORT);
+  // 启动前套用设置页保存的网段白名单
+  const savedCidrs = parseCidrList(store.get().settings.approval?.allowedCidrs);
+  if (savedCidrs.length) approvalServer.setAllowedCidrs(savedCidrs);
   return await approvalServer.start(port);
 });
 
@@ -485,6 +592,28 @@ ipcMain.handle('approval:saveClientConfig', (_e, { hostname, port }) => {
   return { ok: true };
 });
 
+/** 读取审批服务端配置（端口 + 允许网段） */
+ipcMain.handle('approval:getServerConfig', () => ({
+  ok: true,
+  serverPort: Number(store.get().settings.approval?.serverPort || approvalServer.DEFAULT_PORT),
+  allowedCidrs: store.get().settings.approval?.allowedCidrs || '',
+  effectiveCidrs: approvalServer.getAllowedCidrs(),
+}));
+
+/** 保存允许访问审批服务的网段（立即生效） */
+ipcMain.handle('approval:setAllowedCidrs', (_e, payload) => {
+  const list = parseCidrList(payload && payload.cidrs);
+  if (!list.length) return { ok: false, message: '请填写至少一个有效网段，例如 10.1.1.0/24' };
+  const applied = approvalServer.setAllowedCidrs(list);
+  if (!applied.ok) return applied;
+  store.get().settings.approval = {
+    ...store.get().settings.approval,
+    allowedCidrs: applied.cidrs.join(','),
+  };
+  store.persist(true);
+  return { ok: true, cidrs: applied.cidrs };
+});
+
 /** 测试与李华东审批服务的连通性（不影响配置） */
 ipcMain.handle('approval:testConnection', async (_e, payload) => {
   const cfg = getApprovalConfig();
@@ -493,8 +622,35 @@ ipcMain.handle('approval:testConnection', async (_e, payload) => {
   return await approvalClient.probe({ hostname, port });
 });
 
+/** 本次运行内已使用过的解密令牌（一次性，防止同一令牌重复解密） */
+const usedDecryptTokens = new Set();
+
 ipcMain.handle('approval:decryptWithToken', async (_e, { token }) => {
   if (!IS_STANDARD) return { ok: false, message: '科研版不提供资料解密功能' };
+  if (!token || typeof token !== 'string') return { ok: false, message: '缺少审批令牌' };
+  if (usedDecryptTokens.has(token)) {
+    return { ok: false, message: '该审批令牌已使用，请重新发起审批' };
+  }
+  // 通知审批端作废令牌；审批服务不可达时仍由令牌 5 分钟有效期兜底
+  const approvalCfg = getApprovalConfig();
+  if (approvalCfg && approvalCfg.hostname) {
+    try {
+      const port = Number(approvalCfg.port || approvalServer.DEFAULT_PORT);
+      const resp = await fetch(`http://${approvalCfg.hostname}:${port}/consume-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+        signal: AbortSignal.timeout(2500),
+      });
+      if (resp.status === 409) {
+        usedDecryptTokens.add(token);
+        return { ok: false, message: '该审批令牌已被使用，请重新发起审批' };
+      }
+    } catch {
+      /* 网络异常：继续使用本地有效期约束，不阻断现场使用 */
+    }
+  }
+  usedDecryptTokens.add(token);
   const selected = await dialog.showOpenDialog(mainWindow, {
     title: '选择需要解密的 .ctre 文件',
     properties: ['openFile'],
@@ -744,7 +900,7 @@ async function getPdfRenderDoc(filePath) {
   }
   const { getDocument, canvasFactory, pdfjsRoot } = await loadPdfRenderDeps();
   const task = getDocument({
-    data: new Uint8Array(fs.readFileSync(filePath)),
+    data: new Uint8Array(await fsp.readFile(filePath)),
     canvasFactory,
     useSystemFonts: true,
     isEvalSupported: false,
@@ -776,16 +932,18 @@ ipcMain.handle('pdf:pageInfo', async (_e, filePath) => {
   }
 });
 
-/** 渲染指定页为 PNG data URL（scale 为缩放倍率，0.4~3） */
+/** 渲染指定页为 PNG：打包后落临时文件并返回 file:// 地址，开发模式返回 data URL */
 ipcMain.handle('pdf:renderPage', async (_e, payload) => {
   try {
     const { filePath } = payload || {};
-    if (!filePath || !fs.existsSync(filePath)) return { ok: false, message: '文件不存在' };
+    if (!filePath || !(await pathExists(filePath))) return { ok: false, message: '文件不存在' };
     const wanted = Math.max(1, Math.floor(Number(payload && payload.page) || 1));
     const scale = Math.min(3, Math.max(0.4, Number(payload && payload.scale) || 1.2));
     const cacheKey = `${filePath}|${wanted}|${scale}`;
     const hit = pdfPageCache.get(cacheKey);
-    if (hit) return { ok: true, pageCount: hit.pageCount, page: hit.page, dataUrl: hit.dataUrl };
+    if (hit) {
+      return { ok: true, pageCount: hit.pageCount, page: hit.page, url: hit.url, dataUrl: hit.dataUrl };
+    }
 
     const doc = await getPdfRenderDoc(filePath);
     const pageCount = doc.numPages;
@@ -804,19 +962,70 @@ ipcMain.handle('pdf:renderPage', async (_e, payload) => {
       viewport,
       canvasFactory: pdfRenderState.canvasFactory,
     }).promise;
-    const dataUrl = canvas.toDataURL('image/png');
 
-    pdfPageCache.set(cacheKey, { pageCount, page: pageNumber, dataUrl });
+    let url = '';
+    let dataUrl = '';
+    if (isDev) {
+      // 开发模式页面来自 http://localhost，无法加载 file:// 资源，仍用 data URL
+      dataUrl = canvas.toDataURL('image/png');
+    } else {
+      // 打包后：写入临时文件并把 file:// 地址交给渲染进程，
+      // 避免每页几百 KB~1MB 的 base64 在 IPC 上序列化/反序列化
+      const dir = path.join(app.getPath('temp'), 'ctr-pdf-pages');
+      await fsp.mkdir(dir, { recursive: true });
+      const name = `${crypto.createHash('sha1').update(cacheKey).digest('hex')}.png`;
+      const file = path.join(dir, name);
+      const png = typeof canvas.encode === 'function' ? await canvas.encode('png') : canvas.toBuffer('image/png');
+      await fsp.writeFile(file, png);
+      url = pathToFileURL(file).href;
+      cleanupPdfPageTmp(dir);
+    }
+
+    pdfPageCache.set(cacheKey, { pageCount, page: pageNumber, url, dataUrl });
     if (pdfPageCache.size > PDF_PAGE_CACHE_MAX) {
       const oldest = pdfPageCache.keys().next().value;
       pdfPageCache.delete(oldest);
     }
     page.cleanup();
-    return { ok: true, pageCount, page: pageNumber, width, height, dataUrl };
+    return { ok: true, pageCount, page: pageNumber, width, height, url, dataUrl };
   } catch (err) {
     return { ok: false, message: String((err && err.message) || err) };
   }
 });
+
+/** 异步判断路径是否存在（UNC 上避免主进程被同步 IO 卡住） */
+async function pathExists(p) {
+  try {
+    await fsp.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+let pdfPageTmpCleanAt = 0;
+/** 清理 PDF 渲染页临时文件：仅在写入后每 5 分钟执行一次，过期阈值 30 分钟 */
+function cleanupPdfPageTmp(dir) {
+  const now = Date.now();
+  if (now - pdfPageTmpCleanAt < 5 * 60 * 1000) return;
+  pdfPageTmpCleanAt = now;
+  (async () => {
+    try {
+      const names = await fsp.readdir(dir);
+      await mapLimit(names, 8, async (n) => {
+        const p = path.join(dir, n);
+        try {
+          const st = await fsp.stat(p);
+          if (now - st.mtimeMs > 30 * 60 * 1000) await fsp.unlink(p);
+        } catch {
+          /* 单个文件被占用或已删除，忽略 */
+        }
+      });
+    } catch {
+      /* 目录不存在等情况忽略 */
+    }
+  })();
+}
 
 /**
  * 把 pdfjs 解码出的内嵌图像（kind: 1=GRAYSCALE_1BPP 2=RGB_24BPP 3=RGBA_32BPP）
@@ -1266,29 +1475,36 @@ ipcMain.handle('pdf:ocrFirstPage', async (_e, filePath) => {
 /** 将 PDF 文件（含 UNC 路径）拷贝到临时目录，返回 file:// URL 供 iframe 原生 PDF 查看器加载（避免 data URL 长度限制） */
 ipcMain.handle('db:pdfData', async (_e, filePath) => {
   try {
-    if (!filePath || !fs.existsSync(filePath)) return { ok: false, message: '文件不存在' };
-    if (!/\.pdf$/i.test(filePath)) return { ok: false, message: '仅支持 PDF 文件' };
-    const st = fs.statSync(filePath);
+    if (!filePath || !/\.pdf$/i.test(filePath) || !(await pathExists(filePath))) {
+      return { ok: false, message: '文件不存在或不是 PDF' };
+    }
+    // 仅允许预览产品库 / 知识库内的归档文件
+    if (!isInAnyRoot(filePath, [UNC_ROOT, KBE_ROOT])) {
+      return { ok: false, message: '仅允许预览数据库目录内的归档文件' };
+    }
+    const st = await fsp.stat(filePath);
     if (st.size > 200 * 1024 * 1024) return { ok: false, message: '文件过大（>200MB）暂不支持预览' };
 
     // 拷贝到临时目录，避免 UNC 网络路径 + data URL 长度限制双重问题
     const tmpDir = path.join(app.getPath('temp'), 'ctr-pdf-preview');
-    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-    const safeName = crypto.randomBytes(6).toString('hex') + '_' + path.basename(filePath);
+    await fsp.mkdir(tmpDir, { recursive: true });
+    // 临时副本只用随机名，不带原文件名，避免在 %TEMP% 暴露客户/项目/版本信息
+    const safeName = crypto.randomBytes(12).toString('hex') + '.pdf';
     const tmpPath = path.join(tmpDir, safeName);
-    fs.copyFileSync(filePath, tmpPath);
+    await fsp.copyFile(filePath, tmpPath);
 
     // 清理临时目录中过期文件（保留最近 30 分钟内创建的）
-    try {
-      const now = Date.now();
-      for (const n of fs.readdirSync(tmpDir)) {
-        const p = path.join(tmpDir, n);
-        try {
-          const s = fs.statSync(p);
-          if (now - s.mtimeMs > 30 * 60 * 1000) fs.unlinkSync(p);
-        } catch {}
+    const now = Date.now();
+    const names = await fsp.readdir(tmpDir).catch(() => []);
+    await mapLimit(names, 8, async (n) => {
+      const p = path.join(tmpDir, n);
+      try {
+        const s = await fsp.stat(p);
+        if (now - s.mtimeMs > 30 * 60 * 1000) await fsp.unlink(p);
+      } catch {
+        /* 被占用或已删除，忽略 */
       }
-    } catch {}
+    });
 
     const fileUrl = pathToFileURL(tmpPath).href;
     return { ok: true, fileUrl, size: st.size };
@@ -1340,11 +1556,12 @@ ipcMain.handle('fmea:listByProject', async (_e, payload) => {
   try {
     const { projectId } = payload || {};
     if (!projectId) return { ok: true, records: [] };
-    ensureDir(KBE_FMEA);
-    const files = fs
-      .readdirSync(KBE_FMEA)
-      .filter((n) => /\.parquet$/i.test(n))
-      .map((n) => path.join(KBE_FMEA, n));
+    const listed = await readdirStatus(KBE_FMEA);
+    if (listed.state === 'unreachable') {
+      return { ok: false, records: [], message: listed.message };
+    }
+    const names = listed.names;
+    const files = names.filter((n) => /\.parquet$/i.test(n)).map((n) => path.join(KBE_FMEA, n));
     const out = [];
     for (const fp of files) {
       try {
@@ -1368,6 +1585,10 @@ ipcMain.handle('db:archive', async (_e, payload) => {
     const { base64, fileName, libType, overwrite } = payload || {};
     const targetDir = libDir(libType);
     if (!targetDir) return { ok: false, message: '未知库类型' };
+    // 防目录穿越：归档文件名必须是纯文件名，不允许分隔符或 ..
+    if (!fileName || typeof fileName !== 'string' || /[\\/]/.test(fileName) || fileName.includes('..')) {
+      return { ok: false, message: '归档文件名不合法' };
+    }
     ensureDir(targetDir);
     const filePath = path.join(targetDir, fileName);
     if (fs.existsSync(filePath) && overwrite === false) {
@@ -1386,7 +1607,13 @@ ipcMain.handle('db:list', async (_e, payload) => {
     const { libType } = payload || {};
     const targetDir = libDir(libType);
     if (!targetDir) return { ok: false, message: '未知库类型' };
-    if (!fs.existsSync(targetDir)) return { ok: true, dir: targetDir, files: [] };
+    const listed = await readdirStatus(targetDir);
+    // 共享盘不可达时明确报错，避免界面把"断网"显示成"空库"
+    if (listed.state === 'unreachable') {
+      return { ok: false, dir: targetDir, files: [], message: listed.message };
+    }
+    if (listed.state === 'missing') return { ok: true, dir: targetDir, files: [] };
+    const names = listed.names;
     const extRe =
       libType === 'material'
         ? /\.(parquet|json)$/i
@@ -1394,13 +1621,18 @@ ipcMain.handle('db:list', async (_e, payload) => {
           ? // 新格式 FM-A-A03-001-V01 与旧格式 FM-2026-001 都要能列出（与 parseFmeaFileName 对齐）
             /^(?:FM-[A-JU]-(?:[A-J]\d{2}|U|UXX|XX)-\d{3,}-V\d{2}|FM-\d{4}-\d{3,})\.parquet$/i
           : /\.(xlsx|pdf)$/i;
-    const files = fs
-      .readdirSync(targetDir)
-      .filter((n) => extRe.test(n))
-      .map((name) => {
-        const st = fs.statSync(path.join(targetDir, name));
-        return { name, size: st.size, mtime: st.mtime.toISOString(), fullPath: path.join(targetDir, name) };
+    const files = (
+      await mapLimit(names.filter((n) => extRe.test(n)), 8, async (name) => {
+        const fullPath = path.join(targetDir, name);
+        try {
+          const st = await fsp.stat(fullPath);
+          return { name, size: st.size, mtime: st.mtime.toISOString(), fullPath };
+        } catch {
+          return null; // 并发删除等导致取不到元信息的条目跳过
+        }
       })
+    )
+      .filter(Boolean)
       .sort((a, b) => b.mtime.localeCompare(a.mtime));
     return { ok: true, dir: targetDir, files };
   } catch (err) {
@@ -1414,17 +1646,31 @@ ipcMain.handle('kbe:browse', async (_e, payload) => {
     const key = (payload && payload.category) || '';
     const targetDir = KBE_BROWSE_DIRS[key];
     if (!targetDir) return { ok: false, message: '未知分类' };
-    if (!fs.existsSync(targetDir)) {
+    const listed = await readdirStatus(targetDir);
+    if (listed.state === 'unreachable') {
+      return { ok: false, dir: targetDir, exists: true, files: [], message: listed.message };
+    }
+    if (listed.state === 'missing') {
       return { ok: true, dir: targetDir, exists: false, files: [], message: '目录尚未创建' };
     }
-    const files = fs
-      .readdirSync(targetDir, { withFileTypes: true })
-      .filter((d) => d.isFile() && !d.name.startsWith('~$'))
-      .map((d) => {
-        const fullPath = path.join(targetDir, d.name);
-        const st = fs.statSync(fullPath);
-        return { name: d.name, size: st.size, mtime: st.mtime.toISOString(), fullPath };
-      })
+    const names = listed.names;
+    const files = (
+      await mapLimit(
+        names.filter((n) => !n.startsWith('~$')),
+        8,
+        async (name) => {
+          const fullPath = path.join(targetDir, name);
+          try {
+            const st = await fsp.stat(fullPath);
+            if (!st.isFile()) return null;
+            return { name, size: st.size, mtime: st.mtime.toISOString(), fullPath };
+          } catch {
+            return null;
+          }
+        },
+      )
+    )
+      .filter(Boolean)
       .sort((a, b) => b.mtime.localeCompare(a.mtime));
     return { ok: true, dir: targetDir, exists: true, files };
   } catch (err) {
@@ -1634,12 +1880,17 @@ ipcMain.handle('kbe:listByProject', async (_e, payload) => {
     const records = [];
     for (const cat of Object.keys(KBE_DOC_META)) {
       const meta = KBE_DOC_META[cat];
-      if (!fs.existsSync(meta.dir)) continue;
+      const listed = await readdirStatus(meta.dir);
+      if (listed.state === 'unreachable') {
+        return { ok: false, records: [], message: listed.message };
+      }
+      if (listed.state === 'missing') continue;
+      const names = listed.names;
       const re = new RegExp(`^${meta.prefix}-\\d{4}-\\d{3,}\\.json$`, 'i');
-      for (const n of fs.readdirSync(meta.dir)) {
+      for (const n of names) {
         if (!re.test(n)) continue;
         try {
-          const rec = JSON.parse(fs.readFileSync(path.join(meta.dir, n), 'utf8'));
+          const rec = JSON.parse(await fsp.readFile(path.join(meta.dir, n), 'utf8'));
           if (!rec || !rec.id) continue;
           const cited = (Array.isArray(rec.citations) ? rec.citations : []).some(
             (x) => String(x && x.projectId) === projectId,
@@ -1659,6 +1910,10 @@ ipcMain.handle('db:read', async (_e, payload) => {
   try {
     const { fullPath } = payload || {};
     if (!fullPath || !fs.existsSync(fullPath)) return { ok: false, message: '文件不存在' };
+    // 仅允许读取产品库 / 知识库内的归档文件，避免渲染层被利用读取任意本地文件
+    if (!isInAnyRoot(fullPath, [UNC_ROOT, KBE_ROOT])) {
+      return { ok: false, message: '仅允许读取数据库目录内的归档文件' };
+    }
     const ExcelJS = require('exceljs');
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(fullPath);
@@ -1690,7 +1945,7 @@ ipcMain.handle('db:readText', async (_e, payload) => {
       return { ok: true, text: JSON.stringify(record) };
     }
     if (!/\.(json|csv|txt)$/i.test(fullPath)) return { ok: false, message: '仅支持文本类归档文件' };
-    return { ok: true, text: fs.readFileSync(fullPath, 'utf8') };
+    return { ok: true, text: await fsp.readFile(fullPath, 'utf8') };
   } catch (err) {
     return { ok: false, message: String((err && err.message) || err) };
   }
@@ -1739,8 +1994,13 @@ ipcMain.handle('db:rename', async (_e, payload) => {
 
 /** 数据库连通性自检（UNC 根 + 知识库根） */
 ipcMain.handle('db:ping', async () => {
+  // 异步探测（含 3 秒超时）替代同步 existsSync：共享盘离线时不会卡住主进程
+  const [productOk, kbeOk] = await Promise.all([
+    probeShare(shareRootOf(UNC_ROOT)),
+    probeShare(shareRootOf(KBE_ROOT)),
+  ]);
   return {
-    reachable: fs.existsSync(UNC_ROOT) || fs.existsSync(KBE_ROOT),
+    reachable: productOk || kbeOk,
     root: UNC_ROOT,
     calc: UNC_CALC_LIB,
     test: UNC_TEST_LIB,
@@ -1759,6 +2019,10 @@ ipcMain.handle('db:ping', async () => {
 ipcMain.handle('app:openPath', async (_e, filePath) => {
   try {
     if (!filePath || !fs.existsSync(filePath)) return { ok: false, message: '文件不存在或无法访问' };
+    // 仅允许打开产品库 / 材料库 / 知识库 / 用户数据目录内的文件或文件夹
+    if (!isInAnyRoot(filePath, [UNC_ROOT, UNC_MATERIAL_LIB, KBE_ROOT, app.getPath('userData')])) {
+      return { ok: false, message: '仅允许打开数据库目录内的文件或文件夹' };
+    }
     // 标准版：禁止把文件交给外部程序打开。外部程序（Acrobat / WPS / 浏览器）自带「另存为」，
     // 且不受本软件的内容保护约束，一旦交给它就无法再阻止保存与截图，因此只允许打开文件夹。
     if (IS_STANDARD) {
@@ -2420,6 +2684,17 @@ ipcMain.handle('app:info', () => ({
   dataDir: store.dataPath(),
 }));
 
+// —— 本地数据备份与恢复（设置页） ——
+ipcMain.handle('store:backups', () => ({
+  ok: true,
+  dir: store.backupPath(),
+  files: store.listBackups(),
+}));
+
+ipcMain.handle('store:backupNow', () => store.createBackup());
+
+ipcMain.handle('store:restore', (_e, name) => store.restore(String(name || '')));
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   store.init(app.getPath('userData'));
@@ -2431,4 +2706,21 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// 退出前强制落盘，避免本地数据停留在合并写入窗口内丢失
+app.on('before-quit', () => {
+  try {
+    store.flush();
+  } catch (err) {
+    console.error('退出前保存本地数据失败：', (err && err.message) || err);
+  }
+  // 清理预览临时文件：敏感资料的明文副本不留在 %TEMP%
+  for (const dirName of ['ctr-pdf-pages', 'ctr-pdf-preview']) {
+    try {
+      fs.rmSync(path.join(app.getPath('temp'), dirName), { recursive: true, force: true });
+    } catch {
+      /* 文件被占用时忽略，交由下次启动的过期清理兜底 */
+    }
+  }
 });

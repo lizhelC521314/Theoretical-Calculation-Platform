@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import * as echarts from 'echarts';
+import { memo, useEffect, useRef, useState } from 'react';
+import { echarts, type EChartsInstance } from './echarts';
 import type { FormulaSpec, ShowIf } from '../formula/types';
 import { showIfMatches } from '../formula/types';
 import { formatNumber } from '../formula/units';
@@ -14,7 +14,7 @@ interface Props {
  * 参数敏感性分析：对选定输入在 ±50% 范围内扫描，观察某个输出结果的变化趋势。
  * 用于快速判断哪个参数对结果影响最大（设计优化的方向）。
  */
-export function SensitivityChart({ formula, inputsSI }: Props) {
+function SensitivityChartView({ formula, inputsSI }: Props) {
   // 按 showIf 只列出当前设计模式下实际参与计算的输入与输出
   const visible = (cond?: ShowIf) => !cond || (inputsSI != null && showIfMatches(cond, inputsSI));
 
@@ -35,7 +35,9 @@ export function SensitivityChart({ formula, inputsSI }: Props) {
     }
   });
   const ref = useRef<HTMLDivElement | null>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
+  const chartRef = useRef<EChartsInstance | null>(null);
+  /** 坐标轴/系列结构变化（换变量或换结果）时需要全量重建 */
+  const optionKeyRef = useRef('');
 
   useEffect(() => {
     if (!ref.current) return;
@@ -44,11 +46,13 @@ export function SensitivityChart({ formula, inputsSI }: Props) {
 
     if (!inputsSI || !xKey || !yKey) {
       chart.clear();
+      optionKeyRef.current = '';
       return;
     }
     const base = inputsSI[xKey];
     if (!Number.isFinite(base) || base === 0) {
       chart.clear();
+      optionKeyRef.current = '';
       return;
     }
 
@@ -68,47 +72,62 @@ export function SensitivityChart({ formula, inputsSI }: Props) {
     const xSpec = formula.inputs.find((p) => p.key === xKey);
     const ySpec = formula.outputs.find((o) => o.key === yKey);
 
-    chart.setOption(
-      {
-        grid: { left: 62, right: 18, top: 34, bottom: 40 },
-        tooltip: {
-          trigger: 'axis',
-          valueFormatter: (val: number) => formatNumber(val),
-        },
-        xAxis: {
-          type: 'value',
-          name: `${xSpec?.symbol ?? xKey} (${xSpec?.unit ?? ''})`,
-          nameLocation: 'middle',
-          nameGap: 26,
-          axisLabel: { fontSize: 11 },
-        },
-        yAxis: {
-          type: 'value',
-          name: `${ySpec?.symbol ?? yKey} (${ySpec?.unit ?? ''})`,
-          nameTextStyle: { fontSize: 11 },
-          axisLabel: { fontSize: 11 },
-        },
-        series: [
-          {
-            type: 'line',
-            smooth: true,
-            symbolSize: 5,
-            data: points,
-            lineStyle: { color: '#1a5fb4', width: 2 },
-            itemStyle: { color: '#1a5fb4' },
-            areaStyle: { color: 'rgba(26,95,180,0.08)' },
-          },
-        ],
+    const option = {
+      grid: { left: 62, right: 18, top: 34, bottom: 40 },
+      tooltip: {
+        trigger: 'axis' as const,
+        valueFormatter: (val: number) => formatNumber(val),
       },
-      true,
-    );
+      xAxis: {
+        type: 'value' as const,
+        name: `${xSpec?.symbol ?? xKey} (${xSpec?.unit ?? ''})`,
+        nameLocation: 'middle' as const,
+        nameGap: 26,
+        axisLabel: { fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value' as const,
+        name: `${ySpec?.symbol ?? yKey} (${ySpec?.unit ?? ''})`,
+        nameTextStyle: { fontSize: 11 },
+        axisLabel: { fontSize: 11 },
+      },
+      series: [
+        {
+          type: 'line' as const,
+          smooth: true,
+          symbolSize: 5,
+          data: points,
+          lineStyle: { color: '#1a5fb4', width: 2 },
+          itemStyle: { color: '#1a5fb4' },
+          areaStyle: { color: 'rgba(26,95,180,0.08)' },
+        },
+      ],
+    };
+
+    // 仅当坐标轴配置变化（换变量/换结果/换公式）时全量重建，其余只替换 series 数据
+    const optionKey = `${formula.id}|${xKey}|${yKey}`;
+    if (optionKeyRef.current !== optionKey) {
+      chart.setOption(option, { notMerge: true });
+      optionKeyRef.current = optionKey;
+    } else {
+      chart.setOption(option, { replaceMerge: ['series'] });
+    }
   }, [formula, inputsSI, xKey, yKey]);
 
   useEffect(() => {
-    const onResize = () => chartRef.current?.resize();
+    // 窗口尺寸变化用 rAF 合并，避免拖动窗口时逐帧重排图表
+    let raf = 0;
+    const onResize = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        chartRef.current?.resize();
+      });
+    };
     window.addEventListener('resize', onResize);
     return () => {
       window.removeEventListener('resize', onResize);
+      if (raf) window.cancelAnimationFrame(raf);
       chartRef.current?.dispose();
       chartRef.current = null;
     };
@@ -157,3 +176,5 @@ export function SensitivityChart({ formula, inputsSI }: Props) {
     </div>
   );
 }
+
+export const SensitivityChart = memo(SensitivityChartView);

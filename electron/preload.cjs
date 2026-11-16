@@ -22,6 +22,11 @@ const bridge = {
     info: () => ipcRenderer.invoke('license:info'),
     activate: (code) => ipcRenderer.invoke('license:activate', code),
   },
+  maintenance: {
+    backups: () => ipcRenderer.invoke('store:backups'),
+    backupNow: () => ipcRenderer.invoke('store:backupNow'),
+    restore: (name) => ipcRenderer.invoke('store:restore', name),
+  },
   approval: {
     status: (username) => ipcRenderer.invoke('approval:status', username),
     startServer: () => ipcRenderer.invoke('approval:startServer'),
@@ -29,6 +34,8 @@ const bridge = {
     listPending: () => ipcRenderer.invoke('approval:listPending'),
     resolve: (p) => ipcRenderer.invoke('approval:resolve', p),
     saveClientConfig: (p) => ipcRenderer.invoke('approval:saveClientConfig', p),
+    getServerConfig: () => ipcRenderer.invoke('approval:getServerConfig'),
+    setAllowedCidrs: (p) => ipcRenderer.invoke('approval:setAllowedCidrs', p),
     testConnection: (p) => ipcRenderer.invoke('approval:testConnection', p),
     decryptWithToken: (p) => ipcRenderer.invoke('approval:decryptWithToken', p),
     onNewRequest: (cb) => {

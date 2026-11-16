@@ -87,8 +87,10 @@ export function PdfViewer({ filePath }: Props) {
       .renderPage({ filePath, page, scale })
       .then((res) => {
         if (cancel || my !== seq.current) return;
-        if (res.ok && res.dataUrl) {
-          setSrc(res.dataUrl);
+        // 打包后主进程返回临时文件的 file:// 地址（url），开发模式仍返回 dataUrl
+        const next = res.url || res.dataUrl;
+        if (res.ok && next) {
+          setSrc(next);
           if (res.pageCount) setPageCount(res.pageCount);
           if (res.page && res.page !== page) setPage(res.page);
         } else {

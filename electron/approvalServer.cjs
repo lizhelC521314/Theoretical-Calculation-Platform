@@ -14,6 +14,34 @@ const os = require('node:os');
 const DEFAULT_PORT = 39125;
 const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 分钟
 
+// —— 访问控制与限流 ——
+// 默认只允许本机与 10.1.1.0/24 网段访问审批服务；
+// 导出方不在该网段时，用环境变量 CTR_APPROVAL_ALLOW=10.1.1.0/24,10.1.2.0/24 覆盖
+const DEFAULT_ALLOWED_CIDRS = ['127.0.0.1/32', '10.1.1.0/24'];
+const RATE_WINDOW_MS = 60 * 1000;
+const RATE_MAX_REQ = 120; // 每 IP 每分钟请求上限
+const AUTH_FAIL_LIMIT = 10; // 5 分钟内密钥错误次数上限
+const AUTH_FAIL_WINDOW_MS = 5 * 60 * 1000;
+const BLOCK_MS = 5 * 60 * 1000;
+const MAX_BODY_BYTES = 16 * 1024;
+const MAX_PENDING = 50;
+
+/** 允许的网段，可用环境变量 CTR_APPROVAL_ALLOW=10.1.0.0/16,192.168.1.0/24 覆盖 */
+let allowedCidrs = (() => {
+  const fromEnv = String(process.env.CTR_APPROVAL_ALLOW || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return fromEnv.length ? fromEnv : DEFAULT_ALLOWED_CIDRS.slice();
+})();
+
+/** 每 IP 请求计数：ip → { windowStart, count } */
+const rateMap = new Map();
+/** 每 IP 密钥失败计数：ip → { windowStart, count, blockedUntil } */
+const failMap = new Map();
+/** 已消费的令牌：令牌一次性使用，防止被重复拿去解密 */
+const usedTokens = new Set();
+
 /** 待审批请求内存表：requestId → { request, res, resolveTimer, expireAt } */
 const pending = new Map();
 /** 已签发的令牌表：token → { requestId, fileHash, expiresAt } */
@@ -47,6 +75,85 @@ function getLocalIPs() {
 
 function randomToken() {
   return crypto.randomBytes(24).toString('hex');
+}
+
+/** IPv4 转 32 位整数，非法返回 null */
+function ipToInt(ip) {
+  const parts = String(ip || '').split('.');
+  if (parts.length !== 4) return null;
+  let value = 0;
+  for (const part of parts) {
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < 0 || n > 255) return null;
+    value = (value * 256) + n;
+  }
+  return value >>> 0;
+}
+
+/** 统一 IPv6 映射地址与回环地址的表示 */
+function normalizeIp(raw) {
+  let ip = String(raw || '').trim();
+  if (ip.startsWith('::ffff:')) ip = ip.slice(7);
+  if (ip === '::1') ip = '127.0.0.1';
+  return ip;
+}
+
+/** 判断来源 IP 是否在允许网段内 */
+function isIpAllowed(rawIp) {
+  const value = ipToInt(normalizeIp(rawIp));
+  if (value == null) return false;
+  for (const cidr of allowedCidrs) {
+    const [base, bitsRaw] = String(cidr).split('/');
+    const bits = bitsRaw == null ? 32 : Number(bitsRaw);
+    const baseValue = ipToInt(base);
+    if (baseValue == null || !Number.isInteger(bits) || bits < 0 || bits > 32) continue;
+    const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+    if (((value & mask) >>> 0) === ((baseValue & mask) >>> 0)) return true;
+  }
+  return false;
+}
+
+/** 每 IP 每分钟请求数限流；超限返回 true */
+function isRateLimited(ip) {
+  const now = Date.now();
+  const state = rateMap.get(ip);
+  if (!state || now - state.windowStart > RATE_WINDOW_MS) {
+    rateMap.set(ip, { windowStart: now, count: 1 });
+    return false;
+  }
+  state.count += 1;
+  return state.count > RATE_MAX_REQ;
+}
+
+/** 该 IP 是否因密钥连续错误被临时封禁 */
+function isBlocked(ip) {
+  const state = failMap.get(ip);
+  return !!state && state.blockedUntil > Date.now();
+}
+
+/** 记录一次密钥校验失败，达到阈值后封禁一段时间 */
+function noteAuthFailure(ip) {
+  const now = Date.now();
+  const state = failMap.get(ip);
+  if (!state || now - state.windowStart > AUTH_FAIL_WINDOW_MS) {
+    failMap.set(ip, { windowStart: now, count: 1, blockedUntil: 0 });
+    return;
+  }
+  state.count += 1;
+  if (state.count >= AUTH_FAIL_LIMIT) state.blockedUntil = now + BLOCK_MS;
+}
+
+/** 防止两个计数表无限增长 */
+function pruneThrottleMaps() {
+  if (rateMap.size > 500 || failMap.size > 500) {
+    const now = Date.now();
+    for (const [ip, s] of rateMap) {
+      if (now - s.windowStart > RATE_WINDOW_MS) rateMap.delete(ip);
+    }
+    for (const [ip, s] of failMap) {
+      if (now - s.windowStart > AUTH_FAIL_WINDOW_MS && s.blockedUntil <= now) failMap.delete(ip);
+    }
+  }
 }
 
 /** 生成自包含令牌（HMAC-SHA256 签名），客户端可独立验证有效期 */
@@ -86,7 +193,20 @@ function jsonResponse(res, status, body) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on('data', (c) => chunks.push(c));
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      // 限制请求体大小，避免异常客户端占用内存
+      if (size > MAX_BODY_BYTES) {
+        const err = new Error('请求体过大');
+        err.code = 'BODY_TOO_LARGE';
+        reject(err);
+        // 丢弃剩余数据而不是销毁连接，保证 413 响应能正常返回
+        req.resume();
+        return;
+      }
+      chunks.push(c);
+    });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
@@ -100,7 +220,22 @@ function checkClientKey(req) {
 
 function handleRequest(req, res) {
   if (req.method === 'OPTIONS') return jsonResponse(res, 204, {});
-  if (!checkClientKey(req)) return jsonResponse(res, 401, { ok: false, message: '客户端密钥不匹配' });
+  // 网段限制 + 限流 + 失败封禁：审批服务只应对局域网内可信机器开放
+  const ip = normalizeIp(req.socket.remoteAddress);
+  if (!isIpAllowed(ip)) {
+    return jsonResponse(res, 403, { ok: false, message: '该网段不允许访问审批服务' });
+  }
+  if (isBlocked(ip)) {
+    return jsonResponse(res, 429, { ok: false, message: '密钥错误次数过多，请 5 分钟后再试' });
+  }
+  pruneThrottleMaps();
+  if (isRateLimited(ip)) {
+    return jsonResponse(res, 429, { ok: false, message: '请求过于频繁，请稍后再试' });
+  }
+  if (!checkClientKey(req)) {
+    noteAuthFailure(ip);
+    return jsonResponse(res, 401, { ok: false, message: '客户端密钥不匹配' });
+  }
 
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -120,6 +255,10 @@ function handleRequest(req, res) {
       .then((body) => {
         let payload;
         try { payload = JSON.parse(body || '{}'); } catch { return jsonResponse(res, 400, { ok: false, message: 'JSON 格式错误' }); }
+        // 待审批请求数量上限，避免被刷出大量待办
+        if (Array.from(pending.values()).filter((e) => e.status === 'pending').length >= MAX_PENDING) {
+          return jsonResponse(res, 429, { ok: false, message: '待审批请求过多，请先处理现有请求' });
+        }
         const requestId = String(payload.requestId || crypto.randomUUID());
         const pendingEntry = {
           requestId,
@@ -150,7 +289,24 @@ function handleRequest(req, res) {
         }
         return jsonResponse(res, 200, { ok: true, requestId });
       })
-      .catch((err) => jsonResponse(res, 500, { ok: false, message: String(err?.message || err) }));
+      .catch((err) => jsonResponse(res, err && err.code === 'BODY_TOO_LARGE' ? 413 : 500, { ok: false, message: String(err?.message || err) }));
+  }
+
+  // 令牌一次性使用：导出方解密前调用此接口作废令牌，重复使用返回 409
+  if (req.method === 'POST' && url.pathname === '/consume-token') {
+    return readBody(req)
+      .then((body) => {
+        let token = '';
+        try { token = String(JSON.parse(body || '{}').token || ''); } catch { /* 按无效令牌处理 */ }
+        const payload = token ? verifyToken(token) : null;
+        if (!payload) return jsonResponse(res, 400, { ok: false, message: '令牌无效或已过期' });
+        if (usedTokens.has(token)) return jsonResponse(res, 409, { ok: false, message: '令牌已使用' });
+        usedTokens.add(token);
+        issuedTokens.delete(token);
+        setTimeout(() => usedTokens.delete(token), TOKEN_TTL_MS + 60 * 1000);
+        return jsonResponse(res, 200, { ok: true, requestId: payload.requestId });
+      })
+      .catch((err) => jsonResponse(res, err && err.code === 'BODY_TOO_LARGE' ? 413 : 500, { ok: false, message: String(err?.message || err) }));
   }
 
   if (req.method === 'GET' && url.pathname.startsWith('/poll/')) {
@@ -213,6 +369,9 @@ function stop() {
       currentPort = 0;
       pending.clear();
       issuedTokens.clear();
+      usedTokens.clear();
+      rateMap.clear();
+      failMap.clear();
       serverSecret = '';
       resolve({ ok: true });
     });
@@ -276,6 +435,23 @@ function verifyTokenWithKey(tokenBase64, key) {
   }
 }
 
+/** 运行时更新允许网段（设置页保存后立即生效，无需重启服务） */
+function setAllowedCidrs(list) {
+  const valid = (Array.isArray(list) ? list : [])
+    .map((s) => String(s || '').trim())
+    .filter((s) => /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/.test(s))
+    .map((s) => (s.includes('/') ? s : `${s}/32`));
+  if (!valid.length) return { ok: false, message: '至少保留一个有效网段' };
+  // 本机回环始终保留，避免保存白名单后本机自检（测试连接）也被拒绝
+  allowedCidrs = valid.includes('127.0.0.1/32') ? valid : ['127.0.0.1/32', ...valid];
+  return { ok: true, cidrs: allowedCidrs.slice() };
+}
+
+/** 当前生效的允许网段 */
+function getAllowedCidrs() {
+  return allowedCidrs.slice();
+}
+
 module.exports = {
   DEFAULT_PORT,
   TOKEN_TTL_MS,
@@ -283,6 +459,9 @@ module.exports = {
   stop,
   isRunning,
   getPort,
+  isIpAllowed, // 供自检/诊断使用
+  setAllowedCidrs,
+  getAllowedCidrs,
   resolveRequest,
   listPending,
   verifyToken,       // 服务端内部（用全局 secret）

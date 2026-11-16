@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import * as echarts from 'echarts';
+import { echarts, type EChartsInstance } from './echarts';
 import { showIfMatches, type FormulaSpec } from '../formula/types';
 import { UNIT_GROUPS, formatNumber, fromSI, toSI } from '../formula/units';
 import {
@@ -499,7 +499,7 @@ function SweepView({
   xUnit: string;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
+  const chartRef = useRef<EChartsInstance | null>(null);
   const xSpec = formula.inputs.find((p) => p.key === xKey);
   const ySpec = formula.outputs.find((o) => o.key === curveKey);
   const yUnit = ySpec?.unitGroup
@@ -556,10 +556,18 @@ function SweepView({
   }, [result, xSpec, ySpec, xUnit, yUnit, xKey, curveKey]);
 
   useEffect(() => {
-    const onResize = () => chartRef.current?.resize();
+    let raf = 0;
+    const onResize = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        chartRef.current?.resize();
+      });
+    };
     window.addEventListener('resize', onResize);
     return () => {
       window.removeEventListener('resize', onResize);
+      if (raf) window.cancelAnimationFrame(raf);
       chartRef.current?.dispose();
       chartRef.current = null;
     };
@@ -619,7 +627,7 @@ function GridView({
   yUnit: string;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
+  const chartRef = useRef<EChartsInstance | null>(null);
   const xSpec = formula.inputs.find((p) => p.key === xKey);
   const ySpec = formula.inputs.find((p) => p.key === yKey);
 
@@ -683,10 +691,18 @@ function GridView({
   }, [result, xSpec, ySpec, xUnit, yUnit, xKey, yKey]);
 
   useEffect(() => {
-    const onResize = () => chartRef.current?.resize();
+    let raf = 0;
+    const onResize = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        chartRef.current?.resize();
+      });
+    };
     window.addEventListener('resize', onResize);
     return () => {
       window.removeEventListener('resize', onResize);
+      if (raf) window.cancelAnimationFrame(raf);
       chartRef.current?.dispose();
       chartRef.current = null;
     };

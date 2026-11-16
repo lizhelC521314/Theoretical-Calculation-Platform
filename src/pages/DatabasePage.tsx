@@ -127,6 +127,9 @@ export function DatabasePage({ user, onNavigate }: Props) {
     if (t.ok) setTestFiles(t.files || []);
     if (d.ok) setDesignFiles(d.files || []);
     if (tr.ok) setTrustedFiles(tr.files || []);
+    // 共享盘不可达时给出明确提示，而不是静默显示空列表
+    const failed = [c, t, d, tr].find((r) => !r.ok);
+    if (failed && failed.message) setToast(failed.message);
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);

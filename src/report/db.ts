@@ -1,4 +1,5 @@
-import ExcelJS from 'exceljs';
+// ExcelJS 仅在导出可信资产时用到，改为函数内动态加载，避免所有检索页被动加载该库
+import type ExcelJS from 'exceljs';
 
 /**
  * 可信资产数据模块
@@ -301,6 +302,7 @@ export async function buildTrustedXlsxBase64(
   calcRows: CalcAssetRow[],
   testRows: TestAssetRow[],
 ): Promise<string> {
+  const ExcelJS = (await import('exceljs')).default;
   const thin = { style: 'thin' as const, color: { argb: 'FF808080' } };
   const border = { top: thin, left: thin, bottom: thin, right: thin };
   const center: Partial<ExcelJS.Alignment> = { horizontal: 'center', vertical: 'middle', wrapText: true };

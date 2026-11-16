@@ -405,6 +405,7 @@ select {
   color: #dce7f5;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 .sidebar-brand {
   display: flex;
@@ -412,6 +413,7 @@ select {
   gap: 10px;
   padding: 18px 16px;
   border-bottom: 1px solid #1c3d61;
+  flex-shrink: 0;
 }
 .sidebar-brand img {
   width: 42px;
@@ -434,6 +436,22 @@ select {
 .sidebar-nav {
   padding: 12px 10px;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.sidebar-nav::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: rgba(143, 178, 216, 0.35);
+  border-radius: 3px;
+}
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background: rgba(143, 178, 216, 0.55);
 }
 .nav-item {
   display: flex;
@@ -499,6 +517,7 @@ select {
   border-top: 1px solid #1c3d61;
   font-size: 11px;
   color: #7593b5;
+  flex-shrink: 0;
 }
 .main-area {
   flex: 1;
@@ -548,6 +567,18 @@ select {
 }
 .content:has(.calc-page) {
   padding: 0;
+  overflow: hidden;
+}
+/* JS 动态注入的类——用于需要内部滚动的页面（检索/库/产品库/公式库/计算书） */
+.content.content-inner-scroll {
+  overflow: hidden;
+}
+.content:has(.db-page) {
+  overflow: hidden;
+}
+.content:has(.test-search),
+.content:has(.test-page),
+.content:has(.library-page) {
   overflow: hidden;
 }
 /* 工作页面自动充满可用高度，内部区域各自滚动 */
@@ -2413,6 +2444,10 @@ select {
 .db-page > .settings-card,
 .db-page > .lib-tabs {
   flex-shrink: 0;
+}
+.db-page > .db-split {
+  flex: 1 1 0;
+  min-height: 0;
 }
 .db-page > .file-list {
   flex: 1 1 0;
@@ -5691,4 +5726,11 @@ body.col-resizing {
   display: flex;
   gap: 10px;
   margin-top: 16px;
+}
+
+/* 页面懒加载占位（切换导航时短暂显示） */
+.page-loading {
+  padding: 28px 24px;
+  font-size: 13px;
+  color: var(--muted);
 }

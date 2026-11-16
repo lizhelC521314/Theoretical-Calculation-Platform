@@ -51,6 +51,16 @@ function initialValues(formula: FormulaSpec) {
   return { values, units };
 }
 
+/** 输入防抖：击键只更新输入框，计算与图表延后到停顿后再跑，避免每次按键触发整链重算 */
+function useDebounced<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}
+
 export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }: Props) {
   const init = useMemo(() => initialValues(formula), [formula]);
   const [values, setValues] = useState<Record<string, number>>(init.values);
@@ -159,8 +169,20 @@ export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }
     [formula, units],
   );
 
-  /** 输入校验 + 换算到 SI 并求解（统一入口，见 formula/compute.ts） */
-  const computed = useMemo(() => computeFormula(formula, values, units), [formula, values, units]);
+  /**
+   * 输入校验 + 换算到 SI 并求解（统一入口，见 formula/compute.ts）。
+   * 基于防抖后的输入：输入框即时响应，结果区与图表在停顿后刷新。
+   * 保存/导出走 computeCurrent()，始终读取当前输入，不会写出滞后值。
+   */
+  const calcValues = useDebounced(values, 150);
+  const calcUnits = useDebounced(units, 150);
+  const computed = useMemo(
+    () => computeFormula(formula, calcValues, calcUnits),
+    [formula, calcValues, calcUnits],
+  );
+
+  /** 立即按当前输入求解：保存/导出前调用，避免防抖窗口内写出上一组参数 */
+  const computeCurrent = () => computeFormula(formula, values, units);
 
   const showToast = (t: string) => {
     setToast(t);
@@ -228,13 +250,17 @@ export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }
   }, [bindings, formula, materials, values, units]);
 
   const saveHistory = async () => {
-    if (!computed.ok || !computed.inputsSI || !computed.outputsSI) return;
-    await api.history.save(historyPayload());
+    const current = computeCurrent();
+    if (!current.ok || !current.inputsSI || !current.outputsSI) {
+      showToast('输入参数不完整，请检查后重试');
+      return;
+    }
+    await api.history.save(historyPayload(current));
     showToast(project ? `已保存到项目「${project.name}」` : '已保存到计算记录（临时计算）');
   };
 
   /** 计算记录的公共载荷：保存记录与存入型号共用，保证两者内容一致 */
-  const historyPayload = () => ({
+  const historyPayload = (c: ReturnType<typeof computeFormula> = computed) => ({
     userId: user.id,
     username: user.displayName || user.username,
     projectId: project?.id ?? null,
@@ -243,14 +269,18 @@ export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }
     formulaVersion: formula.version,
     formulaStatus: formula.status,
     domain: DOMAIN_LABEL[formula.domain],
-    inputs: { values, units, inputsSI: computed.inputsSI ?? {}, materialBindings: bindingDetails },
-    outputs: computed.outputsSI ?? {},
+    inputs: { values, units, inputsSI: c.inputsSI ?? {}, materialBindings: bindingDetails },
+    outputs: c.outputsSI ?? {},
     note: '',
   });
 
   /** 存入产品型号：先落一条计算记录，再把记录快照与输出参数挂到型号上 */
   const saveToModel = async () => {
-    if (!computed.ok || !computed.inputsSI || !computed.outputsSI) return;
+    const current = computeCurrent();
+    if (!current.ok || !current.inputsSI || !current.outputsSI) {
+      showToast('输入参数不完整，请检查后重试');
+      return;
+    }
     const target = modelOpts.find((m) => m.id === selectedModel);
     if (!target) {
       showToast('请选择要存入的产品型号');
@@ -272,7 +302,7 @@ export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }
     }
     setSavingModel(true);
     try {
-      const res = await api.history.save(historyPayload());
+      const res = await api.history.save(historyPayload(current));
       const store = await api.product.get();
       const model = store?.models.find((m) => m.id === target.id);
       if (!store || !model) {
@@ -316,9 +346,13 @@ export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }
   };
 
   const exportCsv = async () => {
-    if (!computed.ok || !computed.inputsSI || !computed.outputsSI) return;
-    const inputsSI = computed.inputsSI;
-    const outputsSI = computed.outputsSI;
+    const current = computeCurrent();
+    if (!current.ok || !current.inputsSI || !current.outputsSI) {
+      showToast('输入参数不完整，请检查后重试');
+      return;
+    }
+    const inputsSI = current.inputsSI;
+    const outputsSI = current.outputsSI;
     const lines: string[] = [];
     lines.push(`公式,${formula.title}`);
     lines.push(`公式编号,${formula.id}`);
@@ -365,18 +399,30 @@ export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }
     if (res.ok) showToast('计算书已导出');
   };
 
-  // 左栏 ↔ 中栏 拖动
+  // 左栏 ↔ 中栏 拖动（rAF 合并高频 mousemove）
   const handleLeftResize = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       const startX = e.clientX, startW = leftW;
       const minW = 220, maxW = 520;
+      let pending = startW;
+      let raf = 0;
       const onMove = (ev: MouseEvent) => {
-        setLeftW(Math.min(maxW, Math.max(minW, startW + (ev.clientX - startX))));
+        pending = Math.min(maxW, Math.max(minW, startW + (ev.clientX - startX)));
+        if (raf) return;
+        raf = window.requestAnimationFrame(() => {
+          raf = 0;
+          setLeftW(pending);
+        });
       };
       const onUp = () => {
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
+        if (raf) {
+          window.cancelAnimationFrame(raf);
+          raf = 0;
+        }
+        setLeftW(pending);
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
       };
@@ -388,18 +434,30 @@ export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }
     [leftW],
   );
 
-  // 中栏 ↔ 右栏 拖动
+  // 中栏 ↔ 右栏 拖动（rAF 合并高频 mousemove）
   const handleRightResize = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       const startX = e.clientX, startW = rightW;
       const minW = 280, maxW = 580;
+      let pending = startW;
+      let raf = 0;
       const onMove = (ev: MouseEvent) => {
-        setRightW(Math.min(maxW, Math.max(minW, startW - (ev.clientX - startX))));
+        pending = Math.min(maxW, Math.max(minW, startW - (ev.clientX - startX)));
+        if (raf) return;
+        raf = window.requestAnimationFrame(() => {
+          raf = 0;
+          setRightW(pending);
+        });
       };
       const onUp = () => {
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
+        if (raf) {
+          window.cancelAnimationFrame(raf);
+          raf = 0;
+        }
+        setRightW(pending);
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
       };
@@ -498,7 +556,7 @@ export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }
         {!IS_STANDARD && (
           <>
             <div className="calc-col middle">
-              <FormulaView formula={formula} values={values} />
+              <FormulaView formula={formula} values={calcValues} />
             </div>
 
             <div className="sidebar-resizer" onMouseDown={handleRightResize} />
@@ -527,11 +585,15 @@ export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }
               if (target) onOpenFormula(target);
             }}
           />
-          {/* 结果 → 结果曲线 → 参数敏感性分析（两种版本都展示） */}
+          {/* 结果 → 结果曲线 → 参数敏感性分析（两种版本都展示）；key 保证换公式时图表状态彻底重建 */}
           {formula.curve && computed.ok && computed.inputsSI && (
-            <CurveChart spec={formula.curve} inputsSI={computed.inputsSI} />
+            <CurveChart key={formula.id} spec={formula.curve} inputsSI={computed.inputsSI} />
           )}
-          <SensitivityChart formula={formula} inputsSI={computed.ok ? computed.inputsSI ?? null : null} />
+          <SensitivityChart
+            key={formula.id}
+            formula={formula}
+            inputsSI={computed.ok ? computed.inputsSI ?? null : null}
+          />
           <UncertaintyPanel formula={formula} inputsSI={computed.ok ? computed.inputsSI ?? null : null} />
           <BacksolvePanel
             formula={formula}

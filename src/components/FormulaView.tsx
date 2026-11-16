@@ -1,5 +1,5 @@
 import katex from 'katex';
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import type { FormulaSpec } from '../formula/types';
 import { DOMAIN_LABEL, FORMULA_STATUS_LABEL, showIfMatches } from '../formula/types';
 
@@ -12,7 +12,7 @@ function renderTex(tex: string): string {
 }
 
 /** 公式展示区：LaTeX 主公式、符号说明、示意图、适用条件 */
-export function FormulaView({
+function FormulaViewView({
   formula,
   values,
 }: {
@@ -24,14 +24,12 @@ export function FormulaView({
   const visible = (s?: Parameters<typeof showIfMatches>[0]) =>
     !values || !s || showIfMatches(s, values);
 
-  const rendered = useMemo(
-    () =>
-      formula.latex
-        .filter((l) => visible(l.showIf))
-        .map((l) => ({ ...l, html: renderTex(l.tex) })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [formula, values],
+  // KaTeX 解析只依赖公式本身；数值变化时仅重新过滤显隐，不重复解析 LaTeX
+  const renderedAll = useMemo(
+    () => formula.latex.map((l) => ({ ...l, html: renderTex(l.tex) })),
+    [formula],
   );
+  const rendered = renderedAll.filter((l) => visible(l.showIf));
 
   return (
     <div className="formula-view">
@@ -122,3 +120,5 @@ export function FormulaView({
     </div>
   );
 }
+
+export const FormulaView = memo(FormulaViewView);

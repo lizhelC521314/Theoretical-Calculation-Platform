@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { FormulaSpec } from '../formula/types';
 import { showIfMatches } from '../formula/types';
 import { autoUnit, formatNumber } from '../formula/units';
@@ -27,7 +28,7 @@ function IssueList({ issues, level }: { issues: InputIssue[]; level: 'error' | '
   );
 }
 
-export function ResultPanel({ formula, outputsSI, inputsSI, issues = [], onSensitivity, sensitivityKey }: Props) {
+function ResultPanelView({ formula, outputsSI, inputsSI, issues = [], onSensitivity, sensitivityKey }: Props) {
   if (!outputsSI) {
     return (
       <div className="result-block">
@@ -154,3 +155,5 @@ export function ResultPanel({ formula, outputsSI, inputsSI, issues = [], onSensi
     </div>
   );
 }
+
+export const ResultPanel = memo(ResultPanelView);
