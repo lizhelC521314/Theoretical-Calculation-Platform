@@ -4314,6 +4314,26 @@ select {
   align-items: center;
   gap: 6px;
   margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* 引用说明输入框：备注这份资料用于哪个零部件 / 为什么引用 */
+.fmea-cite-note {
+  width: 240px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--blue-dark);
+  font-size: 12px;
+  outline: none;
+}
+.fmea-cite-note:focus {
+  border-color: var(--blue);
+}
+.fmea-cite-note:disabled {
+  background: #f6f8fb;
+  color: var(--muted);
 }
 .fmea-conclusion {
   background: var(--blue-light);
@@ -4368,6 +4388,7 @@ select {
 .fmea-cites li {
   display: flex;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   font-size: 12.5px;
   padding: 4px 0;
@@ -4376,6 +4397,13 @@ select {
 .fmea-cites li span {
   color: var(--muted);
   font-size: 11.5px;
+}
+.fmea-cites li .fmea-cite-remark {
+  flex-basis: 100%;
+  font-style: normal;
+  color: #4d657f;
+  font-size: 11.5px;
+  text-align: right;
 }
 .fmea-similar {
   display: flex;
@@ -4600,29 +4628,35 @@ select {
   min-height: 0;
 }
 /* 中缝拖动条：两侧区域可自由调整宽窄 */
-.theory-splitter {
-  position: relative;
-  cursor: col-resize;
-  background: transparent;
-}
-.theory-splitter::after {
-  content: '';
-  position: absolute;
-  top: 12%;
-  bottom: 12%;
-  left: 3px;
-  width: 2px;
-  border-radius: 2px;
-  background: #dde5ef;
-  transition: background 0.15s;
-}
-.theory-splitter:hover::after,
-body.col-resizing .theory-splitter::after {
-  background: var(--accent, #2f6fed);
-}
 body.col-resizing {
   cursor: col-resize;
   user-select: none;
+}
+/* 通用左右分栏拖动条：10px 中缝，悬停/拖动时高亮 */
+.pane-divider {
+  position: relative;
+  cursor: col-resize;
+  align-self: stretch;
+  min-height: 0;
+  z-index: 5;
+}
+.pane-divider::after {
+  content: '';
+  position: absolute;
+  top: 8%;
+  bottom: 8%;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: #dde5ef;
+  transition: background 0.15s, width 0.15s;
+}
+.pane-divider:hover::after,
+.pane-divider:active::after,
+body.col-resizing .pane-divider::after {
+  width: 4px;
+  background: var(--accent, #2f6fed);
 }
 .fmea-detail-head {
   border-bottom: 1px solid #eef2f7;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type CtrUser } from '../api';
 import { PdfViewer } from '../components/PdfViewer';
+import { usePaneResize } from '../components/usePaneResize';
 import { IS_STANDARD } from '../edition';
 import { KBE_DESIGN, UNC_CALC_LIB, UNC_TEST_LIB, UNC_TRUSTED, buildTrustedXlsxBase64, extractKeywords, parseArchiveName, productKey, trustedFileName } from '../report/db';
 
@@ -108,6 +109,7 @@ export function DatabasePage({ user, onNavigate }: Props) {
   /** 右侧内置预览选中的文件（PDF 用 PdfViewer，xlsx 用表格预览） */
   const [preview, setPreview] = useState<DbFile | null>(null);
   const [sheet, setSheet] = useState<{ rows: string[][]; error: string } | null>(null);
+  const pane = usePaneResize({ defaultWidth: 640, min: 320, minRight: 340 });
 
   const showToast = (t: string) => {
     setToast(t);
@@ -278,7 +280,14 @@ export function DatabasePage({ user, onNavigate }: Props) {
         )}
       </div>
 
-      <div className="db-split">
+      <div
+        className="db-split"
+        ref={pane.containerRef}
+        style={{
+          gridTemplateColumns: `minmax(0, ${pane.width}px) 10px minmax(300px, 1fr)`,
+          columnGap: 0,
+        }}
+      >
         <div className="db-file-col">
           {tab === 'design' && (
             <FileList
@@ -335,6 +344,13 @@ export function DatabasePage({ user, onNavigate }: Props) {
             />
           )}
         </div>
+
+        <div
+          className="pane-divider"
+          onMouseDown={pane.onMouseDown}
+          onDoubleClick={pane.reset}
+          title="按住左右拖动可调整两侧宽度，双击恢复默认"
+        />
 
         <div className="preview-area">
           {!preview ? (
@@ -436,7 +452,7 @@ function FileList({
             {hint ??
               (IS_STANDARD
                 ? '计算书：在「项目管理」页点击项目卡片的「导出到数据库」。'
-                : '计算书：在「项目管理」页点击项目卡片的「导出到数据库」；试验报告：在「试验报告」页点击「导出 Excel 测试表」，后续将支持直接归档。')}
+                : '计算书：在「项目管理」页点击项目卡片的「导出到数据库」；试验测试表：在「试验报告导入」页归档 PDF 报告时自动生成并归档。')}
           </p>
           {emptyActions && emptyActions.length > 0 && (
             <div className="pc-actions">

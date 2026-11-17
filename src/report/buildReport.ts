@@ -1092,14 +1092,22 @@ const KBE_REF_CATEGORIES: Array<{ key: string; label: string }> = [
   { key: 'papers', label: '论文/专利' },
 ];
 
-/** 把引用资料按分类分组（保持 standards → guidelines → lessons → papers 顺序） */
+/** 把引用资料按分类分组（保持 standards → guidelines → lessons → papers 顺序；同一资料只列一次） */
 function groupKbeByCategory(docs?: unknown[]): Array<{ key: string; label: string; items: Record<string, string>[] }> {
   if (!Array.isArray(docs) || docs.length === 0) return [];
+  const seen = new Set<string>();
   return KBE_REF_CATEGORIES.map(({ key, label }) => ({
     key,
     label,
     items: docs
       .filter((d) => String((d as Record<string, unknown>).category || '') === key)
+      .filter((d) => {
+        const id = String((d as Record<string, unknown>).id || '');
+        if (!id) return true;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
       .map((d) => {
         const r = d as Record<string, unknown>;
         return {

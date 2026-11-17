@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, isDesktop, type CtrUser, type Project } from '../api';
 import { PdfViewer } from '../components/PdfViewer';
+import { usePaneResize } from '../components/usePaneResize';
 import { IS_STANDARD } from '../edition';
 import {
   KBE_DOC_ACCEPT,
@@ -440,9 +441,12 @@ export function KbeDocSearchPage({ user, category }: Props) {
   const [fieldFilter, setFieldFilter] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [toast, setToast] = useState('');
+  const pane = usePaneResize({ defaultWidth: 340, min: 240, minRight: 320 });
   /** 引用到项目：项目下拉与引用状态（与 FMEA 库同构） */
   const [projects, setProjects] = useState<Project[]>([]);
   const [citeProjectId, setCiteProjectId] = useState('');
+  /** 引用说明：用于哪个零部件 / 为什么引用 */
+  const [citeNote, setCiteNote] = useState('');
   const [citing, setCiting] = useState(false);
   /** 元数据编辑草稿：null 表示未进入编辑 */
   const [draft, setDraft] = useState<{
@@ -550,30 +554,27 @@ export function KbeDocSearchPage({ user, category }: Props) {
     }
     setCiting(true);
     try {
-      const next = addKbeDocCitation(selected, {
+      const citation = {
         projectId: project.id,
         projectName: project.name,
         username: user.username,
         displayName: user.displayName,
         at: new Date().toISOString(),
-      });
+        note: citeNote.trim(),
+      };
+      const next = addKbeDocCitation(selected, citation);
       const res = await api.kbe.docCite({
         category,
         id: selected.id,
-        citation: (next.citations || []).find((c) => c.projectId === project.id) || {
-          projectId: project.id,
-          projectName: project.name,
-          username: user.username,
-          displayName: user.displayName,
-          at: new Date().toISOString(),
-        },
+        citation: (next.citations || []).find((c) => c.projectId === project.id) || citation,
       });
       if (!res.ok) {
         setError(`引用失败：${res.message || '未知错误'}`);
         return;
       }
+      setCiteNote('');
       await refresh();
-      showToast(`已引用到「${project.name}」，导出计算书时将列在文末引用资料中`);
+      showToast(`已成功引用到「${project.name}」，导出计算书时将列在文末引用资料中`);
     } finally {
       setCiting(false);
     }
@@ -638,7 +639,15 @@ export function KbeDocSearchPage({ user, category }: Props) {
       {error && <div className="login-error">{error}</div>}
 
       <div className="settings-card" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <div className="fmea-body" style={{ gridTemplateColumns: '340px minmax(0, 1fr)', marginTop: 4 }}>
+        <div
+          className="fmea-body"
+          ref={pane.containerRef}
+          style={{
+            gridTemplateColumns: `${pane.width}px 10px minmax(0, 1fr)`,
+            columnGap: 0,
+            marginTop: 4,
+          }}
+        >
           <div className="fmea-list">
             {filtered.map((r) => (
               <div
@@ -686,6 +695,13 @@ export function KbeDocSearchPage({ user, category }: Props) {
               </div>
             )}
           </div>
+
+          <div
+            className="pane-divider"
+            onMouseDown={pane.onMouseDown}
+            onDoubleClick={pane.reset}
+            title="按住左右拖动可调整两侧宽度，双击恢复默认"
+          />
 
           <div className="fmea-detail">
             {!selected && (
@@ -736,6 +752,14 @@ export function KbeDocSearchPage({ user, category }: Props) {
                           </option>
                         ))}
                       </select>
+                      <input
+                        className="fmea-cite-note"
+                        value={citeNote}
+                        onChange={(e) => setCiteNote(e.target.value)}
+                        placeholder="引用说明（用于哪个零部件 / 为什么引用）"
+                        maxLength={200}
+                        disabled={citing}
+                      />
                       <button
                         className="btn-primary sm"
                         onClick={citeToProject}
@@ -765,6 +789,27 @@ export function KbeDocSearchPage({ user, category }: Props) {
                     )}
                   </div>
                 </div>
+
+                {(selected.citations || []).length > 0 && (
+                  <div className="fmea-block">
+                    <h4>引用记录</h4>
+                    <ul className="fmea-cites">
+                      {(selected.citations || [])
+                        .slice()
+                        .reverse()
+                        .map((c, i) => (
+                          <li key={`${c.projectId}-${c.at}-${i}`}>
+                            <b>{c.projectName || '未命名项目'}</b>
+                            <span>
+                              {c.displayName || c.username || '—'} ·{' '}
+                              {c.at ? c.at.replace('T', ' ').slice(0, 16) : '—'}
+                            </span>
+                            {c.note ? <em className="fmea-cite-remark">说明：{c.note}</em> : null}
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                )}
 
                 {draft && (
                   <div className="kbe-edit">

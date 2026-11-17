@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { archivePdfFileName, parseArchiveName } from '../src/report/db';
+import { archivePdfFileName, parseArchiveName, productKey } from '../src/report/db';
 import {
   DEFAULT_KEYWORDS,
   buildTestXlsxBase64,
@@ -63,6 +63,63 @@ describe('试验报告解析', () => {
     const b64 = await buildTestXlsxBase64(parsed.meta, parsed.items);
     expect(b64.startsWith('UEsDB')).toBe(true); // PK\x03\x04
     expect(b64.length).toBeGreaterThan(4000);
+  });
+});
+
+describe('归档时同步生成试验测试表（可信资产匹配链路）', () => {
+  const meta = {
+    customer: '长城汽车',
+    project: 'B26-A',
+    testItem: '压力损失',
+    flow: '',
+    flowUnit: '',
+    product: '进气系统',
+    version: 'V1.0',
+    date: '2026-08-19',
+  };
+
+  it('测试表文件名与 PDF 归档名反解出的项目/产品/版本一致', () => {
+    const pdfName = archivePdfFileName(
+      meta.customer,
+      meta.project,
+      meta.testItem,
+      meta.product,
+      meta.version,
+      meta.date,
+    );
+    const xlsxName = testReportFileName(meta);
+    expect(xlsxName).toBe('B26-A+进气系统+V1.0+20260819.xlsx');
+    const pdfParsed = parseArchiveName(pdfName);
+    const xlsxParsed = parseArchiveName(xlsxName);
+    expect(productKey(xlsxParsed.project, xlsxParsed.product, xlsxParsed.version)).toBe(
+      productKey(pdfParsed.project, pdfParsed.product, pdfParsed.version),
+    );
+  });
+
+  it('含流量的进气阻力报告：测试表名不含流量段，仍能匹配同一产品', () => {
+    const flowMeta = { ...meta, testItem: '进气阻力', flow: '370', flowUnit: 'kg/h' };
+    const pdfName = archivePdfFileName(
+      flowMeta.customer,
+      flowMeta.project,
+      flowMeta.testItem,
+      flowMeta.product,
+      flowMeta.version,
+      flowMeta.date,
+      flowMeta.flow,
+      flowMeta.flowUnit,
+    );
+    expect(pdfName).toBe('长城汽车+B26-A+进气阻力+370kg-h+进气系统+V1.0+20260819.pdf');
+    const pdfParsed = parseArchiveName(pdfName);
+    const xlsxParsed = parseArchiveName(testReportFileName(flowMeta));
+    expect(productKey(xlsxParsed.project, xlsxParsed.product, xlsxParsed.version)).toBe(
+      productKey(pdfParsed.project, pdfParsed.product, pdfParsed.version),
+    );
+  });
+
+  it('扫描件（无文字层）测试项为空时仍能生成有效工作簿', async () => {
+    const b64 = await buildTestXlsxBase64(meta, []);
+    expect(b64.startsWith('UEsDB')).toBe(true);
+    expect(b64.length).toBeGreaterThan(2000);
   });
 });
 

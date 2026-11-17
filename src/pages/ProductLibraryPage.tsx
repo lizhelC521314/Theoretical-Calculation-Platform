@@ -28,6 +28,7 @@ import { findSimilarModels } from '../product/similar';
 import { createBlankTemplate, modelFromTemplate, templateFromModel } from '../product/template';
 import { createVariant } from '../product/variant';
 import { TemplateEditor } from '../components/TemplateEditor';
+import { usePaneResize } from '../components/usePaneResize';
 
 interface Props {
   user: CtrUser;
@@ -70,6 +71,7 @@ export function ProductLibraryPage({ user }: Props) {
   /** 正在重新导出设计档案的基线 id（空表示空闲） */
   const [exportingId, setExportingId] = useState('');
   const [toast, setToast] = useState('');
+  const pane = usePaneResize({ defaultWidth: 300, min: 220, minRight: 360 });
   const [newFamily, setNewFamily] = useState(false);
   const [newModel, setNewModel] = useState(false);
   const [familyDraft, setFamilyDraft] = useState({ code: '', name: '', system: '', structure: '' });
@@ -474,7 +476,15 @@ export function ProductLibraryPage({ user }: Props) {
           </div>
         )}
 
-        <div className="fmea-body" style={{ gridTemplateColumns: '300px minmax(0, 1fr)', marginTop: 6 }}>
+        <div
+          className="fmea-body"
+          ref={pane.containerRef}
+          style={{
+            gridTemplateColumns: `${pane.width}px 10px minmax(0, 1fr)`,
+            columnGap: 0,
+            marginTop: 6,
+          }}
+        >
           <div className="fmea-list">
             {store.families.map((f) => {
               const count = store.models.filter((m) => m.familyId === f.id).length;
@@ -561,6 +571,13 @@ export function ProductLibraryPage({ user }: Props) {
               </>
             )}
           </div>
+
+          <div
+            className="pane-divider"
+            onMouseDown={pane.onMouseDown}
+            onDoubleClick={pane.reset}
+            title="按住左右拖动可调整两侧宽度，双击恢复默认"
+          />
 
           <div className="prod-detail">
             {!family && (

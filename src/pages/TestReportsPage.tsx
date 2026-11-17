@@ -2,12 +2,16 @@ import { useState } from 'react';
 import { api, type CtrUser, type Project } from '../api';
 import {
   bufToBase64,
+  buildTestXlsxBase64,
+  DEFAULT_KEYWORDS,
   extractPdfText,
   isFlowReport,
   missingMetaFields,
   ocrPdfFirstPage,
   parseMetaOnly,
   parseOcrMeta,
+  parseTestReport,
+  testReportFileName,
   type PdfReportMeta,
 } from '../report/testReport';
 import { archivePdfFileName } from '../report/db';
@@ -25,6 +29,8 @@ interface PdfReportEntry {
   meta: PdfReportMeta;
   /** 扫描件（无文字层），元信息来自封面 OCR */
   scanned?: boolean;
+  /** PDF 文字层内容，归档时用于生成试验测试表 */
+  text?: string;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -84,7 +90,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
           if (!meta.project && currentProject?.name) meta.project = currentProject.name;
           if (!meta.product && currentProject?.product) meta.product = currentProject.product;
           if (!meta.version && currentProject?.version) meta.version = currentProject.version;
-          added.push({ id: uid(), originalName: file.name, file, meta, scanned });
+          added.push({ id: uid(), originalName: file.name, file, meta, scanned, text });
         } catch (e) {
           showToast(`「${file.name}」解析失败：${e instanceof Error ? e.message : String(e)}`);
         }
@@ -134,6 +140,8 @@ export function TestReportsPage({ user, currentProject }: Props) {
     setError('');
     let okCount = 0;
     let failCount = 0;
+    let xlsxCount = 0;
+    const xlsxFails: string[] = [];
     try {
       for (const r of reports) {
         try {
@@ -152,6 +160,20 @@ export function TestReportsPage({ user, currentProject }: Props) {
           const res = await api.db.archive({ base64: b64, fileName, libType: 'test' });
           if (res.ok) {
             okCount++;
+            // 同步生成试验测试表 xlsx：可信资产生成与试验检索页的测试表预览都依赖它
+            try {
+              const { items } = parseTestReport(r.text || '', r.originalName, DEFAULT_KEYWORDS);
+              const xlsxB64 = await buildTestXlsxBase64(r.meta, items);
+              const xlsxRes = await api.db.archive({
+                base64: xlsxB64,
+                fileName: testReportFileName(r.meta),
+                libType: 'test',
+              });
+              if (xlsxRes.ok) xlsxCount++;
+              else xlsxFails.push(`「${r.originalName}」测试表归档失败：${xlsxRes.message || '未知错误'}`);
+            } catch (e) {
+              xlsxFails.push(`「${r.originalName}」测试表生成失败：${e instanceof Error ? e.message : String(e)}`);
+            }
           } else {
             failCount++;
             showToast(`归档失败：${fileName} — ${res.message || '未知错误'}`);
@@ -161,8 +183,11 @@ export function TestReportsPage({ user, currentProject }: Props) {
           showToast(`归档异常：${r.originalName} — ${e instanceof Error ? e.message : String(e)}`);
         }
       }
-      setReports((prev) => prev.filter((_, i) => i >= okCount + failCount));
-      showToast(`归档完成：成功 ${okCount} 份${failCount > 0 ? `，失败 ${failCount} 份` : ''}`);
+      const totalFail = failCount + xlsxFails.length;
+      if (xlsxFails.length > 0) setError(xlsxFails.join('\n'));
+      showToast(
+        `归档完成：报告 ${okCount} 份、测试表 ${xlsxCount} 份${totalFail > 0 ? `，失败 ${totalFail} 项` : ''}`,
+      );
       // 归档成功的从列表里移除（不再需要留着）
       setReports([]);
     } finally {
@@ -213,6 +238,7 @@ export function TestReportsPage({ user, currentProject }: Props) {
             试验项目为「进气阻力」时，还会从接受标准（如 3.5kPa@370kg/h）读取流量，数值与单位（kg/h、m³/h）均可修改。
             扫描件（无文字层的图片型 PDF）会自动对封面做系统 OCR 识别，准确率低于文字版，请重点核对。
             归档文件名统一格式为「客户+项目+试验项目+流量+产品+版本+日期.pdf」（无流量的报告省略流量段），存放在 UNC 试验库目录。
+            归档时会同步生成「项目+产品+版本+日期.xlsx」试验测试表一并归档，供试验检索页预览、以及「产品数据库」生成可信资产使用。
           </p>
         </div>
       )}

@@ -471,6 +471,49 @@ function hashBytes(buf) {
   return crypto.createHash('sha256').update(buf).digest('hex');
 }
 
+/**
+ * 审批通过并写出 .ctre 后，询问是否同时保存一份明文副本。
+ * 明文仅在用户明确选择时写出，保存位置由用户指定，便于本机直接打开查看。
+ */
+async function offerPlainCopy(encryptedPath, token) {
+  try {
+    const originalName = path.basename(encryptedPath).replace(/\.ctre$/i, '');
+    const choice = await dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      title: '审批已通过',
+      message: `加密文件已保存：${path.basename(encryptedPath)}`,
+      detail: '是否同时解密一份明文文件？明文可用本机 PDF / Office 程序直接打开，仅保存到你选择的位置。',
+      buttons: ['解密并保存明文', '仅保留加密文件'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (choice.response !== 0) return null;
+    const ext = path.extname(originalName).replace('.', '');
+    const save = await dialog.showSaveDialog(mainWindow, {
+      title: '保存解密后的文件',
+      defaultPath: originalName,
+      filters: ext
+        ? [{ name: '原始文件', extensions: [ext] }, { name: '所有文件', extensions: ['*'] }]
+        : undefined,
+    });
+    if (save.canceled || !save.filePath) return null;
+    const decrypted = fileEncryption.decryptBuffer(fs.readFileSync(encryptedPath), token);
+    fs.writeFileSync(save.filePath, decrypted.data);
+    return save.filePath;
+  } catch (err) {
+    await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: '解密失败',
+      message: '加密文件已保存，但明文解密失败。',
+      detail: String((err && err.message) || err),
+      buttons: ['知道了'],
+      noLink: true,
+    });
+    return null;
+  }
+}
+
 /** 等待审批 + 拿到令牌 + 加密写盘的统一流程 */
 async function approvalExport({ defaultName, displayName, bytes, operator }) {
   const res = await dialog.showSaveDialog(mainWindow, {
@@ -515,11 +558,15 @@ async function approvalExport({ defaultName, displayName, bytes, operator }) {
     fs.writeFileSync(target, fileEncryption.encryptBuffer(bytes, originalName, result.token));
     store.get().settings.approval.lastSecret = result.serverSecret;
     store.persist();
+    // 先结束「等待审批」提示，再询问是否另存明文
+    sendApprovalProgress('done', waitName);
+    const plainPath = await offerPlainCopy(target, result.token);
     return {
       ok: true,
       filePath: target,
       token: result.token,
       expiresAt: result.expiresAt,
+      plainPath: plainPath || undefined,
     };
   } catch (err) {
     if (err && err.__approvalRejected) {
@@ -766,7 +813,10 @@ ipcMain.handle('export:pdf', async (_e, payload) => {
     const target = fileEncryption.encryptedFileName(res.filePath);
     const originalName = path.basename(target).replace(/\.ctre$/i, '');
     fs.writeFileSync(target, fileEncryption.encryptBuffer(pdf, originalName, result.token));
-    return { ok: true, filePath: target, token: result.token, expiresAt: result.expiresAt };
+    // 先结束「等待审批」提示，再询问是否另存明文
+    sendApprovalProgress('done', 'PDF 计算书');
+    const plainPath = await offerPlainCopy(target, result.token);
+    return { ok: true, filePath: target, token: result.token, expiresAt: result.expiresAt, plainPath: plainPath || undefined };
   } catch (err) {
     if (err && err.__approvalRejected) return { ok: false, rejected: true, message: '拒绝下载，请联系解密人员（李华东）' };
     if (err && err.__approvalTimeout) return { ok: false, timeout: true, message: '审批超时，请联系李华东' };
@@ -938,7 +988,7 @@ ipcMain.handle('pdf:renderPage', async (_e, payload) => {
     const { filePath } = payload || {};
     if (!filePath || !(await pathExists(filePath))) return { ok: false, message: '文件不存在' };
     const wanted = Math.max(1, Math.floor(Number(payload && payload.page) || 1));
-    const scale = Math.min(3, Math.max(0.4, Number(payload && payload.scale) || 1.2));
+    const scale = Math.min(3, Math.max(0.1, Number(payload && payload.scale) || 1.2));
     const cacheKey = `${filePath}|${wanted}|${scale}`;
     const hit = pdfPageCache.get(cacheKey);
     if (hit) {
@@ -1862,6 +1912,7 @@ ipcMain.handle('kbe:docCite', async (_e, payload) => {
       username: String(c.username || ''),
       displayName: String(c.displayName || ''),
       at: String(c.at || new Date().toISOString()),
+      note: String(c.note || '').trim().slice(0, 200),
     });
     rec.citations = rest;
     rec.updatedAt = new Date().toISOString();

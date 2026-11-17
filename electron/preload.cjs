@@ -109,6 +109,9 @@ const bridge = {
     docList: (p) => ipcRenderer.invoke('kbe:docList', p),
     docUpdate: (p) => ipcRenderer.invoke('kbe:docUpdate', p),
     docDelete: (p) => ipcRenderer.invoke('kbe:docDelete', p),
+    docCite: (p) => ipcRenderer.invoke('kbe:docCite', p),
+    /** 列出被某项目引用过的资料（导出计算书时附「附录 引用资料」） */
+    listByProject: (p) => ipcRenderer.invoke('kbe:listByProject', p),
   },
   app: {
     info: () => ipcRenderer.invoke('app:info'),

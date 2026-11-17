@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type CtrUser } from '../api';
 import { PdfViewer } from '../components/PdfViewer';
+import { usePaneResize } from '../components/usePaneResize';
 import { IS_STANDARD } from '../edition';
 import { KBE_TRAINING } from '../report/db';
 import type { TrainingRecord } from '../report/training';
@@ -35,6 +36,7 @@ export function TrainingSearchPage({ onOpenImport }: Props) {
     category: string;
   } | null>(null);
   const [toast, setToast] = useState('');
+  const pane = usePaneResize({ defaultWidth: 360, min: 260, minRight: 320 });
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -231,7 +233,11 @@ export function TrainingSearchPage({ onOpenImport }: Props) {
 
       {error && <div className="login-error">{error}</div>}
 
-      <div className="fmea-body">
+      <div
+        className="fmea-body"
+        ref={pane.containerRef}
+        style={{ gridTemplateColumns: `${pane.width}px 10px minmax(0, 1fr)`, columnGap: 0 }}
+      >
         <div className="fmea-list">
           {filtered.map((r) => (
             <div
@@ -260,6 +266,13 @@ export function TrainingSearchPage({ onOpenImport }: Props) {
             </div>
           )}
         </div>
+
+        <div
+          className="pane-divider"
+          onMouseDown={pane.onMouseDown}
+          onDoubleClick={pane.reset}
+          title="按住左右拖动可调整两侧宽度，双击恢复默认"
+        />
 
         <div className="fmea-detail">
           {!selected && (

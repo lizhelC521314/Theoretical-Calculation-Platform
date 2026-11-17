@@ -7,7 +7,7 @@ interface Props {
   filePath: string;
 }
 
-const MIN_SCALE = 0.4;
+const MIN_SCALE = 0.1;
 const MAX_SCALE = 3;
 const ZOOM_STEP = 0.2;
 /** 画布容器左右内边距合计（与样式表 .pdf-canvas-wrap 保持一致） */

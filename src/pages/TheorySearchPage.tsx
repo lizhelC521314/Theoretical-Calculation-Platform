@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type CtrUser } from '../api';
 import { PdfViewer } from '../components/PdfViewer';
+import { usePaneResize } from '../components/usePaneResize';
 import { IS_STANDARD } from '../edition';
 import { KBE_THEORY } from '../report/db';
 import { THEORY_CATEGORIES, type TheoryRecord } from '../report/theory';
@@ -35,31 +36,7 @@ export function TheorySearchPage({ onOpenImport }: Props) {
   } | null>(null);
   const [toast, setToast] = useState('');
   /** 左侧列表宽度，支持拖动中缝调整 */
-  const [leftWidth, setLeftWidth] = useState(340);
-  const draggingRef = useRef(false);
-
-  const startResize = (e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    draggingRef.current = true;
-    const startX = e.clientX;
-    const startWidth = leftWidth;
-    const onMove = (ev: MouseEvent) => {
-      if (!draggingRef.current) return;
-      const next = startWidth + (ev.clientX - startX);
-      // 限制在 240px ~ 窗口宽度的 60% 之间，保证右侧预览始终可读
-      const max = Math.max(360, Math.round(window.innerWidth * 0.6));
-      setLeftWidth(Math.min(Math.max(next, 240), max));
-    };
-    const onUp = () => {
-      draggingRef.current = false;
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      document.body.classList.remove('col-resizing');
-    };
-    document.body.classList.add('col-resizing');
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  };
+  const pane = usePaneResize({ defaultWidth: 340, min: 240, minRight: 320 });
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -258,7 +235,8 @@ export function TheorySearchPage({ onOpenImport }: Props) {
 
       <div
         className="fmea-body"
-        style={{ gridTemplateColumns: `${leftWidth}px 8px minmax(0, 1fr)`, columnGap: 0 }}
+        ref={pane.containerRef}
+        style={{ gridTemplateColumns: `${pane.width}px 10px minmax(0, 1fr)`, columnGap: 0 }}
       >
         <div className="fmea-list">
           {filtered.map((r) => (
@@ -290,9 +268,10 @@ export function TheorySearchPage({ onOpenImport }: Props) {
         </div>
 
         <div
-          className="theory-splitter"
-          onMouseDown={startResize}
-          title="按住拖动可调整左右区域宽度"
+          className="pane-divider"
+          onMouseDown={pane.onMouseDown}
+          onDoubleClick={pane.reset}
+          title="按住左右拖动可调整两侧宽度，双击恢复默认"
         />
 
         <div className="fmea-detail">

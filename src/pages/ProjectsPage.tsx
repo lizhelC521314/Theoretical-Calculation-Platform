@@ -95,6 +95,8 @@ export function ProjectsPage({ user, projects, currentProject, onSelectProject, 
             : `${format === 'docx' ? 'Word' : 'PDF'} 计算书已导出`,
         );
       }
+    } catch (e) {
+      showToast(`导出失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setExporting('');
     }

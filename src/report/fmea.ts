@@ -410,6 +410,8 @@ export interface FmeaCitation {
   username: string;
   displayName: string;
   at: string;
+  /** 引用说明：用于哪个零部件 / 为什么引用（操作者填写，可为空） */
+  note?: string;
 }
 
 /** 卡片内容（可编辑部分） */
@@ -885,27 +887,42 @@ export function applyStructuredDefaults(draft: FmeaDraft): FmeaDraft {
   return merged;
 }
 
-/** 引用记录解析（旧记录没有该字段） */
+/** 引用记录解析（旧记录没有该字段）：同一项目 + 相同说明视为重复引用，只保留最近一条 */
 export function parseFmeaCitations(raw: unknown): FmeaCitation[] {
   if (!Array.isArray(raw)) return [];
   const out: FmeaCitation[] = [];
-  for (const item of raw) {
+  const seen = new Set<string>();
+  // 倒序遍历：保留最近一次（后面的覆盖前面的），再反转回原顺序
+  for (let i = raw.length - 1; i >= 0; i--) {
+    const item = raw[i];
     if (!item || typeof item !== 'object') continue;
     const o = item as Partial<FmeaCitation>;
-    out.push({
+    const citation: FmeaCitation = {
       projectId: String(o.projectId || ''),
       projectName: String(o.projectName || ''),
       username: String(o.username || ''),
       displayName: String(o.displayName || ''),
       at: String(o.at || ''),
-    });
+      note: String(o.note || '').trim(),
+    };
+    const key = `${citation.projectId}|${citation.note}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.unshift(citation);
   }
   return out;
 }
 
-/** 追加一条引用记录 */
+/**
+ * 追加一条引用记录：同一项目 + 相同说明视为重复引用，只保留一条（更新为最近一次），
+ * 不同说明则分别保留，避免导出项目时出现重复的引用条目。
+ */
 export function addFmeaCitation(rec: FmeaRecord, citation: FmeaCitation): FmeaRecord {
-  return { ...rec, citations: [...rec.citations, citation], updatedAt: new Date().toISOString() };
+  const next: FmeaCitation = { ...citation, note: (citation.note || '').trim() };
+  const isSame = (c: FmeaCitation) =>
+    c.projectId === next.projectId && (c.note || '').trim() === next.note;
+  const rest = (rec.citations || []).filter((c) => !isSame(c));
+  return { ...rec, citations: [...rest, next], updatedAt: new Date().toISOString() };
 }
 
 /** 常用同义词表（标准词 → 同义词/近义词） */

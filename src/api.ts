@@ -316,7 +316,15 @@ interface CtrApi {
     docCite(p: {
       category: 'standards' | 'guidelines' | 'lessons' | 'papers';
       id: string;
-      citation: { projectId: string; projectName: string; username: string; displayName: string; at: string };
+      citation: {
+        projectId: string;
+        projectName: string;
+        username: string;
+        displayName: string;
+        at: string;
+        /** 引用说明：用于哪个零部件 / 为什么引用 */
+        note?: string;
+      };
     }): Promise<{ ok: boolean; record?: unknown; message?: string }>;
     /** 知识经验库：列出被某项目引用过的全部资料（导出计算书时按分类列出） */
     listByProject(p: { projectId: string }): Promise<{ ok: boolean; records?: unknown[]; message?: string }>;

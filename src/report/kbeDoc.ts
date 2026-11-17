@@ -49,12 +49,15 @@ export interface KbeDocCitation {
   username: string;
   displayName: string;
   at: string;
+  /** 引用说明：用于哪个零部件 / 为什么引用（操作者填写，可为空） */
+  note?: string;
 }
 
-/** 追加一条引用记录：同一项目重复引用时覆盖旧记录（保留最近一次） */
+/** 追加一条引用记录：同一项目重复引用时覆盖旧记录（保留最近一次，说明为空则清空说明） */
 export function addKbeDocCitation(rec: KbeDocRecord, citation: KbeDocCitation): KbeDocRecord {
-  const rest = (rec.citations || []).filter((c) => c.projectId !== citation.projectId);
-  return { ...rec, citations: [...rest, citation], updatedAt: new Date().toISOString() };
+  const next: KbeDocCitation = { ...citation, note: (citation.note || '').trim() };
+  const rest = (rec.citations || []).filter((c) => c.projectId !== next.projectId);
+  return { ...rec, citations: [...rest, next], updatedAt: new Date().toISOString() };
 }
 
 export interface KbeDocDraft {

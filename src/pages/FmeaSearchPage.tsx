@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type CtrUser } from '../api';
 import { IS_STANDARD } from '../edition';
 import { FmeaImageCell, FmeaImageInput } from '../components/FmeaImageInput';
+import { usePaneResize } from '../components/usePaneResize';
 import { computeAp } from '../report/fmeaRatings';
 import {
   addFmeaCitation,
@@ -134,6 +135,7 @@ function downloadCsvBlob(text: string, fileName: string) {
  * 左侧四行卡片快速扫读，右侧摘要条、一句话结论、失效链、设计规避、措施与引用记录一屏展开。
  */
 export function FmeaSearchPage({ user, onOpenImport }: Props) {
+  const pane = usePaneResize({ defaultWidth: 360, min: 280, minRight: 380 });
   const [files, setFiles] = useState<FmeaFile[]>([]);
   const [reachable, setReachable] = useState<boolean | null>(null);
   const [cache, setCache] = useState<Record<string, FmeaRecord | null>>({});
@@ -171,6 +173,8 @@ export function FmeaSearchPage({ user, onOpenImport }: Props) {
   const [editIssues, setEditIssues] = useState<string[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [citeProjectId, setCiteProjectId] = useState('');
+  /** 引用说明：用于哪个零部件 / 为什么引用 */
+  const [citeNote, setCiteNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -719,6 +723,7 @@ export function FmeaSearchPage({ user, onOpenImport }: Props) {
         username: user.username,
         displayName: user.displayName,
         at: new Date().toISOString(),
+        note: citeNote.trim(),
       });
       const res = await api.fmea.write({
         record: next,
@@ -730,7 +735,8 @@ export function FmeaSearchPage({ user, onOpenImport }: Props) {
         return;
       }
       patchCache(selected.file.fullPath, next);
-      showToast(`已引用到「${project.name}」`);
+      setCiteNote('');
+      showToast(`已成功引用到「${project.name}」`);
     } finally {
       setSaving(false);
     }
@@ -1012,7 +1018,11 @@ export function FmeaSearchPage({ user, onOpenImport }: Props) {
 
       {error && <div className="login-error">{error}</div>}
 
-      <div className="fmea-body">
+      <div
+        className="fmea-body"
+        ref={pane.containerRef}
+        style={{ gridTemplateColumns: `${pane.width}px 10px minmax(0, 1fr)`, columnGap: 0 }}
+      >
         <div className="fmea-tree-card fmea-tree-left">
           <div className="fmea-tree-head">
             <h3>FMEA 目录</h3>
@@ -1191,6 +1201,13 @@ export function FmeaSearchPage({ user, onOpenImport }: Props) {
             })}
           </div>
         </div>
+
+        <div
+          className="pane-divider"
+          onMouseDown={pane.onMouseDown}
+          onDoubleClick={pane.reset}
+          title="按住左右拖动可调整两侧宽度，双击恢复默认"
+        />
 
         <div className="fmea-detail fmea-detail-right">
           {/* 工作表视图：占满右栏，从 filtered 数据聚合 */}
@@ -1584,6 +1601,14 @@ export function FmeaSearchPage({ user, onOpenImport }: Props) {
                       </option>
                     ))}
                   </select>
+                  <input
+                    className="fmea-cite-note"
+                    value={citeNote}
+                    onChange={(e) => setCiteNote(e.target.value)}
+                    placeholder="引用说明（用于哪个零部件 / 为什么引用）"
+                    maxLength={200}
+                    disabled={saving}
+                  />
                   <button
                     className="btn-primary sm"
                     onClick={citeToProject}
@@ -1814,6 +1839,7 @@ export function FmeaSearchPage({ user, onOpenImport }: Props) {
                           <span>
                             {c.displayName || c.username || '—'} · {c.at ? c.at.replace('T', ' ').slice(0, 16) : '—'}
                           </span>
+                          {c.note ? <em className="fmea-cite-remark">说明：{c.note}</em> : null}
                         </li>
                       ))}
                   </ul>
