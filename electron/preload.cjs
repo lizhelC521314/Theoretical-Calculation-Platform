@@ -125,6 +125,11 @@ const bridge = {
     get: () => ipcRenderer.invoke('product:get'),
     set: (snapshot) => ipcRenderer.invoke('product:set', snapshot),
   },
+  ai: {
+    listCalibrations: () => ipcRenderer.invoke('ai:listCalibrations'),
+    saveCalibrations: (list) => ipcRenderer.invoke('ai:saveCalibrations', list),
+    saveTrainingData: (payload) => ipcRenderer.invoke('ai:saveTrainingData', payload),
+  },
 };
 
 contextBridge.exposeInMainWorld('ctr', bridge);

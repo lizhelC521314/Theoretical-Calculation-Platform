@@ -1,6 +1,7 @@
 /** 与主进程通信的受控接口（由 electron/preload.cjs 注入） */
 
 import type { ProductStore } from './product/types';
+import type { CalibrationRecord } from './ai/calibration/types';
 
 export interface CtrUser {
   id: string;
@@ -344,6 +345,26 @@ interface CtrApi {
     get(): Promise<ProductStore | null>;
     set(snapshot: ProductStore | null): Promise<{ ok: true } | { ok: false; error: string }>;
   };
+  ai: {
+    /** AI 公式优化：读取标定记录（草稿 / 审核 / 发布） */
+    listCalibrations(): Promise<CalibrationRecord[]>;
+    saveCalibrations(list: CalibrationRecord[]): Promise<{ ok: boolean; message?: string }>;
+    /** 归档导入的 Excel：原始文件 + 映射后 CSV + meta，写入共享盘 ai\TrainCore */
+    saveTrainingData(payload: TrainingDataPayload): Promise<{
+      ok: boolean;
+      dir?: string;
+      message?: string;
+    }>;
+  };
+}
+
+export interface TrainingDataPayload {
+  fileName: string;
+  /** 原始文件内容（xlsx/xls/csv） */
+  buffer?: ArrayBuffer;
+  /** 映射后的数据行，每行 "频率,TL" */
+  csv: string[];
+  meta: Record<string, unknown>;
 }
 
 /**
@@ -365,6 +386,7 @@ const mem = {
   projects: [] as Project[],
   lab: null as unknown,
   product: null as ProductStore | null,
+  calibrations: [] as CalibrationRecord[],
 };
 
 const fallback: CtrApi = {
@@ -516,6 +538,17 @@ const fallback: CtrApi = {
       mem.product = snapshot ?? null;
       return { ok: true as const };
     },
+  },
+  ai: {
+    listCalibrations: async () => mem.calibrations,
+    saveCalibrations: async (list) => {
+      mem.calibrations = list;
+      return { ok: true };
+    },
+    saveTrainingData: async () => ({
+      ok: false,
+      message: '浏览器预览模式不支持写入网络共享，请在桌面客户端中导入。',
+    }),
   },
 };
 

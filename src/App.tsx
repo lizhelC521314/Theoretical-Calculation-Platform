@@ -5,9 +5,11 @@ import { recordRecent } from './formula/library';
 import type { FormulaSpec } from './formula/types';
 import { BRAND } from './branding';
 import { IS_STANDARD } from './edition';
+import { setActiveWovenTubeCalib } from './domains/acoustics/wovenTubeSilencer';
 // 登录页保持同步加载（首屏必须立即可用）；其余页面统一懒加载，见 pages/lazyPages.tsx
 import { LoginPage } from './pages/LoginPage';
 import {
+  AiOptimizePage,
   CaeReportsPage,
   CaeSearchPage,
   CalculatorPage,
@@ -36,7 +38,7 @@ import {
   TrainingSearchPage,
 } from './pages/lazyPages';
 
-type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'projectCheck' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'materialImport' | 'materialSearch' | 'fmeaImport' | 'fmeaSearch' | 'trainingImport' | 'trainingSearch' | 'theoryImport' | 'theorySearch' | 'productLib' | 'kbeStdImport' | 'kbeStdSearch' | 'kbeGdImport' | 'kbeGdSearch' | 'kbeLlImport' | 'kbeLlSearch' | 'kbePtImport' | 'kbePtSearch' | 'db' | 'compare' | 'settings';
+type Page = 'home' | 'projects' | 'library' | 'calc' | 'history' | 'projectCheck' | 'testsImport' | 'testsSearch' | 'lab' | 'caeImport' | 'caeSearch' | 'materialImport' | 'materialSearch' | 'fmeaImport' | 'fmeaSearch' | 'trainingImport' | 'trainingSearch' | 'theoryImport' | 'theorySearch' | 'productLib' | 'kbeStdImport' | 'kbeStdSearch' | 'kbeGdImport' | 'kbeGdSearch' | 'kbeLlImport' | 'kbeLlSearch' | 'kbePtImport' | 'kbePtSearch' | 'db' | 'compare' | 'aiOptimize' | 'settings';
 
 interface NavLeaf { key: Page; label: string; icon?: string }
 /** 分组可嵌套：如「产品验证」下的「试验报告」子分组 */
@@ -160,11 +162,16 @@ const NAV: NavItem[] = [
       },
     ],
   },
+  { key: 'ai', label: 'AI', icon: '✦', children: [{ key: 'aiOptimize', label: '公式优化', icon: '◈' }] },
   { key: 'settings', label: '设置', icon: '⚙' },
 ];
 
 /** 标准版不提供的导入 / 校准类页面（知识经验库四类资料在标准版只读，保护原始资料） */
-const STANDARD_HIDDEN_PAGES = new Set<Page>(['testsImport', 'lab', 'caeImport', 'materialImport', 'fmeaImport', 'trainingImport', 'theoryImport', 'kbeStdImport', 'kbeGdImport', 'kbeLlImport', 'kbePtImport']);
+const STANDARD_HIDDEN_PAGES = new Set<Page>([
+  'testsImport', 'lab', 'caeImport', 'materialImport', 'fmeaImport',
+  'trainingImport', 'theoryImport', 'kbeStdImport', 'kbeGdImport', 'kbeLlImport', 'kbePtImport',
+  'aiOptimize', // AI 公式优化模块（含标定引擎、分阶段拟合、不确定度分析）
+]);
 
 /** 标准版导航：剔除导入类页面，并把只剩检索项的子分组上提为直接的检索入口 */
 function standardNav(items: NavItem[]): NavItem[] {
@@ -248,6 +255,39 @@ export function App() {
   useEffect(() => {
     if (IS_STANDARD && STANDARD_HIDDEN_PAGES.has(page)) setPage('home');
   }, [page]);
+
+  // 启用已发布过的编织管标定系数（无发布记录时沿用公式内置默认值）
+  useEffect(() => {
+    if (!user) {
+      setActiveWovenTubeCalib(null);
+      return;
+    }
+    let alive = true;
+    api.ai
+      .listCalibrations()
+      .then((list) => {
+        if (!alive) return;
+        const released = list.find(
+          (r) => r.formulaId === 'acoustics.muffler.wovenTube' && r.status === 'released',
+        );
+        if (!released) {
+          setActiveWovenTubeCalib(null);
+          return;
+        }
+        const value = (key: string) => released.params.find((p) => p.key === key)?.value;
+        const CR = value('C_R');
+        const AL = value('A_L');
+        const BL = value('B_L');
+        const ok = [CR, AL, BL].every((v) => typeof v === 'number' && Number.isFinite(v));
+        setActiveWovenTubeCalib(ok ? { CR: CR as number, AL: AL as number, BL: BL as number } : null);
+      })
+      .catch(() => {
+        if (alive) setActiveWovenTubeCalib(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [user]);
 
   // 侧边栏可拖动宽度
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -371,6 +411,7 @@ export function App() {
     kbePtImport: '论文/专利 · 资料导入',
     kbePtSearch: '论文/专利 · 资料检索',
     compare: '方案对比',
+    aiOptimize: 'AI · 公式优化',
     settings: '设置',
   };
 
@@ -546,6 +587,7 @@ export function App() {
           {page === 'compare' && compare && (
             <ComparePanel a={compare.a} b={compare.b} onBack={() => setPage('history')} />
           )}
+          {page === 'aiOptimize' && <AiOptimizePage user={user} onBack={() => setPage('home')} />}
           {page === 'settings' && <SettingsPage user={user} />}
           </Suspense>
         </main>

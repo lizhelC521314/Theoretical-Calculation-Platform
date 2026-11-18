@@ -50,6 +50,8 @@ const UNC_CAE_LIB = `${UNC_ROOT}\\Virtual Verification Library`;
 const UNC_MATERIAL_LIB = '\\\\10.1.1.245\\materials library';
 
 const KBE_ROOT = '\\\\10.1.1.245\\Knowledge & Experience Base';
+// AI 公式优化：导入的训练数据归档目录
+const AI_TRAIN_CORE = '\\\\10.1.1.245\\ai\\TrainCore';
 // 展示路径与实际路径一致（本地映射仅在演示录制时临时启用）
 const KBE_DISPLAY_ROOT = KBE_ROOT;
 const kbeDisplayDir = (dir) =>
@@ -397,7 +399,6 @@ ipcMain.handle('lab:set', (_e, snapshot) => {
 
 // ---------- 产品定义库（产品族 / 型号 / 需求 / 参数 / 基线） ----------
 ipcMain.handle('product:get', () => store.get().product ?? null);
-
 ipcMain.handle('product:set', (_e, snapshot) => {
   try {
     store.get().product = snapshot ?? null;
@@ -405,6 +406,67 @@ ipcMain.handle('product:set', (_e, snapshot) => {
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String((err && err.message) || err) };
+  }
+});
+
+// ---------- AI 公式优化：标定记录（草稿 / 审核 / 发布） ----------
+ipcMain.handle('ai:listCalibrations', () => store.get().aiCalibrations ?? []);
+
+ipcMain.handle('ai:saveCalibrations', (_e, list) => {
+  try {
+    if (!Array.isArray(list)) return { ok: false, message: '标定记录格式不正确' };
+    store.get().aiCalibrations = list;
+    store.persist();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, message: String((err && err.message) || err) };
+  }
+});
+
+/**
+ * 归档「AI 公式优化」导入的数据：
+ *   <AI_TRAIN_CORE>/datasets/<时间戳>-<文件名>/
+ *     source.xlsx   原始导入文件
+ *     data.csv      映射后的频率 / TL 数据
+ *     meta.json     公式、字段映射、几何参数、指纹等
+ */
+ipcMain.handle('ai:saveTrainingData', async (_e, payload) => {
+  try {
+    if (!payload || typeof payload.fileName !== 'string' || !Array.isArray(payload.csv)) {
+      return { ok: false, message: '归档数据格式不正确' };
+    }
+    const pad = (n) => String(n).padStart(2, '0');
+    const d = new Date();
+    const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(
+      d.getMinutes(),
+    )}${pad(d.getSeconds())}`;
+    const base = String(payload.fileName)
+      .replace(/\.[^.]+$/, '')
+      .replace(/[\\/:*?"<>|\s]+/g, '_')
+      .slice(0, 80) || 'dataset';
+    const dir = path.join(AI_TRAIN_CORE, 'datasets', `${stamp}-${base}-${d.getTime().toString(36)}`);
+    await fsp.mkdir(dir, { recursive: true });
+
+    const ext = (path.extname(payload.fileName) || '.dat').toLowerCase();
+    if (payload.buffer) {
+      await fsp.writeFile(path.join(dir, `source${ext}`), Buffer.from(new Uint8Array(payload.buffer)));
+    }
+    await fsp.writeFile(
+      path.join(dir, 'data.csv'),
+      ['frequency_hz,tl_db', ...payload.csv].join('\r\n'),
+      'utf8',
+    );
+    await fsp.writeFile(
+      path.join(dir, 'meta.json'),
+      JSON.stringify({ archivedAt: new Date().toISOString(), ...payload.meta }, null, 2),
+      'utf8',
+    );
+    return { ok: true, dir };
+  } catch (err) {
+    return {
+      ok: false,
+      message: `写入 ${AI_TRAIN_CORE} 失败：${String((err && err.message) || err)}`,
+    };
   }
 });
 

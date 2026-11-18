@@ -83,6 +83,10 @@ export const ProductLibraryPage = lazy(() =>
 
 export const SettingsPage = lazy(() => import('./SettingsPage').then((m) => ({ default: m.SettingsPage })));
 
+export const AiOptimizePage = lazy(() =>
+  import('./AiOptimizePage').then((m) => ({ default: m.AiOptimizePage })),
+);
+
 /** 页面 chunk 加载中的占位，避免切换导航时出现空白闪烁 */
 export function PageLoading() {
   return <div className="page-loading">页面加载中…</div>;

@@ -40,13 +40,20 @@ Desktop.ini
 公式梳理/*.zip
 公式梳理/~$*
 公式梳理/*.pdf
-.trae-html-share-packages/
+. trae-html-share-packages/
+测试数据/
+测试文档/
 
 # === 临时调试文件（不入库） ===
 .tmp-pdf-test.out.txt
 _extract_docx.py
 _fmea_plan_extracted.txt
+tmp_*.py
+tmp_*.txt
 __pycache__/
+reports/ai-calibration/
+prototype/ai-formula-optimize.html
+原型图/
 资料/
 ~$*
 *.docx.bak

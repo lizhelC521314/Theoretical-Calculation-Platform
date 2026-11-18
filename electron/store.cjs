@@ -22,6 +22,8 @@ const emptyData = () => ({
   settings: { license: null },
   // 实验库（LabStore）快照：null 表示尚未入库任何实验数据
   lab: null,
+  // AI 公式优化：标定记录（草稿 / 审核 / 发布）
+  aiCalibrations: [],
 });
 
 /** 读取 JSON，失败返回 null（不抛异常，交由调用方决定回退策略） */
@@ -144,6 +146,7 @@ function init(dir) {
   if (!Array.isArray(cache.users)) cache.users = [];
   if (!Array.isArray(cache.history)) cache.history = [];
   if (!Array.isArray(cache.projects)) cache.projects = [];
+  if (!Array.isArray(cache.aiCalibrations)) cache.aiCalibrations = [];
   if (!cache.settings) cache.settings = { license: null };
   migrate(cache);
 

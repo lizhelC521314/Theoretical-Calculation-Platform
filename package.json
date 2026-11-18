@@ -1,7 +1,7 @@
 {
   "name": "ctr-calc",
   "productName": "汽车零部件数字设计平台",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "面向汽车零部件设计与 CAE 工程师的理论公式计算平台",
   "author": "CTR Engineering",
@@ -14,6 +14,7 @@
     "build:web:standard": "tsc --noEmit && vite build --mode standard",
     "build": "npm run build:web && electron-builder --config electron-builder.config.cjs",
     "build:standard": "npm run build:web:standard && electron-builder --config electron-builder.standard.config.cjs",
+    "build:all": "npm run build && npm run build:standard",
     "sign:check": "node scripts/check-signing.cjs",
     "test": "vitest run"
   },
