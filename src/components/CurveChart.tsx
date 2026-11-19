@@ -15,8 +15,6 @@ interface Props {
 function CurveChartView({ spec, inputsSI }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<EChartsInstance | null>(null);
-  /** 首次绘制或清空后需要全量重建，之后只替换 series 数据 */
-  const needRebuild = useRef(true);
 
   const points = useMemo(() => {
     if (!inputsSI) return [];
@@ -34,10 +32,11 @@ function CurveChartView({ spec, inputsSI }: Props) {
 
     if (points.length === 0) {
       chart.clear();
-      needRebuild.current = true;
       return;
     }
 
+    // 给 series 显式设置稳定 id（用 formula.id + "curve"），
+    // 让 ECharts 的 replaceMerge 能精确匹配替换，防止旧 series 残留
     const option = {
       grid: { left: 62, right: 18, top: 34, bottom: 42 },
       tooltip: {
@@ -59,6 +58,7 @@ function CurveChartView({ spec, inputsSI }: Props) {
       },
       series: [
         {
+          id: `${spec.label}-main`,
           type: 'line' as const,
           smooth: true,
           symbol: 'none',
@@ -70,13 +70,9 @@ function CurveChartView({ spec, inputsSI }: Props) {
       ],
     };
 
-    // 数值变化时仅替换 series，避免整图重建（坐标轴与提示框配置保持不变）
-    if (needRebuild.current) {
-      chart.setOption(option, { notMerge: true });
-      needRebuild.current = false;
-    } else {
-      chart.setOption(option, { replaceMerge: ['series'] });
-    }
+    // 强制 notMerge: true —— 最保守策略，每次 setOption 全量替换所有配置
+    // 彻底防止旧 series 残留（用户反馈计算后多次出现"多条曲线"的根因）
+    chart.setOption(option, { notMerge: true });
   }, [spec, points]);
 
   useEffect(() => {

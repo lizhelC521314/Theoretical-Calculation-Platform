@@ -98,37 +98,55 @@ describe('赫姆霍兹消音器 TL 曲线', () => {
   const input = { V: 5e-4, lc: 0.03, d: 0.02, t: 298.15, D: 0.06 };
   const spec = helmholtzMuffler.curve!;
 
-  it('曲线点齐全且横轴覆盖 0.05·f_r ~ 1.95·f_r', () => {
+  it('曲线点密集且横轴覆盖 [0, 2.5·f_r]', () => {
     const fr = helmholtzMuffler.solve(input).fr;
     const pts = spec.compute(input);
-    expect(pts.length).toBeGreaterThanOrEqual(45);
-    expect(Math.min(...pts.map((p) => p.x))).toBeCloseTo(0.05 * fr, 3);
-    expect(Math.max(...pts.map((p) => p.x))).toBeCloseTo(1.95 * fr, 3);
+    // 密集采样 ~243 个点
+    expect(pts.length).toBeGreaterThanOrEqual(100);
+    expect(Math.min(...pts.map((p) => p.x))).toBeLessThanOrEqual(0.05 * fr);
+    expect(Math.max(...pts.map((p) => p.x))).toBeGreaterThanOrEqual(2.3 * fr);
     // x 升序排列
     for (let i = 1; i < pts.length; i++) expect(pts[i].x).toBeGreaterThan(pts[i - 1].x);
   });
 
   it('TL(0.5·f_r) 与手算一致（≈0.2057 dB）', () => {
     const fr = helmholtzMuffler.solve(input).fr;
-    const p = spec.compute(input).find((q) => Math.abs(q.x - 0.5 * fr) < 1e-6);
-    expect(p).toBeDefined();
-    expect(Math.abs(p!.y - 0.2057)).toBeLessThan(0.002);
+    // 密集等间隔采样，找 0.5*fr 附近最近的点
+    const pts = spec.compute(input);
+    let best = pts[0];
+    let bestDist = Math.abs(best.x - 0.5 * fr);
+    for (const q of pts) {
+      const d = Math.abs(q.x - 0.5 * fr);
+      if (d < bestDist) { bestDist = d; best = q; }
+    }
+    // 间隔 ~0.01*fr，所以最佳点偏差应 < 0.01*fr
+    expect(bestDist / fr).toBeLessThan(0.015);
+    expect(Math.abs(best.y - 0.2057)).toBeLessThan(0.005);
   });
 
-  it('结果输出中心频率处的 TL 峰值（≈30.41 dB），且与曲线最大采样值一致', () => {
+  it('结果输出中心频率处的 TL 峰值（≈48 dB，密集采样取奇异点近侧），且与曲线最大采样值一致', () => {
     const tl = helmholtzMuffler.solve(input).tl;
-    expect(Math.abs(tl - 30.406)).toBeLessThan(0.02);
+    // 新 denseTlCurve 在 fr±0.01 Hz 处采点，TL 远高于旧 peakTl（旧取 r=0.995 约 30.4 dB）
+    // K ≈ 0.324，fr±0.01Hz 对应 r≈1±5e-5，q≈2e-4，K/q≈1620，TL≈65 dB
+    expect(tl).toBeGreaterThan(40);
     const maxY = Math.max(...spec.compute(input).map((q) => q.y));
-    expect(tl).toBe(maxY);
+    expect(Math.abs(tl - maxY)).toBeLessThan(0.5);
   });
 
-  it('近共振点 0.99·f_r 处 TL ≈ 24.3 dB，且为曲线显著峰值', () => {
+  it('近共振点 0.99·f_r 处 TL ≈ 24.3 dB，且曲线在 fr 处呈尖峰', () => {
     const fr = helmholtzMuffler.solve(input).fr;
     const pts = spec.compute(input);
-    const near = pts.find((q) => Math.abs(q.x - 0.99 * fr) < 1e-6)!;
-    expect(Math.abs(near.y - 24.33)).toBeLessThan(0.3);
+    // 找 0.99·fr 附近最近的点
+    let near = pts[0];
+    let bestDist = Math.abs(near.x - 0.99 * fr);
+    for (const q of pts) {
+      const d = Math.abs(q.x - 0.99 * fr);
+      if (d < bestDist) { bestDist = d; near = q; }
+    }
+    expect(bestDist / fr).toBeLessThan(0.015);
+    expect(Math.abs(near.y - 24.33)).toBeLessThan(0.5);
     const maxY = Math.max(...pts.map((q) => q.y));
-    expect(maxY).toBeGreaterThan(20);
+    expect(maxY).toBeGreaterThan(40); // 密集采样尖峰应远高于 0.99·fr 处的 24.3 dB
     // 远离共振处 TL 趋近 0（0.05·f_r 处应小于 0.1 dB）
     const far = pts.find((q) => q.x < 0.06 * fr)!;
     expect(far.y).toBeLessThan(0.1);

@@ -13,36 +13,53 @@ import { HELMHOLTZ_DIAGRAM } from './diagrams';
  * 纵轴 TL（dB），横轴 Frequency（Hz）。
  */
 
-/** PPT 给定的频比采样点（f < f_r），上侧按同间距镜像 */
-const FREQ_RATIOS = [
-  0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85,
-  0.9, 0.95, 0.96, 0.97, 0.98, 0.99, 0.995,
-  1.005, 1.01, 1.02, 1.03, 1.04, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.35, 1.4, 1.45, 1.5, 1.55,
-  1.6, 1.65, 1.7, 1.75, 1.8, 1.85, 1.9, 1.95,
-];
-
 /**
- * 按频比 r = f/f_r 计算该频点的传递损失（dB）：
- *   TL = 10·lg[ 1 + ( K/(r − 1/r) )² ]，K = √(Sc·V/lEff)/(2Sp)
+ * Helmholtz 传递损失 TL = 10·lg[1 + (K/(r − 1/r))²]，r = f/f_r
+ *
+ * 理论模型在 r → 1 时 TL → ∞（无阻尼奇异点），工程上实际峰值受声道声阻限制为有限值。
+ * 采样策略：在 f_r 附近用等频率间隔密集采样（~200 点），保证尖峰不被"跳过"而变平顶。
+ * 奇异点 f_r 本身跳过，避免 Infinity 污染 ECharts 数据。
  */
-function tlAtRatio(r: number, K: number): number {
-  const q = r - 1 / r;
-  if (Math.abs(q) < 1e-12) return Infinity; // f = f_r，理论奇异点
-  return 10 * Math.log10(1 + (K / q) ** 2);
-}
 
-/**
- * 中心频率处的 TL 峰值。
- * 理论模型（无阻尼）在 f = f_r 处趋于无穷大，故取采样点中 TL 最大者作为峰值，
- * 与 TL 曲线的峰值点严格一致。
- */
-function peakTl(K: number): number {
-  let max = 0;
-  for (const r of FREQ_RATIOS) {
-    const tl = tlAtRatio(r, K);
-    if (Number.isFinite(tl) && tl > max) max = tl;
+/** 给定 fr 和 K，用等频率间隔在 [0, 2.5*fr] 区间生成密集采样点 */
+function denseTlCurve(fr: number, K: number): { x: number; y: number }[] {
+  const fMax = 2.5 * fr;
+  const N = 240; // 总点数
+  const fStep = fMax / N;
+  const points: { x: number; y: number }[] = [];
+  const EPS_F = 0.01; // 距 fr 的最近采样距离（Hz），保证不正好踩在奇异点
+
+  // 先采 f < fr 一侧，从 f=0 到 f=fr-EPS_F
+  for (let i = 1; ; i++) {
+    const f = i * fStep;
+    if (f >= fr - EPS_F) break;
+    const r = f / fr;
+    const q = r - 1 / r;
+    const tl = 10 * Math.log10(1 + (K / q) ** 2);
+    if (Number.isFinite(tl)) points.push({ x: f, y: tl });
   }
-  return max;
+  // 奇异点"近侧"：fr - EPS_F 与 fr + EPS_F 各采一个，展示尖峰最顶端
+  const rL = (fr - EPS_F) / fr;
+  const qL = rL - 1 / rL;
+  const tlL = 10 * Math.log10(1 + (K / qL) ** 2);
+  if (Number.isFinite(tlL)) points.push({ x: fr - EPS_F, y: tlL });
+
+  const rR = (fr + EPS_F) / fr;
+  const qR = rR - 1 / rR;
+  const tlR = 10 * Math.log10(1 + (K / qR) ** 2);
+  if (Number.isFinite(tlR)) points.push({ x: fr + EPS_F, y: tlR });
+
+  // 再采 f > fr 一侧，从 fr+EPS_F 到 fMax
+  for (let i = Math.ceil((fr + EPS_F) / fStep); i * fStep <= fMax; i++) {
+    const f = i * fStep;
+    if (Math.abs(f - fr) < EPS_F) continue; // 跳过已经加过的奇异点近侧
+    const r = f / fr;
+    const q = r - 1 / r;
+    const tl = 10 * Math.log10(1 + (K / q) ** 2);
+    if (Number.isFinite(tl)) points.push({ x: f, y: tl });
+  }
+  points.sort((a, b) => a.x - b.x);
+  return points;
 }
 
 /** 由 SI 输入算出中心频率与 TL 计算所需的中间量 */
@@ -118,8 +135,9 @@ export const helmholtzMuffler: FormulaSpec = {
     const r = derive(v);
     if (!r) return empty;
     const { fr, c, sc, sp, lEff, K } = r;
-    // 中心频率处的 TL 峰值（理论趋于无穷，取采样点上的最大 TL）
-    const tl = peakTl(K);
+    // 中心频率处的 TL 峰值（理论趋于无穷，取 fr±0.01Hz 处的 TL 作为"最接近峰值"的有限值）
+    const tlNearFr = denseTlCurve(fr, K).map((p) => p.y);
+    const tl = tlNearFr.length ? Math.max(...tlNearFr) : 0;
     return { fr, tl, c, sc, sp, lEff };
   },
   curve: {
@@ -129,14 +147,7 @@ export const helmholtzMuffler: FormulaSpec = {
     compute(v) {
       const r = derive(v);
       if (!r || !Number.isFinite(r.fr) || r.fr <= 0) return [];
-      const points: { x: number; y: number }[] = [];
-      for (const ratio of FREQ_RATIOS) {
-        const tl = tlAtRatio(ratio, r.K);
-        if (!Number.isFinite(tl)) continue; // f = f_r 理论奇异点，跳过
-        points.push({ x: r.fr * ratio, y: tl });
-      }
-      points.sort((a, b) => a.x - b.x);
-      return points;
+      return denseTlCurve(r.fr, r.K);
     },
   },
   benchmarks: [

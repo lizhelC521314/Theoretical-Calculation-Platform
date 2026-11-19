@@ -585,12 +585,12 @@ export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }
               if (target) onOpenFormula(target);
             }}
           />
-          {/* 结果 → 结果曲线 → 参数敏感性分析（两种版本都展示）；key 保证换公式时图表状态彻底重建 */}
+          {/* 结果 → 结果曲线 → 参数敏感性分析；兄弟组件使用不同 key，避免 React 重复/遗漏子节点 */}
           {formula.curve && computed.ok && computed.inputsSI && (
-            <CurveChart key={formula.id} spec={formula.curve} inputsSI={computed.inputsSI} />
+            <CurveChart key={`curve-${formula.id}`} spec={formula.curve} inputsSI={computed.inputsSI} />
           )}
           <SensitivityChart
-            key={formula.id}
+            key={`sensitivity-${formula.id}`}
             formula={formula}
             inputsSI={computed.ok ? computed.inputsSI ?? null : null}
           />

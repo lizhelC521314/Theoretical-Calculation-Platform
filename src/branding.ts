@@ -13,7 +13,7 @@ export const BRAND = {
   productName: '汽车零部件数字设计平台',
   productShort: '数字设计平台',
   /** 版本号（与 package.json / 安装包一致） */
-  version: '0.1.0',
+  version: '1.0.0',
   /** LOGO 文件名（位于 public/ 目录，已替换为公司白底 LOGO PNG） */
   logoUrl: 'logo.png',
   /** 版权信息 */
