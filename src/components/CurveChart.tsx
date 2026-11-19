@@ -27,7 +27,12 @@ function CurveChartView({ spec, inputsSI }: Props) {
 
   useEffect(() => {
     if (!ref.current) return;
-    if (!chartRef.current) chartRef.current = echarts.init(ref.current);
+    // 防御：容器中已存在实例时复用，避免异常重挂载在同一 DOM 上叠加多个画布
+    if (!chartRef.current) {
+      chartRef.current =
+        (echarts.getInstanceByDom(ref.current) as EChartsInstance | undefined) ??
+        echarts.init(ref.current);
+    }
     const chart = chartRef.current;
 
     if (points.length === 0) {
