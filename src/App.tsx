@@ -6,6 +6,8 @@ import type { FormulaSpec } from './formula/types';
 import { BRAND } from './branding';
 import { IS_STANDARD } from './edition';
 import { setActiveWovenTubeCalib } from './domains/acoustics/wovenTubeSilencer';
+import { setActiveHelmholtzCalib } from './domains/acoustics/helmholtzMuffler';
+import { paramsToHelmholtzCalib } from './ai/calibration/adapters/helmholtz';
 // 登录页保持同步加载（首屏必须立即可用）；其余页面统一懒加载，见 pages/lazyPages.tsx
 import { LoginPage } from './pages/LoginPage';
 import {
@@ -283,6 +285,36 @@ export function App() {
       })
       .catch(() => {
         if (alive) setActiveWovenTubeCalib(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [user]);
+
+  // 启用已发布过的赫姆霍兹标定系数（无发布记录时沿用 H0 基准 δout=ψd，ψ=0.75）
+  useEffect(() => {
+    if (!user) {
+      setActiveHelmholtzCalib(null);
+      return;
+    }
+    let alive = true;
+    api.ai
+      .listCalibrations()
+      .then((list) => {
+        if (!alive) return;
+        const released = list.find(
+          (r) => r.formulaId === 'acoustics.muffler.helmholtz' && r.status === 'released',
+        );
+        if (!released) {
+          setActiveHelmholtzCalib(null);
+          return;
+        }
+        const map: Record<string, number> = {};
+        for (const p of released.params) map[p.key] = p.value;
+        setActiveHelmholtzCalib(paramsToHelmholtzCalib(map));
+      })
+      .catch(() => {
+        if (alive) setActiveHelmholtzCalib(null);
       });
     return () => {
       alive = false;

@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type CtrUser } from '../api';
 import type { LabSnapshot } from '../experiment/store';
-import { calibrate } from '../ai/calibration/run';
+import { calibrate, evaluateSourceMetrics, type SourceMetrics } from '../ai/calibration/run';
 import {
   BRAID_M0_V1,
   BRAID_M1_V1,
@@ -27,6 +27,7 @@ import type {
   CalibrationStrategy,
 } from '../ai/calibration/types';
 import { setActiveWovenTubeCalib } from '../domains/acoustics/wovenTubeSilencer';
+import HelmholtzOptimizePanel from './HelmholtzOptimizePanel';
 
 interface Props {
   user: CtrUser;
@@ -46,6 +47,13 @@ interface WorkbookData {
   sheets: Record<string, (string | number)[][]>;
 }
 
+/** 一份已导入的 Excel：原始内容 + 解析后的工作簿 */
+interface XlsxFile {
+  name: string;
+  buffer: ArrayBuffer;
+  workbook: WorkbookData;
+}
+
 interface AlgoSettings {
   huberDelta: number;
   lambda: number;
@@ -58,6 +66,8 @@ interface AlgoSettings {
 
 const FORMULA_ID = 'acoustics.muffler.wovenTube';
 const FORMULA_VERSION = '3.0.0';
+/** 联合标定时各数据源曲线的配色（避开模型蓝与频带均值红） */
+const SOURCE_COLORS = ['#7f8c8d', '#8e44ad', '#16a085', '#d35400', '#2d3436', '#a0522d', '#607d8b', '#827717'];
 /** 导入数据归档目录 */
 const TRAIN_CORE = '\\\\10.1.1.245\\ai\\TrainCore';
 
@@ -106,6 +116,70 @@ function decimate(points: ChartPoint[], max = 1200): ChartPoint[] {
   return out;
 }
 
+/** 按列映射解析一个工作表的有效点（x = 频率，y = TL） */
+function parseSheetPoints(
+  workbook: WorkbookData,
+  sheetName: string,
+  startRow: number,
+  xCol: number,
+  yCol: number,
+): { pts: ChartPoint[]; skipped: number } {
+  const rows = workbook.sheets[sheetName] ?? [];
+  const pts: ChartPoint[] = [];
+  let skipped = 0;
+  for (let i = Math.max(0, startRow - 1); i < rows.length; i++) {
+    const row = rows[i] ?? [];
+    const rawX = row[xCol];
+    const rawY = row[yCol];
+    if (
+      rawX === undefined ||
+      rawX === null ||
+      rawX === '' ||
+      rawY === undefined ||
+      rawY === null ||
+      rawY === ''
+    ) {
+      skipped++;
+      continue;
+    }
+    const x = Number(rawX);
+    const y = Number(rawY);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x <= 0) {
+      skipped++;
+      continue;
+    }
+    pts.push({ x, y });
+  }
+  return { pts, skipped };
+}
+
+/** 频率范围（Hz），无有效点时返回 null */
+function pointsRange(points: ChartPoint[]): { lo: number; hi: number } | null {
+  if (points.length === 0) return null;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const p of points) {
+    if (p.x < lo) lo = p.x;
+    if (p.x > hi) hi = p.x;
+  }
+  return { lo, hi };
+}
+
+/** 联合数据集组数：id 形如 joint(N)，单数据集返回 0 */
+function jointGroups(id: string): number {
+  const m = /^joint\((\d+)\)$/.exec(id);
+  return m ? Number(m[1]) : 0;
+}
+
+/** 数据集展示文案：联合数据额外标注组数 */
+function datasetTitle(
+  ds: { id: string; points: number },
+  sources?: Array<{ id: string; points: number }>,
+): string {
+  const n = sources?.length ?? jointGroups(ds.id);
+  return n > 1 ? `${ds.id}（${n} 组联合，共 ${ds.points} 点）` : `${ds.id}（${ds.points} 点）`;
+}
+
 const fmt = (v: number | undefined, d = 3) =>
   typeof v === 'number' && Number.isFinite(v) ? v.toFixed(d) : '—';
 
@@ -132,16 +206,17 @@ const MODEL_STRATEGIES: Record<'M0' | 'M1' | 'M2', CalibrationStrategy> = {
 export function AiOptimizePage({ user, onBack }: Props) {
   const [step, setStep] = useState(1);
   const [toast, setToast] = useState('');
+  const [formulaId, setFormulaId] = useState<
+    'acoustics.muffler.wovenTube' | 'acoustics.muffler.helmholtz'
+  >('acoustics.muffler.wovenTube');
 
   /* ---------- 数据源 ---------- */
   const [source, setSource] = useState<'lab' | 'xlsx'>('lab');
   const [labOptions, setLabOptions] = useState<LabOption[]>([]);
   const [labLoading, setLabLoading] = useState(false);
   const [labError, setLabError] = useState('');
-  const [labId, setLabId] = useState('');
-  const [workbook, setWorkbook] = useState<WorkbookData | null>(null);
-  const [fileName, setFileName] = useState('');
-  const [fileBuffer, setFileBuffer] = useState<ArrayBuffer | null>(null);
+  const [labIds, setLabIds] = useState<string[]>([]);
+  const [xlsxFiles, setXlsxFiles] = useState<XlsxFile[]>([]);
   const [fileError, setFileError] = useState('');
   const [archive, setArchive] = useState<ArchiveState>({ status: 'idle' });
   const archivedSig = useRef('');
@@ -236,44 +311,42 @@ export function AiOptimizePage({ user, onBack }: Props) {
   }, []);
 
   /* ---------- 解析数据 ---------- */
-  const labOption = labOptions.find((o) => o.id === labId);
+  /** 已选中的实验库曲线（保持选择顺序） */
+  const labSelected = useMemo(
+    () => labIds.map((id) => labOptions.find((o) => o.id === id)).filter((o): o is LabOption => !!o),
+    [labIds, labOptions],
+  );
+
+  /** 预览与归档仍按第一条数据源展示 */
+  const workbook = xlsxFiles[0]?.workbook ?? null;
+  const fileName = xlsxFiles[0]?.name ?? '';
+
+  /** 每个已导入文件按当前列映射解析（列映射对所有文件统一生效） */
+  const parsedFiles = useMemo(
+    () =>
+      xlsxFiles.map((f) => ({
+        name: f.name,
+        ...parseSheetPoints(f.workbook, sheet, startRow, xCol, yCol),
+      })),
+    [xlsxFiles, sheet, startRow, xCol, yCol],
+  );
 
   const parsed = useMemo(() => {
     if (source !== 'xlsx' || !workbook || !sheet) return { pts: [] as ChartPoint[], skipped: 0 };
-    const rows = workbook.sheets[sheet] ?? [];
-    const pts: ChartPoint[] = [];
-    let skipped = 0;
-    for (let i = Math.max(0, startRow - 1); i < rows.length; i++) {
-      const row = rows[i] ?? [];
-      const rawX = row[xCol];
-      const rawY = row[yCol];
-      if (rawX === undefined || rawX === null || rawX === '' || rawY === undefined || rawY === null || rawY === '') {
-        skipped++;
-        continue;
-      }
-      const x = Number(rawX);
-      const y = Number(rawY);
-      if (!Number.isFinite(x) || !Number.isFinite(y) || x <= 0) {
-        skipped++;
-        continue;
-      }
-      pts.push({ x, y });
-    }
-    return { pts, skipped };
+    return parseSheetPoints(workbook, sheet, startRow, xCol, yCol);
   }, [source, workbook, sheet, startRow, xCol, yCol]);
 
-  const points = source === 'lab' ? labOption?.points ?? [] : parsed.pts;
+  const points = source === 'lab' ? labSelected[0]?.points ?? [] : parsed.pts;
 
-  const dataRange = useMemo(() => {
-    if (points.length === 0) return null;
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (const p of points) {
-      if (p.x < lo) lo = p.x;
-      if (p.x > hi) hi = p.x;
-    }
-    return { lo, hi };
-  }, [points]);
+  const dataRange = useMemo(() => pointsRange(points), [points]);
+
+  /** 列映射与文件结构不匹配的告警（例如某文件缺少所选工作表） */
+  const mappingWarnings = useMemo(() => {
+    if (source !== 'xlsx' || !sheet) return [] as string[];
+    return xlsxFiles
+      .filter((f) => !f.workbook.names.includes(sheet))
+      .map((f) => `${f.name}：缺少工作表「${sheet}」，已跳过`);
+  }, [source, xlsxFiles, sheet]);
 
   const colCount = useMemo(() => {
     if (!workbook || !sheet) return 0;
@@ -288,30 +361,45 @@ export function AiOptimizePage({ user, onBack }: Props) {
   };
 
   /* ---------- 选择 Excel ---------- */
-  const pickExcel = async (file: File) => {
+  /** 读取单个文件并解析为工作簿（不做列映射） */
+  const parseExcelFile = async (file: File): Promise<XlsxFile> => {
+    const XLSX = await import('xlsx');
+    const buffer = await file.arrayBuffer();
+    const wb = XLSX.read(buffer, { type: 'array' });
+    const sheets: Record<string, (string | number)[][]> = {};
+    for (const name of wb.SheetNames) {
+      sheets[name] = XLSX.utils.sheet_to_json(wb.Sheets[name], {
+        header: 1,
+        blankrows: false,
+      }) as (string | number)[][];
+    }
+    return { name: file.name, buffer, workbook: { names: wb.SheetNames, sheets } };
+  };
+
+  const pickExcels = async (files: File[]) => {
     setFileError('');
-    setWorkbook(null);
-    setFileName(file.name);
-    setFileBuffer(null);
     setArchive({ status: 'idle' });
     archivedSig.current = '';
-    try {
-      const XLSX = await import('xlsx');
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: 'array' });
-      setFileBuffer(buf);
-      const sheets: Record<string, (string | number)[][]> = {};
-      for (const name of wb.SheetNames) {
-        sheets[name] = XLSX.utils.sheet_to_json(wb.Sheets[name], {
-          header: 1,
-          blankrows: false,
-        }) as (string | number)[][];
+    const ok: XlsxFile[] = [];
+    const errors: string[] = [];
+    for (const file of files) {
+      try {
+        ok.push(await parseExcelFile(file));
+      } catch (err) {
+        errors.push(`${file.name}：${err instanceof Error ? err.message : String(err)}`);
       }
-      setWorkbook({ names: wb.SheetNames, sheets });
-      const first = wb.SheetNames[0];
+    }
+    if (ok.length === 0) {
+      if (errors.length > 0) setFileError(`读取失败：${errors.join('；')}`);
+      return;
+    }
+    // 首次导入时按第一个文件自动识别表头（含 频率/freq/Hz 的行）与 TL 列
+    let targetSheet = sheet;
+    if (xlsxFiles.length === 0) {
+      const first = ok[0].workbook.names[0] ?? '';
+      targetSheet = first;
       setSheet(first);
-      // 自动识别表头（含 频率/freq/Hz 的行）与 TL 列
-      const rows = sheets[first] ?? [];
+      const rows = ok[0].workbook.sheets[first] ?? [];
       let hRow = 1;
       for (let i = 0; i < Math.min(rows.length, 10); i++) {
         if ((rows[i] ?? []).some((c) => /频率|frequency|\bhz\b/i.test(String(c)))) {
@@ -332,9 +420,33 @@ export function AiOptimizePage({ user, onBack }: Props) {
       setXCol(xi);
       setYCol(yi);
       if (yi === xi) setYCol(xi === 0 ? 1 : 0);
-    } catch (err) {
-      setFileError(`读取失败：${err instanceof Error ? err.message : String(err)}`);
     }
+    // 结构需一致：缺少当前工作表的文件跳过并给出原因
+    const usable = ok.filter((f) => {
+      if (!targetSheet || f.workbook.names.includes(targetSheet)) return true;
+      errors.push(`${f.name}：缺少工作表「${targetSheet}」`);
+      return false;
+    });
+    if (usable.length > 0) {
+      // 同名文件覆盖旧项，避免重复导入
+      setXlsxFiles((prev) => {
+        const map = new Map(prev.map((x) => [x.name, x]));
+        for (const f of usable) map.set(f.name, f);
+        return Array.from(map.values());
+      });
+    }
+    if (errors.length > 0) setFileError(`以下文件解析失败已跳过：${errors.join('；')}`);
+  };
+
+  const removeXlsx = (name: string) => {
+    setXlsxFiles((prev) => prev.filter((f) => f.name !== name));
+    setArchive({ status: 'idle' });
+    archivedSig.current = '';
+    setFileError('');
+  };
+
+  const toggleLab = (id: string) => {
+    setLabIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
   /* ---------- 组装策略与数据集 ---------- */
@@ -363,29 +475,79 @@ export function AiOptimizePage({ user, onBack }: Props) {
     [baseStrategy, minHz, maxHz, algo, paramOn, paramInit, geometry.fp],
   );
 
+  /** 每个数据源各自一条 CalibrationDataset（inputs 共用页面顶部几何） */
+  const datasets: CalibrationDataset[] = useMemo(() => {
+    const inputs = wovenTubeInputs(geometry);
+    const make = (id: string, pts: ChartPoint[]): CalibrationDataset => ({
+      id,
+      formulaId: FORMULA_ID,
+      quantity: 'TL',
+      unit: 'dB',
+      inputs,
+      points: pts.map((p) => ({ f: p.x, y: p.y })),
+      groupId: `${id}@L${geometry.L}`,
+      hash: hashPoints(pts),
+    });
+    const list: CalibrationDataset[] = [];
+    if (source === 'lab') {
+      for (const o of labSelected) {
+        if (o.points.length < 10) continue;
+        list.push(make(o.id, o.points));
+      }
+    } else {
+      for (const f of parsedFiles) {
+        if (f.pts.length < 10) continue;
+        list.push(make(f.name, f.pts));
+      }
+    }
+    return list;
+  }, [source, labSelected, parsedFiles, geometry]);
+
+  /** 联合数据集：多个数据源时合并点集，id 记为 joint(N) */
   const dataset: CalibrationDataset = useMemo(() => {
-    const sourceName =
-      source === 'lab'
-        ? labOption?.sub.split(' · ')[0] ?? 'lab-curve'
-        : fileName || 'excel';
+    const list = datasets;
+    if (list.length === 0) {
+      const sourceName =
+        source === 'lab' ? labIds[0] ?? 'lab-curve' : fileName || 'excel';
+      return {
+        id: sourceName,
+        formulaId: FORMULA_ID,
+        quantity: 'TL',
+        unit: 'dB',
+        inputs: wovenTubeInputs(geometry),
+        points: [],
+        groupId: `${sourceName}@L${geometry.L}`,
+        hash: hashPoints([]),
+      };
+    }
+    if (list.length === 1) return list[0];
+    const merged = list.flatMap((d) => d.points);
     return {
-      id: sourceName,
+      id: `joint(${list.length})`,
       formulaId: FORMULA_ID,
       quantity: 'TL',
       unit: 'dB',
       inputs: wovenTubeInputs(geometry),
-      points: points.map((p) => ({ f: p.x, y: p.y })),
-      groupId: `${sourceName}@L${geometry.L}`,
-      hash: hashPoints(points),
+      points: merged,
+      groupId: list.map((d) => d.groupId).join('+'),
+      hash: hashPoints(merged.map((p) => ({ x: p.f, y: p.y }))),
+      sources: list.map((d) => ({ id: d.id, points: d.points.length })),
     };
-  }, [source, labOption, fileName, geometry, points]);
+  }, [datasets, source, labIds, fileName, geometry]);
+
+  /** 联合后的总点数（runnable / 步骤跳转均以它为准） */
+  const totalPoints = dataset.points.length;
 
   /* ---------- 归档导入数据到共享盘 ---------- */
   const archiveDataset = async () => {
-    if (source !== 'xlsx' || !fileBuffer || points.length === 0) return;
+    if (source !== 'xlsx' || parsedFiles.length === 0) return;
+    // 按当前列映射逐文件解析，点数不足 / 缺少工作表的文件不归档
+    const entries = xlsxFiles
+      .map((f, i) => ({ file: f, parsed: parsedFiles[i] }))
+      .filter((e) => e.parsed && e.parsed.pts.length > 0);
+    if (entries.length === 0) return;
     const sig = [
-      dataset.hash,
-      fileName,
+      ...entries.map((e) => `${hashPoints(e.parsed.pts)}|${e.file.name}`),
       sheet,
       headerRow,
       startRow,
@@ -399,36 +561,42 @@ export function AiOptimizePage({ user, onBack }: Props) {
     if (archivedSig.current === sig) return;
     setArchive({ status: 'saving' });
     try {
-      const res = await api.ai.saveTrainingData({
-        fileName: fileName || `dataset-${Date.now()}.xlsx`,
-        buffer: fileBuffer,
-        csv: points.map((p) => `${p.x},${p.y}`),
-        meta: {
-          formulaId: FORMULA_ID,
-          formulaVersion: FORMULA_VERSION,
-          source: 'xlsx',
-          originalFileName: fileName,
-          sheet,
-          headerRow,
-          startRow,
-          xColumn: columnLetter(xCol),
-          xHeader: headerText(xCol),
-          yColumn: columnLetter(yCol),
-          yHeader: headerText(yCol),
-          pointCount: points.length,
-          frequencyRange: dataRange,
-          geometryMm: { ...geometry },
-          dataHash: dataset.hash,
-          operator: user.displayName || user.username,
-        },
-      });
-      if (res.ok) {
-        archivedSig.current = sig;
-        setArchive({ status: 'ok', dir: res.dir });
-        showToast('导入数据已归档到 TrainCore');
-      } else {
-        setArchive({ status: 'error', message: res.message ?? '归档失败' });
+      let dir = '';
+      for (const { file, parsed: p } of entries) {
+        const res = await api.ai.saveTrainingData({
+          fileName: file.name || `dataset-${Date.now()}.xlsx`,
+          buffer: file.buffer,
+          csv: p.pts.map((q) => `${q.x},${q.y}`),
+          meta: {
+            formulaId: FORMULA_ID,
+            formulaVersion: FORMULA_VERSION,
+            source: 'xlsx',
+            originalFileName: file.name,
+            sheet,
+            headerRow,
+            startRow,
+            xColumn: columnLetter(xCol),
+            xHeader: headerText(xCol),
+            yColumn: columnLetter(yCol),
+            yHeader: headerText(yCol),
+            pointCount: p.pts.length,
+            frequencyRange: pointsRange(p.pts),
+            geometryMm: { ...geometry },
+            dataHash: hashPoints(p.pts),
+            operator: user.displayName || user.username,
+          },
+        });
+        if (!res.ok) {
+          setArchive({ status: 'error', message: `${file.name}：${res.message ?? '归档失败'}` });
+          return;
+        }
+        dir = res.dir ?? dir;
       }
+      archivedSig.current = sig;
+      setArchive({ status: 'ok', dir });
+      showToast(
+        entries.length > 1 ? `已归档 ${entries.length} 个文件到 TrainCore` : '导入数据已归档到 TrainCore',
+      );
     } catch (err) {
       setArchive({
         status: 'error',
@@ -438,7 +606,7 @@ export function AiOptimizePage({ user, onBack }: Props) {
   };
 
   /* ---------- 运行 ---------- */
-  const runnable = points.length >= 10 && Object.values(paramOn).some(Boolean);
+  const runnable = totalPoints >= 10 && Object.values(paramOn).some(Boolean);
 
   const run = () => {
     if (!runnable) return;
@@ -612,18 +780,44 @@ export function AiOptimizePage({ user, onBack }: Props) {
   const fitSvg = useMemo(() => {
     if (!report) return '';
     const params = fitValues(report, strategy);
-    const measured = decimate(rawPoints);
-    const modelCurve = measured.map((p) => ({
+    const base = decimate(rawPoints);
+    const modelCurve = base.map((p) => ({
       x: p.x,
       y: wovenTubeModel(report.dataset.inputs, params, [p.x])[0],
     }));
+    // 联合标定时逐条绘制实测曲线，便于对比各样件/工况
+    const measuredSeries =
+      datasets.length > 1
+        ? datasets.map((d, i) => ({
+            name: d.id,
+            points: decimate(d.points.map((p) => ({ x: p.f, y: p.y }))),
+            color: SOURCE_COLORS[i % SOURCE_COLORS.length],
+          }))
+        : undefined;
     return renderFitChartSvg(report, {
-      measured,
+      measured: measuredSeries ? undefined : base,
+      measuredSeries,
       model: modelCurve.filter((p) => Number.isFinite(p.y)),
     });
-  }, [report, rawPoints, strategy]);
+  }, [report, rawPoints, strategy, datasets]);
 
   const residualSvg = useMemo(() => (report ? renderResidualChartSvg(report) : ''), [report]);
+
+  /** 仅当报告对应当前选择时才附带 sources，避免查看历史记录时串用 */
+  const reportSources =
+    report && report.dataset.id === dataset.id && report.dataset.hash === dataset.hash
+      ? dataset.sources
+      : undefined;
+
+  /** 联合标定：用同一套最优参数逐条复算各数据源指标，便于发现偏离的样件/工况 */
+  const sourceMetrics = useMemo(() => {
+    if (!report || !reportSources || datasets.length < 2) return [] as SourceMetrics[];
+    const params: Record<string, number> = {};
+    for (const p of report.params) params[p.key] = p.value;
+    return datasets
+      .map((d) => evaluateSourceMetrics(d, strategy, params, wovenTubeModel))
+      .filter((m): m is SourceMetrics => m != null);
+  }, [report, reportSources, datasets, strategy]);
 
   /* ---------- 记录持久化 ---------- */
   const saveRecords = async (next: CalibrationRecord[]) => {
@@ -795,7 +989,7 @@ h1{font-size:18px;margin:0 0 6px}p{font-size:12.5px;color:#64748b;margin:0 0 16p
 .card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:14px}
 svg{width:100%;height:auto}</style></head><body>
 <h1>编织管传递损失模型 — 标定图形</h1>
-<p>数据集：${report.dataset.id}（${report.dataset.points} 点）· 参数：${report.params
+<p>数据集：${datasetTitle(report.dataset, reportSources)} · 参数：${report.params
       .map((p) => `${p.key}=${fmt(p.value, 4)}`)
       .join('，')} · 生成时间：${new Date().toLocaleString()}</p>
 <div class="card">${fitSvg}</div><div class="card">${residualSvg}</div>
@@ -804,7 +998,7 @@ svg{width:100%;height:auto}</style></head><body>
   };
 
   /* ---------- 视图辅助 ---------- */
-  const canGo = (n: number) => n === 1 || (n <= 3 ? points.length > 0 : !!report);
+  const canGo = (n: number) => n === 1 || (n <= 3 ? totalPoints > 0 : !!report);
   const publishBlocked = report
     ? report.optimizer.multiSolution
       ? '存在多解，不建议发布'
@@ -815,6 +1009,45 @@ svg{width:100%;height:auto}</style></head><body>
   const activeRecord = records.find((r) => r.id === activeId);
   /** 已发布 / 已归档的版本不再允许通过「草稿 / 审核」按钮降级 */
   const lockedRecord = activeRecord?.status === 'released' || activeRecord?.status === 'archived';
+
+  /* ---------- 公式选择器（编织管 TL / 赫姆霍兹 f0） ---------- */
+  const formulaSelector = (
+    <div className="ai-formula-select">
+      <label htmlFor="ai-formula-kind">公式</label>
+      <select
+        id="ai-formula-kind"
+        value={formulaId}
+        onChange={(e) => setFormulaId(e.target.value as typeof formulaId)}
+      >
+        <option value="acoustics.muffler.wovenTube">编织管消音器 · TL 曲线</option>
+        <option value="acoustics.muffler.helmholtz">赫姆霍兹消音器 · f0 标量</option>
+      </select>
+    </div>
+  );
+
+  if (formulaId === 'acoustics.muffler.helmholtz') {
+    return (
+      <div className="ai-page">
+        <div className="ai-hero">
+          <div>
+            <h2>AI 公式优化 · 赫姆霍兹</h2>
+            <p>
+              用实测 / CAE 中心频率 f0 标定赫姆霍兹模型系数。依据《赫姆霍兹消音器中心频率公式自动优化实施方案》：
+              H0 基线对照、H1 有效长度 δ_total 单点标定、H2 偏心/开口/插入修正；标量相对误差目标，
+              先核对长度 / 体积 / 开口三口径再优化。
+            </p>
+          </div>
+          <div className="ai-hero-tags">
+            <span className="tag">赫姆霍兹 f0</span>
+            <span className="tag">标量标定</span>
+            <span className="tag">草稿 → 审核 → 发布</span>
+          </div>
+        </div>
+        {formulaSelector}
+        <HelmholtzOptimizePanel user={user} onBack={onBack} />
+      </div>
+    );
+  }
 
   return (
     <div className="ai-page">
@@ -833,6 +1066,8 @@ svg{width:100%;height:auto}</style></head><body>
           <span className="tag">草稿 → 审核 → 发布</span>
         </div>
       </div>
+
+      {formulaSelector}
 
       <div className="ai-steps">
         {[
@@ -936,19 +1171,19 @@ svg{width:100%;height:auto}</style></head><body>
                 {labOptions.map((o) => (
                   <button
                     key={o.id}
-                    className={`ai-source${labId === o.id ? ' active' : ''}`}
-                    onClick={() => setLabId(o.id)}
+                    className={`ai-source${labIds.includes(o.id) ? ' active' : ''}`}
+                    onClick={() => toggleLab(o.id)}
                   >
                     <span className="ai-source-name">{o.label}</span>
                     <span className="ai-source-meta">{o.sub}</span>
-                    {labId === o.id && <span className="tag tag-ok">已选择</span>}
+                    {labIds.includes(o.id) && <span className="tag tag-ok">已选择</span>}
                   </button>
                 ))}
               </div>
-              {labOption && (
+              {labSelected.length > 0 && (
                 <p className="settings-hint">
-                  已选 {labOption.points.length} 点，频率 {fmt(labOption.points[0].x, 1)}~
-                  {fmt(labOption.points[labOption.points.length - 1].x, 1)} Hz。
+                  已选 {labSelected.length} 条曲线，共{' '}
+                  {labSelected.reduce((n, o) => n + o.points.length, 0)} 点。
                 </p>
               )}
             </div>
@@ -956,23 +1191,55 @@ svg{width:100%;height:auto}</style></head><body>
             <div>
               <div className="ai-row">
                 <label className="btn-primary sm ai-file">
-                  {fileName ? '重新选择 Excel' : '选择 Excel 文件'}
+                  {xlsxFiles.length > 0 ? '继续添加 Excel' : '选择 Excel 文件'}
                   <input
                     type="file"
+                    multiple
                     accept=".xlsx,.xls,.csv"
                     onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) pickExcel(f);
+                      const fs = Array.from(e.target.files ?? []);
+                      if (fs.length > 0) void pickExcels(fs);
                       e.target.value = '';
                     }}
                   />
                 </label>
-                <span className="ai-source-meta">{fileName || '支持 .xlsx / .xls / .csv'}</span>
+                <span className="ai-source-meta">
+                  {xlsxFiles.length > 0
+                    ? `共 ${xlsxFiles.length} 个文件`
+                    : '支持 .xlsx / .xls / .csv，可多选'}
+                </span>
               </div>
               <p className="settings-hint">
-                导入的原始文件与映射后的数据会归档到 {TRAIN_CORE}（桌面客户端）。
+                多个文件需结构相同（工作表与列名一致）；导入的原始文件与映射后的数据会归档到{' '}
+                {TRAIN_CORE}（桌面客户端）。
               </p>
               {fileError && <div className="ai-error">{fileError}</div>}
+              {mappingWarnings.map((w) => (
+                <div className="ai-error" key={w}>
+                  {w}
+                </div>
+              ))}
+              {xlsxFiles.length > 0 && (
+                <div className="ai-source-list">
+                  {xlsxFiles.map((f) => {
+                    const p = parsedFiles.find((x) => x.name === f.name);
+                    return (
+                      <div className="ai-source" key={f.name}>
+                        <span className="ai-source-name">{f.name}</span>
+                        <span className="ai-source-meta">
+                          {p && p.pts.length > 0
+                            ? `${p.pts.length} 点${p.skipped > 0 ? ` · 跳过 ${p.skipped} 行` : ''}`
+                            : '未能解析（检查工作表 / 列映射）'}
+                          {p && p.pts.length > 0 && p.pts.length < 10 ? ' · 少于 10 点，未参与' : ''}
+                        </span>
+                        <button className="btn-link danger" onClick={() => removeXlsx(f.name)}>
+                          移除
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {workbook && (
                 <div className="ai-grid4 ai-mapping">
                   <label className="field">
@@ -1056,11 +1323,13 @@ svg{width:100%;height:auto}</style></head><body>
 
           <div className="ai-actions">
             <span className="settings-hint">
-              {points.length > 0
-                ? `当前数据：${points.length} 点，${fmt(dataRange?.lo, 1)}~${fmt(dataRange?.hi, 1)} Hz`
+              {totalPoints > 0
+                ? dataset.sources
+                  ? `当前数据：${dataset.sources.length} 组联合，共 ${totalPoints} 点`
+                  : `当前数据：${totalPoints} 点，${fmt(dataRange?.lo, 1)}~${fmt(dataRange?.hi, 1)} Hz`
                 : '请选择数据后再继续'}
             </span>
-            <button className="btn-primary sm" disabled={points.length < 10} onClick={() => setStep(2)}>
+            <button className="btn-primary sm" disabled={totalPoints < 10} onClick={() => setStep(2)}>
               下一步：字段映射
             </button>
           </div>
@@ -1074,7 +1343,15 @@ svg{width:100%;height:auto}</style></head><body>
             <div>
               <div className="kv">
                 <span>数据来源</span>
-                <b>{source === 'lab' ? labOption?.label ?? '实验库' : fileName || 'Excel'}</b>
+                <b>
+                  {source === 'lab'
+                    ? labSelected.length > 1
+                      ? `实验库 · ${labSelected.length} 条曲线`
+                      : labSelected[0]?.label ?? '实验库'
+                    : datasets.length > 1
+                      ? `Excel · ${datasets.length} 个文件`
+                      : fileName || 'Excel'}
+                </b>
               </div>
               <div className="kv">
                 <span>频率列 → 自变量</span>
@@ -1086,7 +1363,10 @@ svg{width:100%;height:auto}</style></head><body>
               </div>
               <div className="kv">
                 <span>有效点数</span>
-                <b>{points.length} 点</b>
+                <b>
+                  {totalPoints} 点
+                  {dataset.sources ? `（${dataset.sources.length} 组联合）` : ''}
+                </b>
               </div>
               <div className="kv">
                 <span>频率范围</span>
@@ -1457,8 +1737,49 @@ svg{width:100%;height:auto}</style></head><body>
                     </div>
                   ))}
                 </div>
+                {sourceMetrics.length > 1 && (
+                  <div className="ai-source-metrics">
+                    <p className="settings-hint">
+                      各数据源指标（固定联合最优参数后逐条复算，超出阈值的数值标红）
+                    </p>
+                    <table className="ai-table">
+                      <thead>
+                        <tr>
+                          <th>数据源</th>
+                          <th className="num">点数</th>
+                          <th className="num">有效频带</th>
+                          <th className="num">RMSE (dB)</th>
+                          <th className="num">MAE (dB)</th>
+                          <th className="num">最大单带误差 (dB)</th>
+                          <th className="num">峰值频率偏差 (%)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sourceMetrics.map((m) => (
+                          <tr key={m.id}>
+                            <td>{m.id}</td>
+                            <td className="num">{m.points}</td>
+                            <td className="num">{m.bands}</td>
+                            <td className={`num${m.rmse <= 1.5 ? '' : ' bad'}`}>{fmt(m.rmse, 2)}</td>
+                            <td className={`num${m.mae <= 1.0 ? '' : ' bad'}`}>{fmt(m.mae, 2)}</td>
+                            <td className={`num${m.maxAbsBandErr <= 3 ? '' : ' bad'}`}>
+                              {fmt(m.maxAbsBandErr, 2)}
+                            </td>
+                            <td
+                              className={`num${
+                                !Number.isFinite(m.peakFreqDevPct) || m.peakFreqDevPct <= 5 ? '' : ' bad'
+                              }`}
+                            >
+                              {Number.isFinite(m.peakFreqDevPct) ? fmt(m.peakFreqDevPct, 1) : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
                 <p className="settings-hint">
-                  数据集 {report.dataset.id}（{report.dataset.points} 点）· 有效频带{' '}
+                  数据集 {datasetTitle(report.dataset, reportSources)}· 有效频带{' '}
                   {report.bands.filter((b) => b.included).length} 个 · 目标 J = {fmt(report.objective.J, 4)} ·
                   参数 {report.params.map((p) => `${p.key}=${fmt(p.value, 4)}`).join('，')}
                 </p>

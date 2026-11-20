@@ -45,7 +45,7 @@ export default defineConfig({
     emptyOutDir: true,
     // Electron 32 内置 Chromium 120，无需为老浏览器降级语法
     target: 'chrome120',
-    chunkSizeWarningLimit: 1200,
+    chunkSizeWarningLimit: 950,
     rollupOptions: {
       output: {
         // 把变更频率低、体积大的第三方库拆成独立 vendor chunk：
@@ -54,9 +54,13 @@ export default defineConfig({
           if (!id.includes('node_modules')) return undefined;
           if (/node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react';
           if (/node_modules[\\/](echarts|zrender)[\\/]/.test(id)) return 'vendor-echarts';
-          if (/node_modules[\\/](docx|exceljs|xlsx|pptxgenjs|mammoth|jszip)[\\/]/.test(id)) return 'vendor-office';
-          // 注意：katex 不单独分包——main.tsx 只引入了它的 CSS，
-          // 单独分包会让入口被迫预加载整个 KaTeX JS（约 258KB），反而拖慢首屏
+          // Office 文档库按用途拆分：docx/excel/pptx 分别被不同页面按需加载，
+          // 单块 vendor-office 达 2071 kB 触发告警，拆开后每块 < 900 kB
+          if (/node_modules[\\/]exceljs[\\/]/.test(id)) return 'vendor-office-excel';
+          if (/node_modules[\\/](docx|mammoth)[\\/]/.test(id)) return 'vendor-office-docx';
+          if (/node_modules[\\/]pptxgenjs[\\/]/.test(id)) return 'vendor-office-pptx';
+          // 注意：xlsx、jszip 作为 exceljs/docx 的传递依赖，会跟随主库归入对应块；
+          // 如有页面直接 import 顶层 xlsx，可在规则前追加 vendor-office-xlsx
           if (/node_modules[\\/]pdfjs-dist[\\/]/.test(id)) return 'vendor-pdf';
           return undefined;
         },

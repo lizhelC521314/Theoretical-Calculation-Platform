@@ -1,5 +1,7 @@
-import type { CurvePoint, FormulaSpec, OutputSpec, ParamSpec, ShowIf } from '../../formula/types';
+import type { CurvePoint, FormulaSpec, OutputSpec, ParamSpec, ShowIf, ShowIfCondition } from '../../formula/types';
 import { INTAKE_TL_DIAGRAM } from './diagrams';
+import { evalHelmholtzSummary, getActiveHelmholtzCalib } from './helmholtzMuffler';
+import { evalWovenTubeAt } from './wovenTubeSilencer';
 
 /**
  * 进气系统声音传递损失计算（进气管—波纹管—编织管—空滤器—出气管—多腔穿孔消音器）
@@ -12,10 +14,13 @@ import { INTAKE_TL_DIAGRAM } from './diagrams';
  *   截面突变      Tarea = [1, 0; 0, Sd/Su]                                   （式5）
  *   等截面直管    Tduct = [cos(kL), jsin(kL); jsin(kL), cos(kL)]              （式6）
  *   波纹管        mw = (D+2h)²/D²，TLw = 10·lg[1 + 0.25(mw − 1/mw)²sin²(kw)]   （式7/8）
- *   编织管        JCA 等效流体 → 壁面阻抗 ζw → α = (2/D)·Rw/(Rw² + Xw²)，
- *                 TL ≈ 8.686·α·L（式9~18），本式按复波数 kx = k0 − jα 级联
+ *   编织管        默认孔隙度壁面模型：与「编织管消音器」公式（acoustics.muffler.wovenTube）
+ *                 同源，按孔隙度 f_p 与壁厚算壁面阻抗，由壁面路径与并联泄漏路径的总 TL
+ *                 反算等效衰减 α = TL/(8.686·L)，再按 kx = k0 − jα 级联；
+ *                 JCA 五参数模型（式9~18）保留为对照，可选；也可调用已保存的编织管记录
  *   空滤器膨胀腔  TLexp = 10·lg[1 + 0.25(m − 1/m)²sin²(kL)]                   （式21）
- *   亥姆霍兹      f0 = (c/2π)·[An/(V·Leff)]^(1/2)，Leff = ln + 0.85dn          （式22）
+ *   亥姆霍兹      f0 = (c/2π)·[An/(V·Leff)]^(1/2)，Leff = ln + ψdn + δin
+ *                 （ψ 默认 0.75，与 acoustics.muffler.helmholtz V3 口径统一；式22）
  *   四分之一波长  fq = (2k−1)·c/(4L)，TLbranch = 20·lg|1 + Sp/(2Sbζb)|          （式23/24）
  *   滤芯          JCA 多孔层传递矩阵 Tlayer = [cos(kct), jZcsin(kct); …]        （式13）
  *   膨胀腔高频    峰值 fmax,n = (2n−1)c/(4L)，谷值 fmin,n = n·c/(2L)，
@@ -408,6 +413,134 @@ const CAVITY_LC_DEFAULT = [8, 10, 13, 17, 23.8];
 /** 旁支消音器建议几何（选定旁支类型后才参与计算） */
 const BRANCH_DEFAULT = { V: 0.5, ln: 30, dn: 20, Lq: 400, dq: 35 };
 
+/**
+ * 赫姆霍兹旁支数据来源：
+ *   0 = 内置公式（进气系统的集中参数简化式，默认，行为与旧版一致）；
+ *   1 = 调用「赫姆霍兹消音器」公式保存的计算记录，用该公式的完整口径计算等效参数。
+ */
+const HB_MODE_OPTIONS = [
+  { value: 0, label: '内置公式' },
+  { value: 1, label: '调用赫姆霍兹记录' },
+];
+
+const HB_HELM_ID = 'acoustics.muffler.helmholtz';
+
+/** 从赫姆霍兹记录（SI 输入）派生旁支等效参数：Leff(mm)、流通面积(mm²)、腔容积(L) */
+function hbRecordSnapshot(si: Record<string, number>): Record<string, number> | null {
+  const r = evalHelmholtzSummary(si);
+  if (!Number.isFinite(r.lEff) || !Number.isFinite(r.sArea) || !Number.isFinite(r.Vc)) return null;
+  if (!(r.lEff > 0) || !(r.sArea > 0) || !(r.Vc > 0)) return null;
+  return { lEff: r.lEff * 1000, sArea: r.sArea * 1e6, Vc: r.Vc * 1000 };
+}
+
+/** 生成一组「数据来源 + 记录引用 + 隐藏快照」参数（进气管段 / 出气管段 / 空滤器共用） */
+function hbRefInputs(
+  keys: { mode: string; ref: string; L: string; A: string; V: string },
+  labelPrefix: string,
+  showIf: ShowIfCondition[],
+): ParamSpec[] {
+  const base = showIf;
+  return [
+    {
+      key: keys.mode,
+      label: `${labelPrefix}赫姆霍兹数据来源`,
+      symbol: '-',
+      unit: '-',
+      kind: 'select',
+      options: HB_MODE_OPTIONS,
+      default: 0,
+      showIf,
+      description: '内置公式：填写 V / l_n / d_n，按进气系统简化式（Leff = l_n + ψd_n + δ_in）计算；调用赫姆霍兹记录：使用「赫姆霍兹消音器」公式页面保存的计算记录，按该公式的完整口径（ψ、δ_in、净/毛腔、H1/H2 标定等）计算，V/l_n/d_n 不再手填',
+    },
+    {
+      key: keys.ref,
+      label: `${labelPrefix}赫姆霍兹记录`,
+      symbol: '-',
+      unit: '-',
+      kind: 'select',
+      options: [{ value: 0, label: '未选择' }],
+      default: 0,
+      showIf: [...base, { key: keys.mode, min: 1 }],
+      refRecord: {
+        formulaId: HB_HELM_ID,
+        labelOutput: { key: 'fr', name: 'f0', unit: 'Hz' },
+        snapshot: { lEff: keys.L, sArea: keys.A, Vc: keys.V },
+        derive: hbRecordSnapshot,
+      },
+      description: '选择「赫姆霍兹消音器」公式中保存过的计算记录；选中后等效长度、流通面积与腔容积自动带入，若记录已被删除则回退为内置公式',
+    },
+    { key: keys.L, label: '引用等效长度', symbol: 'L_eff,ref', unit: 'mm', unitGroup: 'length', default: 0, hidden: true },
+    { key: keys.A, label: '引用流通面积', symbol: 'A_ref', unit: 'mm²', unitGroup: 'area', default: 0, hidden: true },
+    { key: keys.V, label: '引用腔容积', symbol: 'V_ref', unit: 'L', unitGroup: 'volume', default: 0, hidden: true },
+  ];
+}
+
+/* ---------- 编织管段：引用「编织管消音器」记录（频域重建） ---------- */
+
+const WT_WOVEN_ID = 'acoustics.muffler.wovenTube';
+
+const WT_MODE_OPTIONS = [
+  { value: 1, label: '孔隙度壁面模型（默认）' },
+  { value: 0, label: 'JCA 五参数模型（对照）' },
+  { value: 2, label: '调用编织管记录' },
+];
+
+/** 从编织管记录（SI 输入）派生复波数模型所需参数：fp(Hz)、壁厚(mm)、介质参数 */
+function wtRecordSnapshot(si: Record<string, number>): Record<string, number> | null {
+  const { fp, t, rho0, c0, gam, P0 } = si;
+  const nums = [fp, t, rho0, c0, gam, P0];
+  if (!nums.every((x) => Number.isFinite(x) && x > 0)) return null;
+  return { fp, tw: t * 1000, rho0, c0, gam, P0 };
+}
+
+/** 编织管段「数据来源 + 记录引用 + 隐藏快照」参数 */
+function wtRefInputs(i: number, showIf: ShowIfCondition[]): ParamSpec[] {
+  const base = showIf;
+  return [
+    {
+      key: `wtMode${i}`,
+      label: `进气管段 ${i} 编织管模型`,
+      symbol: '-',
+      unit: '-',
+      kind: 'select',
+      options: WT_MODE_OPTIONS,
+      default: 1,
+      showIf,
+      description: '孔隙度壁面模型（默认，与「编织管消音器」公式同源）：按孔隙度 f_p 与壁厚算壁面阻抗，再由壁面路径与并联泄漏路径的总 TL 反算等效衰减；JCA 五参数模型：按式9~18 的等效流体与壁面衰减（保留作对照）；调用编织管记录：使用已保存记录中的 f_p 与介质参数，孔径/长度仍取本段几何',
+    },
+    {
+      key: `wtRef${i}`,
+      label: `进气管段 ${i} 编织管记录`,
+      symbol: '-',
+      unit: '-',
+      kind: 'select',
+      options: [{ value: 0, label: '未选择' }],
+      default: 0,
+      showIf: [...base, { key: `wtMode${i}`, min: 2, max: 2 }],
+      refRecord: {
+        formulaId: WT_WOVEN_ID,
+        labelOutput: { key: 'tl_avg', name: 'TL', unit: 'dB' },
+        snapshot: {
+          fp: `wtRefFp${i}`,
+          tw: `wtRefTw${i}`,
+          rho0: `wtRefRho${i}`,
+          c0: `wtRefC${i}`,
+          gam: `wtRefGam${i}`,
+          P0: `wtRefP${i}`,
+        },
+        derive: wtRecordSnapshot,
+      },
+      description: '选择「编织管消音器」公式中保存过的计算记录；选中后按记录的孔隙度 f_p 与介质参数逐频点计算，替换本段内置模型；记录失效时回退默认孔隙度壁面模型',
+    },
+    { key: `wtRefFp${i}`, label: '引用孔隙度频率', symbol: 'f_p', unit: 'Hz', default: 0, hidden: true },
+    { key: `wtRefTw${i}`, label: '引用壁厚', symbol: 't_ref', unit: 'mm', unitGroup: 'length', default: 0, hidden: true },
+    { key: `wtRefRho${i}`, label: '引用空气密度', symbol: 'ρ0,ref', unit: 'kg/m³', default: 0, hidden: true },
+    { key: `wtRefC${i}`, label: '引用声速', symbol: 'c0,ref', unit: 'm/s', default: 0, hidden: true },
+    { key: `wtRefGam${i}`, label: '引用比热比', symbol: 'γ_ref', unit: '-', default: 0, hidden: true },
+    { key: `wtRefP${i}`, label: '引用环境压力', symbol: 'P0,ref', unit: 'Pa', default: 0, hidden: true },
+  ];
+}
+
 /** 旁支消音器类型：0 无、1 四分之一波长管、2 亥姆霍兹消音器 */
 const BRANCH_OPTIONS = [
   { value: 0, label: '无' },
@@ -420,12 +553,13 @@ const BRANCH_N_OPTIONS = [1, 2, 3, 4, 5, 6].map((n) => ({ value: n, label: `${n}
 /** 输入分区标题 */
 const SEC_COMP = '系统组成';
 const SEC_RUN = '运行参数';
-const SEC_JCA = '编织管材料（JCA）';
+const SEC_JCA = '编织管壁面与材料';
 const SEC_MED = '介质与多腔消音器参数';
 const SEC_IN = '进气管几何';
 const SEC_BOX = '空滤器';
 const SEC_FIL = '空滤器滤芯';
 const SEC_OUT = '出气管几何与消音器';
+const SEC_HBC = '赫姆霍兹端部修正（全系统共用）';
 
 /** 给一组输入统一加分区标题 */
 const withGroup = (list: ParamSpec[], group: string): ParamSpec[] =>
@@ -476,10 +610,16 @@ for (let i = 1; i <= SEG_MAX; i++) {
     { key: `L${i}`, label: `进气管段 ${i} 长度`, symbol: `L_in${i}`, unit: 'mm', unitGroup: 'length', default: d.L, min: 0, required: true, showIf: seg, description: '该段沿程长度，未使用取 0；旁支数量非 0 时长度可取 0，旁支仍按集中元件接入' },
     { key: `h${i}`, label: `进气管段 ${i} 波纹波深`, symbol: `h${i}`, unit: 'mm', unitGroup: 'length', default: d.h, min: 0, showIf: [seg, { key: `t${i}`, min: 2, max: 2 }], description: '仅波纹管需要：波深 h；mw = (D+2h)²/D²（式7）' },
     { key: `w${i}`, label: `进气管段 ${i} 波纹波距`, symbol: `w${i}`, unit: 'mm', unitGroup: 'length', default: d.w, min: 0, showIf: [seg, { key: `t${i}`, min: 2, max: 2 }], description: '仅波纹管需要：波距 w，每个波节按长度 w 的膨胀腔处理（式8）' },
-    { key: `twB${i}`, label: `进气管段 ${i} 编织壁厚`, symbol: `t_b${i}`, unit: 'mm', unitGroup: 'length', default: d.tw, min: 0, showIf: [seg, { key: `t${i}`, min: 3, max: 3 }], description: '仅编织管需要：壁厚 t，进入 JCA 壁面阻抗计算（式13/14）' },
-    { key: `hbV${i}`, label: `进气管段 ${i} 亥姆霍兹腔容积`, symbol: `V_H,in${i}`, unit: 'L', unitGroup: 'volume', default: BRANCH_DEFAULT.V, min: 0, showIf: [seg, { key: `br${i}`, min: 2, max: 2 }], description: '仅该段旁支选为亥姆霍兹消音器时填写：总容积 V（多腔并联时按单个腔计）' },
-    { key: `hbLn${i}`, label: `进气管段 ${i} 亥姆霍兹腔颈长`, symbol: `l_n,in${i}`, unit: 'mm', unitGroup: 'length', default: BRANCH_DEFAULT.ln, min: 0, showIf: [seg, { key: `br${i}`, min: 2, max: 2 }], description: '仅该段旁支选为亥姆霍兹消音器时填写：颈长 l_n，Leff = l_n + 0.85d_n（式22）' },
-    { key: `hbDn${i}`, label: `进气管段 ${i} 亥姆霍兹腔颈径`, symbol: `d_n,in${i}`, unit: 'mm', unitGroup: 'diameter', default: BRANCH_DEFAULT.dn, min: 0, showIf: [seg, { key: `br${i}`, min: 2, max: 2 }], description: '仅该段旁支选为亥姆霍兹消音器时填写：颈径 d_n，An = πd_n²/4（式22）' },
+    { key: `twB${i}`, label: `进气管段 ${i} 编织壁厚`, symbol: `t_b${i}`, unit: 'mm', unitGroup: 'length', default: d.tw, min: 0, showIf: [seg, { key: `t${i}`, min: 3, max: 3 }, { key: `wtMode${i}`, max: 1 }], description: '仅编织管且使用内置模型（孔隙度/JCA）时需要：壁厚 t；孔隙度模型用于壁面声阻换算，JCA 模型用于特征长度依据' },
+    ...wtRefInputs(i, [seg, { key: `t${i}`, min: 3, max: 3 }]),
+    { key: `hbV${i}`, label: `进气管段 ${i} 亥姆霍兹腔容积`, symbol: `V_H,in${i}`, unit: 'L', unitGroup: 'volume', default: BRANCH_DEFAULT.V, min: 0, showIf: [seg, { key: `br${i}`, min: 2, max: 2 }, { key: `hbMode${i}`, max: 0 }], description: '仅该段旁支选为亥姆霍兹消音器且数据来源为「内置公式」时填写：总容积 V（多腔并联时按单个腔计）' },
+    { key: `hbLn${i}`, label: `进气管段 ${i} 亥姆霍兹腔颈长`, symbol: `l_n,in${i}`, unit: 'mm', unitGroup: 'length', default: BRANCH_DEFAULT.ln, min: 0, showIf: [seg, { key: `br${i}`, min: 2, max: 2 }, { key: `hbMode${i}`, max: 0 }], description: '仅该段旁支选为亥姆霍兹消音器且数据来源为「内置公式」时填写：颈长 l_n，Leff = l_n + ψd_n + δ_in（ψ 默认 0.75）' },
+    { key: `hbDn${i}`, label: `进气管段 ${i} 亥姆霍兹腔颈径`, symbol: `d_n,in${i}`, unit: 'mm', unitGroup: 'diameter', default: BRANCH_DEFAULT.dn, min: 0, showIf: [seg, { key: `br${i}`, min: 2, max: 2 }, { key: `hbMode${i}`, max: 0 }], description: '仅该段旁支选为亥姆霍兹消音器且数据来源为「内置公式」时填写：颈径 d_n，An = πd_n²/4（式22）' },
+    ...hbRefInputs(
+      { mode: `hbMode${i}`, ref: `hbRef${i}`, L: `hbRefL${i}`, A: `hbRefA${i}`, V: `hbRefV${i}` },
+      `进气管段 ${i} `,
+      [seg, { key: `br${i}`, min: 2, max: 2 }],
+    ),
     { key: `qwL${i}`, label: `进气管段 ${i} 四分之一波长支管长度`, symbol: `L_q,in${i}`, unit: 'mm', unitGroup: 'length', default: BRANCH_DEFAULT.Lq, min: 0, showIf: [seg, { key: `br${i}`, min: 1, max: 1 }], description: '仅该段旁支选为四分之一波长管时填写：支管长度 L_b，fq = c/(4L)（式23）' },
     { key: `qwD${i}`, label: `进气管段 ${i} 四分之一波长支管直径`, symbol: `d_q,in${i}`, unit: 'mm', unitGroup: 'diameter', default: BRANCH_DEFAULT.dq, min: 0, showIf: [seg, { key: `br${i}`, min: 1, max: 1 }], description: '仅该段旁支选为四分之一波长管时填写：支管直径 d_b，Sb = πd_b²/4（式24）' },
   );
@@ -502,9 +642,14 @@ for (let i = 1; i <= SEG_MAX; i++) {
     { key: `nhS${i}`, label: `出气管段 ${i} 消音器开孔数量`, symbol: `n_h${i}`, unit: '个', default: d.nh, min: 0, showIf: [seg, { key: `o${i}`, min: 3, max: 3 }], description: '仅多腔穿孔消音器需要：该腔穿孔个数（本段各腔共用）' },
     { key: `twS${i}`, label: `出气管段 ${i} 消音器穿孔壁厚`, symbol: `t_w${i}`, unit: 'mm', unitGroup: 'length', default: d.tw, min: 0, showIf: [seg, { key: `o${i}`, min: 3, max: 3 }], description: '仅多腔穿孔消音器需要：穿孔板厚度（孔深）t_w' },
     { key: `ctS${i}`, label: `出气管段 ${i} 消音器隔板厚度`, symbol: `c_t${i}`, unit: 'mm', unitGroup: 'length', default: d.ct, min: 0, showIf: [seg, { key: `o${i}`, min: 3, max: 3 }], description: '仅多腔穿孔消音器需要：相邻腔间环形隔板厚度，按直管段插入（式31）' },
-    { key: `hbVo${i}`, label: `出气管段 ${i} 亥姆霍兹腔容积`, symbol: `V_H,out${i}`, unit: 'L', unitGroup: 'volume', default: BRANCH_DEFAULT.V, min: 0, showIf: [seg, { key: `bro${i}`, min: 2, max: 2 }], description: '仅该段旁支选为亥姆霍兹消音器时填写：总容积 V（多腔并联时按单个腔计）' },
-    { key: `hbLno${i}`, label: `出气管段 ${i} 亥姆霍兹腔颈长`, symbol: `l_n,out${i}`, unit: 'mm', unitGroup: 'length', default: BRANCH_DEFAULT.ln, min: 0, showIf: [seg, { key: `bro${i}`, min: 2, max: 2 }], description: '仅该段旁支选为亥姆霍兹消音器时填写：颈长 l_n，Leff = l_n + 0.85d_n（式22）' },
-    { key: `hbDno${i}`, label: `出气管段 ${i} 亥姆霍兹腔颈径`, symbol: `d_n,out${i}`, unit: 'mm', unitGroup: 'diameter', default: BRANCH_DEFAULT.dn, min: 0, showIf: [seg, { key: `bro${i}`, min: 2, max: 2 }], description: '仅该段旁支选为亥姆霍兹消音器时填写：颈径 d_n，An = πd_n²/4（式22）' },
+    { key: `hbVo${i}`, label: `出气管段 ${i} 亥姆霍兹腔容积`, symbol: `V_H,out${i}`, unit: 'L', unitGroup: 'volume', default: BRANCH_DEFAULT.V, min: 0, showIf: [seg, { key: `bro${i}`, min: 2, max: 2 }, { key: `hbModeO${i}`, max: 0 }], description: '仅该段旁支选为亥姆霍兹消音器且数据来源为「内置公式」时填写：总容积 V（多腔并联时按单个腔计）' },
+    { key: `hbLno${i}`, label: `出气管段 ${i} 亥姆霍兹腔颈长`, symbol: `l_n,out${i}`, unit: 'mm', unitGroup: 'length', default: BRANCH_DEFAULT.ln, min: 0, showIf: [seg, { key: `bro${i}`, min: 2, max: 2 }, { key: `hbModeO${i}`, max: 0 }], description: '仅该段旁支选为亥姆霍兹消音器且数据来源为「内置公式」时填写：颈长 l_n，Leff = l_n + ψd_n + δ_in（ψ 默认 0.75）' },
+    { key: `hbDno${i}`, label: `出气管段 ${i} 亥姆霍兹腔颈径`, symbol: `d_n,out${i}`, unit: 'mm', unitGroup: 'diameter', default: BRANCH_DEFAULT.dn, min: 0, showIf: [seg, { key: `bro${i}`, min: 2, max: 2 }, { key: `hbModeO${i}`, max: 0 }], description: '仅该段旁支选为亥姆霍兹消音器且数据来源为「内置公式」时填写：颈径 d_n，An = πd_n²/4（式22）' },
+    ...hbRefInputs(
+      { mode: `hbModeO${i}`, ref: `hbRefO${i}`, L: `hbRefLO${i}`, A: `hbRefAO${i}`, V: `hbRefVO${i}` },
+      `出气管段 ${i} `,
+      [seg, { key: `bro${i}`, min: 2, max: 2 }],
+    ),
     { key: `qwLo${i}`, label: `出气管段 ${i} 四分之一波长支管长度`, symbol: `L_q,out${i}`, unit: 'mm', unitGroup: 'length', default: BRANCH_DEFAULT.Lq, min: 0, showIf: [seg, { key: `bro${i}`, min: 1, max: 1 }], description: '仅该段旁支选为四分之一波长管时填写：支管长度 L_b，fq = c/(4L)（式23）' },
     { key: `qwDo${i}`, label: `出气管段 ${i} 四分之一波长支管直径`, symbol: `d_q,out${i}`, unit: 'mm', unitGroup: 'diameter', default: BRANCH_DEFAULT.dq, min: 0, showIf: [seg, { key: `bro${i}`, min: 1, max: 1 }], description: '仅该段旁支选为四分之一波长管时填写：支管直径 d_b，Sb = πd_b²/4（式24）' },
   );
@@ -523,12 +668,70 @@ for (let i = 1; i <= SEG_MAX; i++) {
   }
 }
 
+/* ---------- 分区级条件显示：未选中的元件不展开其参数区 ---------- */
+
+/** 进气管第 i 段启用且管型为编织管 */
+const wovenSegConds = (i: number) => [
+  { key: 'nIn', min: i },
+  { key: `t${i}`, min: 3, max: 3 },
+];
+/** 某段编织管使用 JCA 五参数模型（wtMode = 0）时需要 σ_f/φ/α∞/Λ/Λ′ */
+const anyWovenJca: ShowIf = {
+  any: Array.from({ length: SEG_MAX }, (_, k) => {
+    const i = k + 1;
+    return [...wovenSegConds(i), { key: `wtMode${i}`, min: 0, max: 0 }];
+  }),
+};
+/** 某段编织管使用孔隙度壁面模型（wtMode = 1）时需要孔隙度 f_p */
+const anyWovenPorosity: ShowIf = {
+  any: Array.from({ length: SEG_MAX }, (_, k) => {
+    const i = k + 1;
+    return [...wovenSegConds(i), { key: `wtMode${i}`, min: 1, max: 1 }];
+  }),
+};
+/** 任一赫姆霍兹元件（进/出气管旁支、空滤器谐振腔）使用内置公式时需要 ψ、δ_in */
+const anyHelmholtzBuiltIn: ShowIf = {
+  any: [
+    ...Array.from({ length: SEG_MAX }, (_, k) => {
+      const i = k + 1;
+      return [
+        { key: 'nIn', min: i },
+        { key: `br${i}`, min: 2, max: 2 },
+        { key: `hbMode${i}`, min: 0, max: 0 },
+      ];
+    }),
+    ...Array.from({ length: SEG_MAX }, (_, k) => {
+      const i = k + 1;
+      return [
+        { key: 'nOut', min: i },
+        { key: `bro${i}`, min: 2, max: 2 },
+        { key: `hbModeO${i}`, min: 0, max: 0 },
+      ];
+    }),
+    [
+      { key: 'hOn', min: 1, max: 1 },
+      { key: 'hbModeBox', min: 0, max: 0 },
+    ],
+  ],
+};
+/** 任一出气管段为多腔穿孔消音器时需要 M1、R0 */
+const anyMultiCavity: ShowIf = {
+  any: Array.from({ length: SEG_MAX }, (_, k) => {
+    const i = k + 1;
+    return [
+      { key: 'nOut', min: i },
+      { key: `o${i}`, min: 3, max: 3 },
+    ];
+  }),
+};
+
 const jcaInputs: ParamSpec[] = [
-  { key: 'sigmaF', label: '编织壁流阻率', symbol: 'σ_f', unit: 'Pa·s/m²', default: 240000, min: 0, required: true, description: 'JCA 五参数之一（式9/10）；建议取值 σ_f = 240 kPa·s/m²，即 240000 Pa·s/m²' },
-  { key: 'phiJ', label: '编织壁孔隙率', symbol: 'φ', unit: '-', unitGroup: 'dimensionless', default: 0.35, min: 0, max: 1, required: true, description: 'JCA 孔隙率 φ，建议取值 0.35' },
-  { key: 'alphaInf', label: '编织壁曲折度', symbol: 'α∞', unit: '-', unitGroup: 'dimensionless', default: 2.5, min: 1, required: true, description: 'JCA 高频曲折度 α∞，建议取值 2.5' },
-  { key: 'lambdaV', label: '编织壁黏性特征长度', symbol: 'Λ', unit: 'mm', unitGroup: 'length', default: 0.027, min: 0, required: true, description: 'JCA 黏性特征长度 Λ，建议取值 0.027 mm（27 μm）' },
-  { key: 'lambdaT', label: '编织壁热特征长度', symbol: 'Λ′', unit: 'mm', unitGroup: 'length', default: 0.054, min: 0, required: true, description: 'JCA 热特征长度 Λ′，建议取值 0.054 mm（54 μm）' },
+  { key: 'sigmaF', label: '编织壁流阻率', symbol: 'σ_f', unit: 'Pa·s/m²', default: 240000, min: 0, required: true, showIf: anyWovenJca, description: 'JCA 五参数之一（式9/10）；建议取值 σ_f = 240 kPa·s/m²，即 240000 Pa·s/m²' },
+  { key: 'phiJ', label: '编织壁孔隙率', symbol: 'φ', unit: '-', unitGroup: 'dimensionless', default: 0.35, min: 0, max: 1, required: true, showIf: anyWovenJca, description: 'JCA 孔隙率 φ，建议取值 0.35' },
+  { key: 'alphaInf', label: '编织壁曲折度', symbol: 'α∞', unit: '-', unitGroup: 'dimensionless', default: 2.5, min: 1, required: true, showIf: anyWovenJca, description: 'JCA 高频曲折度 α∞，建议取值 2.5' },
+  { key: 'lambdaV', label: '编织壁黏性特征长度', symbol: 'Λ', unit: 'mm', unitGroup: 'length', default: 0.027, min: 0, required: true, showIf: anyWovenJca, description: 'JCA 黏性特征长度 Λ，建议取值 0.027 mm（27 μm）' },
+  { key: 'lambdaT', label: '编织壁热特征长度', symbol: 'Λ′', unit: 'mm', unitGroup: 'length', default: 0.054, min: 0, required: true, showIf: anyWovenJca, description: 'JCA 热特征长度 Λ′，建议取值 0.054 mm（54 μm）' },
+  { key: 'fpBraid', label: '编织壁孔隙度 f_p', symbol: 'f_p', unit: 'Hz', default: 1400, min: 0, required: true, showIf: anyWovenPorosity, description: '孔隙度壁面模型（默认）的特性频率：按式(4.1) 由静态压降-流量确定，实测样件 1400 Hz；与「编织管消音器」公式同参数口径；JCA 对照模型不使用' },
 ];
 
 const filterInputs: ParamSpec[] = [
@@ -538,6 +741,16 @@ const filterInputs: ParamSpec[] = [
   { key: 'alphaFil', label: '滤材曲折度', symbol: 'α∞,f', unit: '-', unitGroup: 'dimensionless', default: 1.5, min: 1, required: true, description: '滤材曲折度，纤维滤材通常 1.2~2.0' },
   { key: 'lambdaVFil', label: '滤材黏性特征长度', symbol: 'Λ_f', unit: 'mm', unitGroup: 'length', default: 0.1, min: 0, required: true, description: '滤材黏性特征长度，建议按滤材纤维直径与孔隙结构取值' },
   { key: 'lambdaTFil', label: '滤材热特征长度', symbol: 'Λ′_f', unit: 'mm', unitGroup: 'length', default: 0.2, min: 0, required: true, description: '滤材热特征长度，通常约为 Λ_f 的 2 倍' },
+];
+
+/**
+ * 赫姆霍兹端部修正口径（与 acoustics.muffler.helmholtz 的 V3 公式统一）：
+ *   Leff = l_n + ψ·d_n + δ_in
+ * 所有赫姆霍兹元件（进气管旁支、出气管旁支、空滤器谐振腔）共用同一组系数。
+ */
+const hbCalibInputs: ParamSpec[] = [
+  { key: 'psiH', label: '赫姆霍兹外端修正系数 ψ（管道旁支 0.75 / 自由场 flanged 0.85）', symbol: 'ψ', unit: '—', default: 0.75, min: 0.3, max: 1.2, showIf: anyHelmholtzBuiltIn, group: SEC_HBC, description: 'δ_out = ψ·d_n，全系统赫姆霍兹元件共用。默认 0.75：颈部开在管壁/有限壁面上（管道旁支）取 0.75；四周为无限大障板、向自由半空间辐射时取 0.85；仅「内置公式」模式使用' },
+  { key: 'deltaInH', label: '赫姆霍兹内端修正 δ_in', symbol: 'δ_in', unit: 'mm', unitGroup: 'length', default: 0, min: 0, showIf: anyHelmholtzBuiltIn, group: SEC_HBC, description: '内端辐射修正，Leff = l_n + ψ·d_n + δ_in；默认 0，严格值需试验或三维声学标定（通常 0~0.6d_n 量级）；仅「内置公式」模式使用' },
 ];
 
 const outputList: OutputSpec[] = [
@@ -565,7 +778,7 @@ const outputList: OutputSpec[] = [
   { key: 'fcMode1', label: '腔体一阶高阶模态截止频率', symbol: 'f_c,1', unit: 'Hz', digits: 3, group: '膨胀腔高频特性', description: 'fc,1 = 1.84c/(πD_chamber)（式24f）；频率超过该值后平面波假设失效，需用三维模型或实测' },
   { key: 'fcDuct', label: '最细管段一阶高阶模态截止频率', symbol: 'f_c,duct', unit: 'Hz', digits: 3, group: '膨胀腔高频特性', description: 'fc = 1.84c/(πD_min)（式6d，D_min 为各管段进出口内径的最小值）；渐变管按最小直径校核平面波假设，超过该频率后应改用三维模型或实测' },
 
-  { key: 'fH', label: '亥姆霍兹谐振频率', symbol: 'f_0', unit: 'Hz', digits: 3, group: '谐振频率', showIf: { key: 'hOn', min: 1, max: 1 }, description: 'f0 = (c/2π)·[An/(V·Leff)]^(1/2)，Leff = ln + 0.85dn（式22）' },
+  { key: 'fH', label: '亥姆霍兹谐振频率', symbol: 'f_0', unit: 'Hz', digits: 3, group: '谐振频率', showIf: { key: 'hOn', min: 1, max: 1 }, description: 'f0 = (c/2π)·[An/(V·Leff)]^(1/2)，Leff = ln + ψdn + δin（ψ 默认 0.75；已发布 H1 标定时以 δ_total 替换端部修正）' },
   { key: 'fQ', label: '四分之一波长首阶频率', symbol: 'f_q', unit: 'Hz', digits: 3, group: '谐振频率', showIf: { key: 'qOn', min: 1, max: 1 }, description: 'fq = (2k−1)·c/(4L)，k=1,2,…；结果为首阶 c/(4L)（式23）' },
 ];
 
@@ -611,16 +824,16 @@ for (let i = 1; i <= SEG_MAX; i++) {
 
 export const intakeSystemTransmissionLoss: FormulaSpec = {
   id: 'acoustics.intakeSystemTransmissionLoss',
-  version: '1.0.0',
+  version: '1.3.0',
   status: 'published',
   domain: 'acoustics',
   subsystem: '进气系统',
   title: '★进气系统传递损失设计',
   summary:
     '按「系统组成 → 参数 → 公式」组织：输入区最前先由操作者选择进气管与出气管的分段数（各 1~5 段），再按「进气管 1…nIn + 空滤器 + 出气管 1…nOut」逐件组建，每段选定管型，并在同段选择是否加装旁支消音器（无 / 四分之一波长管 / 亥姆霍兹消音器，默认无），选定后紧接着选择数量 1/2/3…；超出所选段数的管段，其管型、旁支、几何参数与专用公式自动隐藏，其余几何参数与公式区只按所选组成展开。每个管段按进口/出口内径建模，两者不同时按渐变管离散（式6b/6c）。模型按四端参数（传递矩阵）级联，输出系统传递损失 TL 曲线与各分部件平均 TL。',
-  tags: ['进气系统', '传递损失', 'TL', 'NVH', '声学', '进气管', '波纹管', '编织管', 'JCA', '空气滤清器', '滤芯', '膨胀腔', '亥姆霍兹', '四分之一波长', '多腔', '穿孔', '消音器', '传递矩阵', '四端参数', '高频共振', '峰谷频率', '高阶模态', '渐变管', '锥形管', '进出口直径'],
+  tags: ['进气系统', '传递损失', 'TL', 'NVH', '声学', '进气管', '波纹管', '编织管', '孔隙度', 'JCA', '空气滤清器', '滤芯', '膨胀腔', '亥姆霍兹', '四分之一波长', '多腔', '穿孔', '消音器', '传递矩阵', '四端参数', '高频共振', '峰谷频率', '高阶模态', '渐变管', '锥形管', '进出口直径'],
   description:
-    '输入区最前为「系统组成」：先选择进气管与出气管的分段数（各 1~5 段），再按「进气管 1…nIn + 空滤器 + 出气管 1…nOut」逐件组建，每段先选管型，再在同一段选择旁支消音器（无 / 四分之一波长管 / 亥姆霍兹消音器，默认无），选定后紧接数量选择 1/2/3…；空滤器单独选择是否设谐振腔与支管。超出所选段数的管段不显示管型、旁支与几何参数，其专用公式也不出现；选定旁支后，下方几何参数区立即展开该元件所需参数，公式区同步显示对应旁支公式；未选中的元件不出现参数、也不显示公式。每个管段分别给出进口内径 D_in 与出口内径 D_out：两者不同时按 Webster 方程（式6a）离散为 N 段圆柱（D_i = D_in + (D_out − D_in)(i − 0.5)/N，式6b），逐段建立传递矩阵并按局部截面突变级联（式6c）；离散满足 N ≥ 10 且 ΔL ≤ λ_min/10 时与精确锥形管理论误差 < 1 dB，D_in = D_out 时退化为等截面直管（式6）。数量为 N 时，在该段下游端按集中元件并联接入 N 个相同旁支（等效归一化阻抗 ζb/N，传递矩阵 [1, 0; N/ζb, 1]）。传递损失 TL 是消音元件入射声功率与透射声功率之比，只与元件本身有关，与声源和末端反射无关（式1）。本公式统一采用 [p, ρcu] 状态变量（Z0 = 1），按四端参数逐段建立 2×2 传递矩阵并级联：等截面直管 T = [cos(kL), jsin(kL); jsin(kL), cos(kL)]，截面突变 T = [1, 0; 0, Sd/Su]；系统总矩阵 Tsys = Tin·Tbellows·Tbraid·Tairbox·Tmuffler·Tout，最后按 TL = 20lg(|T11+T12+T21+T22|/2) + 10lg(Sin/Sout) 求得（式3 与式33 的面积修正）。进气管侧每段可选进气管（纯直管）、波纹管（按「一串短膨胀腔」逐波节级联，mw = (D+2h)²/D²，单节 TLw = 10lg[1 + 0.25(mw−1/mw)²sin²(kw)]）或编织管（Johnson-Champoux-Allard 等效流体模型：五参数 → ρeq、Keq → Zc、kc → 壁面阻抗 ζw = Rw + jXw → 衰减系数 α = (2/D)·Rw/(Rw²+Xw²) → TL ≈ 8.686·α·L；系统级联时按复波数 kx = k0 − jα 处理）。空滤器按「膨胀腔 + 滤芯 + 可选谐振腔/四分之一波长支管」建模：膨胀腔 TLexp = 10lg[1 + 0.25(m−1/m)²sin²(kL)]（式21，与传递矩阵解严格等价），滤芯按 JCA 多孔层传递矩阵 Tlayer = [cos(kct), jZcsin(kct); jsin(kct)/Zc, cos(kct)]，亥姆霍兹 f0 = (c/2π)[An/(V·Leff)]^(1/2)（Leff = ln + 0.85dn），四分之一波长 fq = (2k−1)c/(4L) 按支管传递矩阵并联接入。出气管侧每段可选普通出气管、波纹管或 Sullivan-Crocker 多腔穿孔消音器（σ = nh·dh²/(4·din·Lc)、ξ = R0 + jk0(tw + α0dh)、4×4 系统矩阵 A → Φ = exp(A·Lc) → 单腔 Tcav → 逐腔串联）。结果区给出系统平均/峰值 TL、250/500/1000/1500 Hz 固定频点 TL、各分部件平均 TL、谐振频率，并按第 6.5 节输出膨胀腔高频峰谷频率、峰值/高频平均 TL 与一阶高阶模态截止频率（fmax,n = (2n−1)c/(4L)、fmin,n = n·c/(2L)、TLmax = 10lg[1+0.25(m−1/m)²]、TLavg = 10lg[1+0.125(m−1/m)²]、fc,1 = 1.84c/(πD)，式24a~24f），同时绘制系统 TL - Frequency 曲线。高频峰来自腔长与波长的干涉：多腔宜错开长度、腔长公差建议 ±2%、按 1/3 倍频程平均评价。选定管型后输入区只显示该元件需要的参数，公式区同步切换为该元件的专用公式。',
+    '输入区最前为「系统组成」：先选择进气管与出气管的分段数（各 1~5 段），再按「进气管 1…nIn + 空滤器 + 出气管 1…nOut」逐件组建，每段先选管型，再在同一段选择旁支消音器（无 / 四分之一波长管 / 亥姆霍兹消音器，默认无），选定后紧接数量选择 1/2/3…；空滤器单独选择是否设谐振腔与支管。超出所选段数的管段不显示管型、旁支与几何参数，其专用公式也不出现；选定旁支后，下方几何参数区立即展开该元件所需参数，公式区同步显示对应旁支公式；未选中的元件不出现参数、也不显示公式。每个管段分别给出进口内径 D_in 与出口内径 D_out：两者不同时按 Webster 方程（式6a）离散为 N 段圆柱（D_i = D_in + (D_out − D_in)(i − 0.5)/N，式6b），逐段建立传递矩阵并按局部截面突变级联（式6c）；离散满足 N ≥ 10 且 ΔL ≤ λ_min/10 时与精确锥形管理论误差 < 1 dB，D_in = D_out 时退化为等截面直管（式6）。数量为 N 时，在该段下游端按集中元件并联接入 N 个相同旁支（等效归一化阻抗 ζb/N，传递矩阵 [1, 0; N/ζb, 1]）。传递损失 TL 是消音元件入射声功率与透射声功率之比，只与元件本身有关，与声源和末端反射无关（式1）。本公式统一采用 [p, ρcu] 状态变量（Z0 = 1），按四端参数逐段建立 2×2 传递矩阵并级联：等截面直管 T = [cos(kL), jsin(kL); jsin(kL), cos(kL)]，截面突变 T = [1, 0; 0, Sd/Su]；系统总矩阵 Tsys = Tin·Tbellows·Tbraid·Tairbox·Tmuffler·Tout，最后按 TL = 20lg(|T11+T12+T21+T22|/2) + 10lg(Sin/Sout) 求得（式3 与式33 的面积修正）。进气管侧每段可选进气管（纯直管）、波纹管（按「一串短膨胀腔」逐波节级联，mw = (D+2h)²/D²，单节 TLw = 10lg[1 + 0.25(mw−1/mw)²sin²(kw)]）或编织管（默认孔隙度壁面模型，与「编织管消音器」公式同源：孔径 D、壁厚 t 与孔隙度 f_p → 壁面阻抗 ζw → 壁面路径与并联泄漏路径的总 TL → 等效衰减 α = TL/(8.686·L)，系统级联按 kx = k0 − jα 处理；可选 JCA 五参数对照模型（五参数 → ρeq、Keq → Zc、kc → 壁面阻抗 ζw = Rw + jXw → α = (2/D)·Rw/(Rw²+Xw²)），或调用已保存的编织管计算记录）。空滤器按「膨胀腔 + 滤芯 + 可选谐振腔/四分之一波长支管」建模：膨胀腔 TLexp = 10lg[1 + 0.25(m−1/m)²sin²(kL)]（式21，与传递矩阵解严格等价），滤芯按 JCA 多孔层传递矩阵 Tlayer = [cos(kct), jZcsin(kct); jsin(kct)/Zc, cos(kct)]，亥姆霍兹 f0 = (c/2π)[An/(V·Leff)]^(1/2)（Leff = l_n + ψd_n + δ_in，ψ 默认 0.85，与赫姆霍兹 V3 公式口径统一，已发布 H1 标定时以 δ_total 替换），四分之一波长 fq = (2k−1)c/(4L) 按支管传递矩阵并联接入。出气管侧每段可选普通出气管、波纹管或 Sullivan-Crocker 多腔穿孔消音器（σ = nh·dh²/(4·din·Lc)、ξ = R0 + jk0(tw + α0dh)、4×4 系统矩阵 A → Φ = exp(A·Lc) → 单腔 Tcav → 逐腔串联）。结果区给出系统平均/峰值 TL、250/500/1000/1500 Hz 固定频点 TL、各分部件平均 TL、谐振频率，并按第 6.5 节输出膨胀腔高频峰谷频率、峰值/高频平均 TL 与一阶高阶模态截止频率（fmax,n = (2n−1)c/(4L)、fmin,n = n·c/(2L)、TLmax = 10lg[1+0.25(m−1/m)²]、TLavg = 10lg[1+0.125(m−1/m)²]、fc,1 = 1.84c/(πD)，式24a~24f），同时绘制系统 TL - Frequency 曲线。高频峰来自腔长与波长的干涉：多腔宜错开长度、腔长公差建议 ±2%、按 1/3 倍频程平均评价。选定管型后输入区只显示该元件需要的参数，公式区同步切换为该元件的专用公式。',
   inputs: [
     ...compInputs,
 
@@ -633,8 +846,8 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     { key: 'nPr', label: '空气普朗特数', symbol: 'N_pr', unit: '-', unitGroup: 'dimensionless', default: 0.71, min: 0, required: true, group: SEC_MED, description: '常温空气约 0.71，用于 JCA 热损耗项（式11）' },
     { key: 'gam', label: '比热比', symbol: 'γ', unit: '-', unitGroup: 'dimensionless', default: 1.4, min: 0, required: true, group: SEC_MED, description: '空气比热比，常温取 1.4' },
     { key: 'pAtm', label: '大气压力', symbol: 'P_0', unit: 'Pa', unitGroup: 'pressure', default: 101325, min: 0, required: true, group: SEC_MED, description: '用于 Keq = γP0/[γ − (γ−1)A]（式10）' },
-    { key: 'M1', label: '主管马赫数（多腔消音器）', symbol: 'M1', unit: '-', unitGroup: 'dimensionless', default: 0, min: 0, max: 0.15, required: true, group: SEC_MED, description: '仅多腔穿孔消音器使用：0 表示无气流（式25/26）；有气流时按 CG 修正（式26/28）' },
-    { key: 'R0', label: '穿孔阻性常数（多腔消音器）', symbol: 'R_0', unit: '-', unitGroup: 'dimensionless', default: 0.0055, min: 0, required: true, group: SEC_MED, description: '仅多腔穿孔消音器使用：ξ 的实部，建议取值 0.0055（±20%）' },
+    { key: 'M1', label: '主管马赫数（多腔消音器）', symbol: 'M1', unit: '-', unitGroup: 'dimensionless', default: 0, min: 0, max: 0.15, required: true, showIf: anyMultiCavity, group: SEC_MED, description: '仅多腔穿孔消音器使用：0 表示无气流（式25/26）；有气流时按 CG 修正（式26/28）' },
+    { key: 'R0', label: '穿孔阻性常数（多腔消音器）', symbol: 'R_0', unit: '-', unitGroup: 'dimensionless', default: 0.0055, min: 0, required: true, showIf: anyMultiCavity, group: SEC_MED, description: '仅多腔穿孔消音器使用：ξ 的实部，建议取值 0.0055（±20%）' },
 
     ...withGroup(inInputs, SEC_IN),
 
@@ -642,14 +855,21 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     { key: 'dBoxOut', label: '空滤器出口管直径', symbol: 'd_box,out', unit: 'mm', unitGroup: 'diameter', default: 60, min: 0, required: true, group: SEC_BOX, description: '膨胀腔出口管直径，可与进口不同；膨胀腔到出口管按截面突变（式5）接入' },
     { key: 'dBoxCh', label: '空滤器腔体直径', symbol: 'D_chamber', unit: 'mm', unitGroup: 'diameter', default: 200, min: 0, required: true, group: SEC_BOX, description: '膨胀腔腔体直径，须不小于进出口管直径' },
     { key: 'LBox', label: '空滤器腔体长度', symbol: 'L_airbox', unit: 'mm', unitGroup: 'length', default: 300, min: 0, required: true, group: SEC_BOX, description: '膨胀腔有效长度，决定 TL 峰值位置 f ≈ (2n−1)c/(4L)' },
-    { key: 'Vh', label: '谐振腔容积', symbol: 'V', unit: 'L', unitGroup: 'volume', default: 0.5, min: 0, showIf: { key: 'hOn', min: 1, max: 1 }, group: SEC_BOX, description: '仅谐振腔需要：腔体容积 V，示例 0.5 L = 5×10⁻⁴ m³' },
-    { key: 'ln', label: '谐振腔颈长', symbol: 'l_n', unit: 'mm', unitGroup: 'length', default: 30, min: 0, showIf: { key: 'hOn', min: 1, max: 1 }, group: SEC_BOX, description: '仅谐振腔需要：颈口长度 l_n，Leff = l_n + 0.85d_n' },
-    { key: 'dn', label: '谐振腔颈径', symbol: 'd_n', unit: 'mm', unitGroup: 'diameter', default: 20, min: 0, showIf: { key: 'hOn', min: 1, max: 1 }, group: SEC_BOX, description: '仅谐振腔需要：颈口直径 d_n，An = πd_n²/4' },
+    { key: 'Vh', label: '谐振腔容积', symbol: 'V', unit: 'L', unitGroup: 'volume', default: 0.5, min: 0, showIf: [{ key: 'hOn', min: 1, max: 1 }, { key: 'hbModeBox', max: 0 }], group: SEC_BOX, description: '仅谐振腔且数据来源为「内置公式」时需要：腔体容积 V，示例 0.5 L = 5×10⁻⁴ m³' },
+    { key: 'ln', label: '谐振腔颈长', symbol: 'l_n', unit: 'mm', unitGroup: 'length', default: 30, min: 0, showIf: [{ key: 'hOn', min: 1, max: 1 }, { key: 'hbModeBox', max: 0 }], group: SEC_BOX, description: '仅谐振腔且数据来源为「内置公式」时需要：颈口长度 l_n，Leff = l_n + ψd_n + δ_in（ψ 默认 0.75）' },
+    { key: 'dn', label: '谐振腔颈径', symbol: 'd_n', unit: 'mm', unitGroup: 'diameter', default: 20, min: 0, showIf: [{ key: 'hOn', min: 1, max: 1 }, { key: 'hbModeBox', max: 0 }], group: SEC_BOX, description: '仅谐振腔且数据来源为「内置公式」时需要：颈口直径 d_n，An = πd_n²/4' },
+    ...hbRefInputs(
+      { mode: 'hbModeBox', ref: 'hbRefBox', L: 'hbRefLBox', A: 'hbRefABox', V: 'hbRefVBox' },
+      '空滤器谐振腔',
+      [{ key: 'hOn', min: 1, max: 1 }],
+    ).map((p) => ({ ...p, group: SEC_BOX })),
     { key: 'Lq', label: '支管长度', symbol: 'L_b', unit: 'mm', unitGroup: 'length', default: 400, min: 0, showIf: { key: 'qOn', min: 1, max: 1 }, group: SEC_BOX, description: '仅四分之一波长支管需要：支管长度 L_b' },
     { key: 'dq', label: '支管直径', symbol: 'd_b', unit: 'mm', unitGroup: 'diameter', default: 35, min: 0, showIf: { key: 'qOn', min: 1, max: 1 }, group: SEC_BOX, description: '仅四分之一波长支管需要：支管直径 d_b，Sb = πd_b²/4' },
     ...withGroup(filterInputs, SEC_FIL),
 
     ...withGroup(outInputs, SEC_OUT),
+
+    ...hbCalibInputs,
   ],
   outputs: outputList,
   diagram: INTAKE_TL_DIAGRAM,
@@ -666,7 +886,7 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     { label: '膨胀腔峰谷频率与峰值（式24a~24d）', tex: '\\lambda=\\frac{c}{f},\\quad kL=\\frac{2\\pi L}{\\lambda},\\qquad f_{min,n}=\\frac{nc}{2L},\\quad f_{max,n}=\\frac{(2n-1)c}{4L},\\quad TL_{max}=10\\lg\\left[1+0.25\\left(m-\\frac{1}{m}\\right)^2\\right]' },
     { label: '膨胀腔高频平均与高阶模态截止（式24e/24f）', tex: 'TL_{avg}=10\\lg\\left[1+0.125\\left(m-\\frac{1}{m}\\right)^2\\right],\\qquad f_{c,1}=\\frac{1.84c}{\\pi D}' },
     { label: '滤芯多孔层（JCA + 传递矩阵，式13）', tex: 'T_{layer} = \\begin{bmatrix}\\cos(k_c t_f) & jZ_c\\sin(k_c t_f)\\\\ j\\sin(k_c t_f)/Z_c & \\cos(k_c t_f)\\end{bmatrix}' },
-    { label: '亥姆霍兹谐振腔（式22）', tex: 'f_0 = \\frac{c}{2\\pi}\\sqrt{\\frac{A_n}{V L_{eff}}},\\qquad L_{eff}=l_n+0.85d_n', showIf: { key: 'hOn', min: 1, max: 1 } },
+    { label: '亥姆霍兹谐振腔（式22，端部修正与 V3 口径统一）', tex: 'f_0 = \\frac{c}{2\\pi}\\sqrt{\\frac{A_n}{V L_{eff}}},\\qquad L_{eff}=l_n+\\psi d_n+\\delta_{in}\\quad(\\psi\\text{ 默认 }0.75;\\ \\text{已发布 H1 标定时 }L_{eff}=l_n+\\delta_{total})', showIf: { key: 'hOn', min: 1, max: 1 } },
     { label: '四分之一波长支管（式23/24）', tex: 'f_q = \\frac{(2k-1)c}{4L},\\qquad TL_{branch} = 20\\lg\\left|1+\\frac{S_p}{2S_b\\zeta_b}\\right|', showIf: { key: 'qOn', min: 1, max: 1 } },
     ...branchLatex,
     { label: '波纹管逐波节级联（式8）', tex: 'N_w = \\mathrm{round}(L/w),\\qquad T_{node} = T_{area}(m_w)\\,T_{duct}(w)\\,T_{area}(1/m_w)' },
@@ -696,6 +916,9 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     '进气管与出气管的分段数（各 1~5 段）由操作者在「系统组成」中选定：只对前 nIn / nOut 段建模，超出段数的段不参与计算；各段管型（进气管/波纹管/编织管、出气管/波纹管/多腔穿孔消音器）与旁支类型逐段独立选择，参数区与公式区随选择展开',
     '旁支只并入所在管段的段矩阵（系统 TL 与 tlInAvg/tlOutAvg），不改变编织管、波纹管、多腔消音器与空滤器总分部件的独立平均，便于把旁支贡献与本体贡献分开评估',
     '亥姆霍兹与四分之一波长支管按并联支管传递矩阵 [1,0; 1/ζb, 1] 接入，ζb 为支管输入阻抗相对主管特性阻抗的归一化值；支管共振频点上 ζb → 0，TL 出现理论峰值，采样点未落在共振频率时峰值会略低',
+    '赫姆霍兹端部修正与 acoustics.muffler.helmholtz（V3）统一口径：Leff = l_n + ψ·d_n + δ_in，ψ 默认 0.85（flanged 带障板/法兰 0.85、unflanged 无障板自由端 0.75），全系统所有赫姆霍兹元件共用该组系数；若在赫姆霍兹公式中已发布 H1 标定（δ_total），本公式自动以 δ_total 替换端部修正项（δin 不再叠加）；H2 的偏心/开孔耦合项在旁支集中参数模型中无对应几何，仅取 C0 项；旁支模型不含插入深度，故不区分净/毛腔口径',
+    '赫姆霍兹旁支数据来源可选「内置公式」或「调用赫姆霍兹记录」：后者使用「赫姆霍兹消音器」公式页面保存的计算记录，按该公式的完整口径（ψ、δ_in、净/毛腔、H1/H2 标定、最小流通面积等）算出等效长度/流通面积/腔容积后接入旁支；记录参数在保存本公式计算记录时以快照（引用等效长度/流通面积/腔容积）固化，可复现；下拉只列当前用户自己的记录；若引用的记录已被删除，自动回退为内置公式并提示；两种模式都不含赫姆霍兹本体的腔体模态、壳体耦合与薄壁小孔移频（那些只在赫姆霍兹公式的 TL 曲线中体现）',
+    '编织管段模型三选一：孔隙度壁面模型（默认，与「编织管消音器」公式同源，按全局 f_p 与壁厚算壁面阻抗，再由壁面路径与并联泄漏路径的总 TL 反算等效衰减重建管段矩阵）、JCA 五参数模型（对照，按式9~18）、调用编织管记录（使用记录中的 f_p 与介质参数，孔径/长度仍取本段几何）；调用记录模式在记录失效时回退默认孔隙度模型；三者均按等效均匀管处理，渐变段按子段长度与直径分别计算后级联，不保留壁面阻抗引起的局部反射细节',
     '多腔穿孔消音器按 Sullivan-Crocker / Munjal 一维耦合模型：σ = nh·dh²/(4·din·Lc)、ξ = R0 + jk0(tw + α0dh)、4×4 矩阵 A → Φ = exp(A·Lc) → Tcav → 逐腔串联（式25~31）；R0 默认 0.0055 为建议取值，未用实测校核，结果仅供参考',
     '多腔消音器的孔口是声学耦合，不是流阻；声学 TL 与流动阻力应分开计算（阻力见 fluid.intakeSystemResistance）',
     '多腔穿孔消音器在本模型下呈带通特性：约 2 kHz 以下 TL 接近 0，峰值出现在 2~3 kHz（与既有 acoustics.muffler.multiCavity 公式为同一实现、同一结论）；因此 20~2000 Hz 频带内 tlSilAvg 接近 0 属模型特性而非漏算，评估消音器效果应在含峰值的频段内取平均',
@@ -726,6 +949,40 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     // 分段数由操作者选择：仅校验已启用段（i ≤ nIn / nOut），超出段数的参数不参与计算
     const nIn = Math.round(v.nIn ?? 3);
     const nOut = Math.round(v.nOut ?? 3);
+
+    // 赫姆霍兹端部修正：与 acoustics.muffler.helmholtz（V3）统一口径
+    //   默认 Leff = l_n + ψ·d_n + δ_in；
+    //   若已发布 H1 标定（δ_total），直接替代端部修正；H2 的偏心/开孔项在旁支无对应几何，仅取 C0 项
+    const hCalib = getActiveHelmholtzCalib();
+    const psiH = Number.isFinite(v.psiH) ? v.psiH : 0.75;
+    const dinH = Number.isFinite(v.deltaInH) ? v.deltaInH : 0;
+    /** 赫姆霍兹颈口端部修正（Leff − l_n），单位 m */
+    const hEndCorr = (dn: number): number => {
+      const dt = hCalib.deltaTotal;
+      if (dt !== undefined && Number.isFinite(dt)) return dt;
+      const c0 = hCalib.C0;
+      if (c0 !== undefined && Number.isFinite(c0)) return c0 * dn;
+      return psiH * dn + dinH;
+    };
+
+    /**
+     * 旁支声学参数：数据来源为「调用赫姆霍兹记录」且快照有效时，用记录派生值
+     * （Leff / 流通面积 / 腔容积）；否则回退内置公式（ψ·d_n + δ_in）。
+     */
+    const hbParams = (
+      mode: number,
+      snapL: number,
+      snapA: number,
+      snapV: number,
+      V: number,
+      ln: number,
+      dn: number,
+    ): { leff: number; an: number; vol: number } => {
+      if (Math.round(mode ?? 0) === 1 && snapL > 0 && snapA > 0 && snapV > 0) {
+        return { leff: snapL, an: snapA, vol: snapV };
+      }
+      return { leff: ln + hEndCorr(dn), an: area(dn), vol: V };
+    };
     if (!(nIn >= 1 && nIn <= SEG_MAX) || !(nOut >= 1 && nOut <= SEG_MAX)) return empty;
 
     for (let i = 1; i <= nIn; i++) {
@@ -736,7 +993,8 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       const brN = Math.round(v[`brN${i}`] ?? 0);
       if (!(br >= 0 && br <= 2)) return empty;
       if (br > 0 && !(brN >= 1 && brN <= 6)) return empty;
-      if (br === 2 && (!pos(v[`hbV${i}`]) || !nn(v[`hbLn${i}`]) || !pos(v[`hbDn${i}`]))) return empty;
+      if (br === 2 && Math.round(v[`hbMode${i}`] ?? 0) === 0 &&
+          (!pos(v[`hbV${i}`]) || !nn(v[`hbLn${i}`]) || !pos(v[`hbDn${i}`]))) return empty;
       if (br === 1 && (!pos(v[`qwL${i}`]) || !pos(v[`qwD${i}`]))) return empty;
     }
     for (let i = 1; i <= nOut; i++) {
@@ -753,14 +1011,16 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       const broN = Math.round(v[`broN${i}`] ?? 0);
       if (!(bro >= 0 && bro <= 2)) return empty;
       if (bro > 0 && !(broN >= 1 && broN <= 6)) return empty;
-      if (bro === 2 && (!pos(v[`hbVo${i}`]) || !nn(v[`hbLno${i}`]) || !pos(v[`hbDno${i}`]))) return empty;
+      if (bro === 2 && Math.round(v[`hbModeO${i}`] ?? 0) === 0 &&
+          (!pos(v[`hbVo${i}`]) || !nn(v[`hbLno${i}`]) || !pos(v[`hbDno${i}`]))) return empty;
       if (bro === 1 && (!pos(v[`qwLo${i}`]) || !pos(v[`qwDo${i}`]))) return empty;
     }
 
     const dBOut = v.dBoxOut ?? v.dBoxIn;
     if (!pos(v.dBoxIn) || !pos(dBOut) || !(v.dBoxCh >= v.dBoxIn) || !(v.dBoxCh >= dBOut) || !nn(v.LBox)) return empty;
     if (!(v.hOn === 0 || v.hOn === 1) || !(v.qOn === 0 || v.qOn === 1)) return empty;
-    if (v.hOn === 1 && (!pos(v.Vh) || !nn(v.ln) || !pos(v.dn))) return empty;
+    if (v.hOn === 1 && Math.round(v.hbModeBox ?? 0) === 0 &&
+        (!pos(v.Vh) || !nn(v.ln) || !pos(v.dn))) return empty;
     if (v.qOn === 1 && (!pos(v.Lq) || !pos(v.dq))) return empty;
     if (!nn(v.tFil) || !pos(v.sigmaFil) || !pos(v.phiFil) || !(v.alphaFil >= 1) || !pos(v.lambdaVFil) || !pos(v.lambdaTFil)) return empty;
 
@@ -801,12 +1061,15 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       return [[cx(1), cx(0)], [inv, cx(1)]];
     };
 
-    /** 亥姆霍兹旁支：ζb = j[ωρ0Leff/An − ρ0c0²/(ωV)]·S/(ρ0c0)（式22） */
-    const helmholtzBranch = (f: number, S: number, V: number, ln: number, dn: number, n: number): Cx[][] => {
+    /** 亥姆霍兹旁支：ζb = j[ωρ0Leff/An − ρ0c0²/(ωV)]·S/(ρ0c0)（式22）；参数可由记录快照覆盖 */
+    const helmholtzBranch = (
+      f: number,
+      S: number,
+      p: { leff: number; an: number; vol: number },
+      n: number,
+    ): Cx[][] => {
       const w = 2 * Math.PI * f;
-      const an = area(dn);
-      const leff = ln + 0.85 * dn;
-      const zb: Cx = [0, (w * v.rho0 * leff) / an - (v.rho0 * c * c) / (w * V)];
+      const zb: Cx = [0, (w * v.rho0 * p.leff) / p.an - (v.rho0 * c * c) / (w * p.vol)];
       return branchMat(cMul(zb, cx(S / (v.rho0 * c))), n);
     };
 
@@ -827,7 +1090,10 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       let T = eye2();
       const br = Math.round(v[`br${i}`] ?? 0);
       const brN = Math.round(v[`brN${i}`] ?? 0);
-      if (br === 2 && brN > 0) T = matMul(T, helmholtzBranch(f, S, v[`hbV${i}`], v[`hbLn${i}`], v[`hbDn${i}`], brN));
+      if (br === 2 && brN > 0) {
+        const bp = hbParams(v[`hbMode${i}`], v[`hbRefL${i}`], v[`hbRefA${i}`], v[`hbRefV${i}`], v[`hbV${i}`], v[`hbLn${i}`], v[`hbDn${i}`]);
+        T = matMul(T, helmholtzBranch(f, S, bp, brN));
+      }
       if (br === 1 && brN > 0) T = matMul(T, quarterBranch(k0, S, area(v[`qwD${i}`]), v[`qwL${i}`], brN));
       return T;
     };
@@ -840,7 +1106,10 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       let T = eye2();
       const bro = Math.round(v[`bro${i}`] ?? 0);
       const broN = Math.round(v[`broN${i}`] ?? 0);
-      if (bro === 2 && broN > 0) T = matMul(T, helmholtzBranch(f, S, v[`hbVo${i}`], v[`hbLno${i}`], v[`hbDno${i}`], broN));
+      if (bro === 2 && broN > 0) {
+        const bp = hbParams(v[`hbModeO${i}`], v[`hbRefLO${i}`], v[`hbRefAO${i}`], v[`hbRefVO${i}`], v[`hbVo${i}`], v[`hbLno${i}`], v[`hbDno${i}`]);
+        T = matMul(T, helmholtzBranch(f, S, bp, broN));
+      }
       if (bro === 1 && broN > 0) T = matMul(T, quarterBranch(k0, S, area(v[`qwDo${i}`]), v[`qwLo${i}`], broN));
       return T;
     };
@@ -865,6 +1134,46 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
           return matMul(matMul(areaMat(m, 1), ductMat(l, cx(k0 * l))), areaMat(1, m));
         };
         return taperMat(din, dout, L, c, v.fmax, wave, Math.max(1, Math.round(L / w)));
+      }
+      const wtMode = Math.round(v[`wtMode${i}`] ?? 1);
+      if (wtMode === 2 && v[`wtRefFp${i}`] > 0) {
+        // 调用编织管记录：按记录的孔隙度壁面模型逐频点计算，重建本段传递矩阵
+        const wtBase = {
+          fp: v[`wtRefFp${i}`],
+          t: v[`wtRefTw${i}`],
+          rho0: v[`wtRefRho${i}`],
+          c0: v[`wtRefC${i}`],
+          gam: v[`wtRefGam${i}`],
+          P0: v[`wtRefP${i}`],
+        };
+        const braidRef = (D: number, l: number): Mat2 => {
+          const r = evalWovenTubeAt({ ...wtBase, D, L: l }, f);
+          if (!r) return ductMat(l, cx(k0 * l));
+          // 由该频点总 TL（壁面路径与泄漏路径并联后的包络）反算等效衰减，重建为均匀管段：
+          // TL = 8.686·α·l ⇒ α = TL/(8.686·l)，Z0 取 1 与系统其余段口径一致
+          const alphaEff = r.TL > 0 && l > 0 ? r.TL / (8.685889638 * l) : 0;
+          return ductMat(l, cx(k0 * l, -alphaEff * l));
+        };
+        return taperMat(din, dout, L, c, v.fmax, braidRef);
+      }
+      if ((wtMode === 1 || wtMode === 2) && v.fpBraid > 0) {
+        // 默认：孔隙度壁面模型（与「编织管消音器」公式同源），介质取当前工况；
+        // mode 2 但快照缺失（记录失效）时也回退到该默认模型
+        const wtBase = {
+          fp: v.fpBraid,
+          t: v[`twB${i}`],
+          rho0: med.rho0,
+          c0: c,
+          gam: med.gam,
+          P0: med.pAtm,
+        };
+        const braidPorous = (D: number, l: number): Mat2 => {
+          const r = evalWovenTubeAt({ ...wtBase, D, L: l }, f);
+          if (!r) return ductMat(l, cx(k0 * l));
+          const alphaEff = r.TL > 0 && l > 0 ? r.TL / (8.685889638 * l) : 0;
+          return ductMat(l, cx(k0 * l, -alphaEff * l));
+        };
+        return taperMat(din, dout, L, c, v.fmax, braidPorous);
       }
       const tw = v[`twB${i}`];
       // 壁面耗散因子逐频点只算一次；各子段按自身直径取 α_i = 2K/D_i（式17），复波数级联
@@ -937,11 +1246,10 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
       // 亥姆霍兹谐振腔旁支：ζb = Zb·S/(ρ0c0)，Zb = jωρ0Leff/An + ρ0c0²/(jωV)
       if (v.hOn === 1) {
         const w = 2 * Math.PI * f;
-        const an = area(v.dn);
-        const leff = v.ln + 0.85 * v.dn;
+        const bp = hbParams(v.hbModeBox, v.hbRefLBox, v.hbRefABox, v.hbRefVBox, v.Vh, v.ln, v.dn);
         const zb: Cx = [
           0,
-          (w * v.rho0 * leff) / an - (v.rho0 * c * c) / (w * v.Vh),
+          (w * v.rho0 * bp.leff) / bp.an - (v.rho0 * c * c) / (w * bp.vol),
         ];
         const zeta = cMul(zb, cx(sIn / (v.rho0 * c)));
         const inv = cDiv(cx(1), zeta);
@@ -1105,9 +1413,10 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
     const at1000 = at(1000).sys;
     const at1500 = at(1500).sys;
 
-    // 谐振频率
+    // 谐振频率（内置公式或记录快照，与旁支矩阵同源）
+    const fHbp = hbParams(v.hbModeBox, v.hbRefLBox, v.hbRefABox, v.hbRefVBox, v.Vh, v.ln, v.dn);
     const fH = v.hOn === 1
-      ? (c / (2 * Math.PI)) * Math.sqrt(area(v.dn) / (v.Vh * (v.ln + 0.85 * v.dn)))
+      ? (c / (2 * Math.PI)) * Math.sqrt(fHbp.an / (fHbp.vol * fHbp.leff))
       : NaN;
     const fQ = v.qOn === 1 ? c / (4 * v.Lq) : NaN;
 
@@ -1186,9 +1495,9 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
         hOn: 1, Vh: 5e-4, ln: 0.03, dn: 0.02,
         qOn: 0, tFil: 0,
       }),
-      expect: { c: 343.42, fH: 199.841979 },
+      expect: { c: 343.42, fH: 204.234635 },
       tolerance: 1e-6,
-      source: '文档第 10 节算例：Leff = 30 + 0.85×20 = 47 mm，f0 = (343/2π)·[3.1416×10⁻⁴/(5×10⁻⁴×0.047)]^(1/2) ≈ 200 Hz',
+      source: '文档第 10 节算例：Leff = 30 + ψ×20（ψ=0.75）= 45 mm，f0 = (343/2π)·[3.1416×10⁻⁴/(5×10⁻⁴×0.045)]^(1/2) ≈ 206 Hz',
     },
     {
       name: '编织管样件：D=49.36 mm、L=145 mm、t=2.7 mm（20~2000 Hz 平均 TL）',
@@ -1198,16 +1507,16 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
         t2: 1, L2: 0, t3: 1, L3: 0,
         Lo1: 0, Lo2: 0, Lo3: 0,
       }),
-      expect: { tlBraidAvg: 18.370085, tl250: 19.950131, tl500: 19.658950, tl1000: 18.691743 },
+      expect: { tlBraidAvg: 27.68481181, tl250: 26.67337984, tl500: 32.78514987, tl1000: 30.37547578 },
       tolerance: 1e-6,
-      source: '文档第 10 节：论文样件 20~2000 Hz 平均 TL≈16.4 dB、580 Hz 约 20 dB；本式按式17/18 得平均约 18.4 dB（差异见 assumptions），基准值由 solve 实跑取得',
+      source: '文档第 10 节：论文样件实测 20~2000 Hz 平均 TL≈16.4 dB；默认孔隙度壁面模型（与「编织管消音器」公式同源，f_p=1400 Hz）实跑约 27.7 dB，JCA 五参数对照模型约 18.4 dB；差异来源见 assumptions',
     },
     {
       name: '默认系统：进气管 3 段 + 空滤器（膨胀腔/滤芯/谐振腔）+ 出气管 3 段（含多腔消音器）',
       input: vBase({}),
-      expect: { tl_avg: 67.057286, tl_max: 78.063762, f_peak: 1594.1 },
+      expect: { tl_avg: 71.7438974030372, tl_max: 82.94641473662591, f_peak: 524.9 },
       tolerance: 1e-6,
-      source: '默认参数实跑回归：进气管 70/60/60 mm（直管/波纹管/编织管）→ 空滤器 200 mm×300 mm（含 30 mm 滤芯与亥姆霍兹腔）→ 出气管 60 mm×400 mm / 5 腔穿孔消音器 200 mm / 未使用段',
+      source: '默认参数实跑回归：进气管 70/60/60 mm（直管/波纹管/编织管）→ 空滤器 200 mm×300 mm（含 30 mm 滤芯与亥姆霍兹腔）→ 出气管 60 mm×400 mm / 5 腔穿孔消音器 200 mm / 未使用段；编织管段按默认孔隙度壁面模型参与（JCA 对照模型时 tl_avg≈67.1 dB、峰值 1594 Hz）',
     },
   ],
 };
@@ -1216,7 +1525,7 @@ export const intakeSystemTransmissionLoss: FormulaSpec = {
 function vBase(over: Record<string, number>): Record<string, number> {
   const base: Record<string, number> = {
     t: 293.15, rho0: 1.205, fmin: 20, fmax: 2000,
-    sigmaF: 240000, phiJ: 0.35, alphaInf: 2.5, lambdaV: 2.7e-5, lambdaT: 5.4e-5,
+    sigmaF: 240000, phiJ: 0.35, alphaInf: 2.5, lambdaV: 2.7e-5, lambdaT: 5.4e-5, fpBraid: 1400,
     mu: 1.81e-5, nPr: 0.71, gam: 1.4, pAtm: 101325, M1: 0, R0: 0.0055,
     hOn: 1, Vh: 5e-4, ln: 0.03, dn: 0.02,
     qOn: 0, Lq: 0.4, dq: 0.035,
@@ -1248,6 +1557,7 @@ function vBase(over: Record<string, number>): Record<string, number> {
     base[`h${i}`] = d.h;
     base[`w${i}`] = d.w;
     base[`twB${i}`] = d.tw;
+    base[`wtMode${i}`] = 1; // 与页面默认一致：孔隙度壁面模型
     const o = outD[i - 1];
     base[`o${i}`] = o.o;
     base[`Do${i}`] = o.D;

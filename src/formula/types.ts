@@ -26,14 +26,23 @@ export interface ShowIfCondition {
 }
 
 /**
- * 条件显示：单条条件，或条件数组（数组表示全部满足）。
- * 后者用于组合条件，如「进气管段数 ≥ i」且「该段管型 = 波纹管」。
+ * 条件显示：单条条件、条件数组（数组表示全部满足），或 any 组合（任一组满足即可）。
+ * 数组用于组合条件，如「进气管段数 ≥ i」且「该段管型 = 波纹管」；
+ * any 用于跨多个元件的同类判断，如「任一段选了编织管」。
  */
-export type ShowIf = ShowIfCondition | ShowIfCondition[];
+export interface ShowIfAny {
+  /** 任一组条件满足即显示；每组内部仍是「全部满足」 */
+  any: ShowIf[];
+}
+
+export type ShowIf = ShowIfCondition | ShowIfCondition[] | ShowIfAny;
 
 /** 判断 showIf 是否满足；参数缺失或为 NaN 时视为不满足 */
 export function showIfMatches(cond: ShowIf | undefined, values: Record<string, number>): boolean {
   if (!cond) return true;
+  if (!Array.isArray(cond) && 'any' in cond) {
+    return cond.any.some((c) => showIfMatches(c, values));
+  }
   const list = Array.isArray(cond) ? cond : [cond];
   return list.every((c) => {
     const v = Number(values[c.key]);
@@ -130,6 +139,34 @@ export interface ParamSpec {
    * 手工修改数值即视为脱离材料库（不再随材料或单位变化重算）。
    */
   bind?: MaterialBind;
+  /**
+   * 仅参与计算与保存、不在表单中渲染。
+   * 用于页面回填的派生快照（如引用某条历史记录后得到的等效长度/面积/容积）。
+   */
+  hidden?: boolean;
+  /**
+   * 引用其他公式的历史计算记录：表单显示记录下拉（选项由页面按 formulaId 提供），
+   * 选中后由页面调用 derive 得到派生快照，并写入 snapshot 指定的三个显示值键（hidden 参数）。
+   */
+  refRecord?: {
+    formulaId: string;
+    /** 下拉摘要展示的输出量（可选，key 为子部件公式的输出键；缺省则只显示时间） */
+    labelOutput?: { key: string; name: string; unit?: string };
+    /**
+     * 记录派生值 → 主系统隐藏参数的映射：
+     *   derive 返回对象的键 → 主系统 ParamSpec.key
+     * 旁支可映射 3 个标量（等效长度/面积/容积），管段可映射多个模型参数。
+     */
+    snapshot: Record<string, string>;
+    /** 从记录 SI 输入派生快照值（使用显示单位）；参数不兼容或非法时返回 null */
+    derive: (inputsSI: Record<string, number>) => Record<string, number> | null;
+  };
+  /**
+   * 派生提示：按当前输入值实时计算并显示（如「δ_out = ψ·d = 17 mm」）。
+   * values 为当前显示单位下的数值，units 为各输入选用的显示单位标签；
+   * 仅用于展示，不参与计算。
+   */
+  deriveHint?: (values: Record<string, number>, units: Record<string, string>) => string;
 }
 
 /** 输出参数定义 */

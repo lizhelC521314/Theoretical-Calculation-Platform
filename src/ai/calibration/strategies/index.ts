@@ -8,6 +8,7 @@
 import type { CalibrationStrategy } from '../types';
 import { JCA_POROUS_V11 } from './jcaPorousV11';
 import { BRAID_M0_V1, BRAID_M1_V1, BRAID_STRUCTURE_V1 } from './braidStructureV1';
+import { HELMHOLTZ_STRATEGIES } from './helmholtzV1';
 
 /** 编织管公式（acoustics.muffler.wovenTube）的所有可用策略 */
 export const WOVEN_TUBE_STRATEGIES = {
@@ -21,16 +22,23 @@ export const WOVEN_TUBE_STRATEGIES = {
   jcaV11: JCA_POROUS_V11,
 } as const satisfies Record<string, CalibrationStrategy>;
 
+/** 赫姆霍兹公式（acoustics.muffler.helmholtz）的所有可用策略（H0~H4） */
+export { HELMHOLTZ_STRATEGIES };
+
 /** 完整策略映射（含预留条目） */
 export const STRATEGY_REGISTRY: Record<string, CalibrationStrategy> = {
   ...WOVEN_TUBE_STRATEGIES,
+  ...HELMHOLTZ_STRATEGIES,
 };
 
-/** 按 (formulaId, modelVersion) 取策略，找不到回退 M0 */
+/** 按 (formulaId, modelVersion) 取策略 */
 export function getStrategy(
   formulaId: string,
-  modelVersion: keyof typeof WOVEN_TUBE_STRATEGIES | string,
+  modelVersion: string,
 ): CalibrationStrategy {
+  if (formulaId === 'acoustics.muffler.helmholtz') {
+    return HELMHOLTZ_STRATEGIES[modelVersion] ?? HELMHOLTZ_STRATEGIES.H1;
+  }
   if (formulaId !== 'acoustics.muffler.wovenTube') return JCA_POROUS_V11;
   return (
     WOVEN_TUBE_STRATEGIES[modelVersion as keyof typeof WOVEN_TUBE_STRATEGIES] ??

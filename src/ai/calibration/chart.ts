@@ -257,7 +257,12 @@ export function renderLineChartSvg(o: LineChartOptions): string {
 /** 拟合曲线：实测/模型（可叠加原始实测与逐点模型曲线） */
 export function renderFitChartSvg(
   report: CalibrationReport,
-  extra?: { measured?: ChartPoint[]; model?: ChartPoint[] },
+  extra?: {
+    measured?: ChartPoint[];
+    model?: ChartPoint[];
+    /** 多数据源叠加：联合标定时每条实测曲线单独绘制 */
+    measuredSeries?: Array<{ name: string; points: ChartPoint[]; color?: string }>;
+  },
 ): string {
   const bands = report.bands.filter(
     (b) => b.included && Number.isFinite(b.center) && Number.isFinite(b.test) && Number.isFinite(b.model),
@@ -270,7 +275,13 @@ export function renderFitChartSvg(
   const trainMaxHz = includedCenters.length > 0 ? Math.max(...includedCenters) : NaN;
 
   const series: ChartSeries[] = [];
-  if (extra?.measured && extra.measured.length > 0) {
+  if (extra?.measuredSeries && extra.measuredSeries.length > 0) {
+    // 联合标定：每条试验数据单独一条曲线，颜色区分
+    for (const s of extra.measuredSeries) {
+      if (s.points.length === 0) continue;
+      series.push({ name: s.name, color: s.color ?? '#94a3b8', points: s.points });
+    }
+  } else if (extra?.measured && extra.measured.length > 0) {
     series.push({ name: '实测（原始）', color: '#94a3b8', points: extra.measured });
   }
   if (extra?.model && extra.model.length > 0) {

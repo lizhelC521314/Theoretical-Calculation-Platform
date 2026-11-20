@@ -548,3 +548,56 @@ function blockBootstrap(
   }
   return out;
 }
+
+/* ---------------- 联合标定：按数据源分别评估 ---------------- */
+
+export interface SourceMetrics {
+  /** 数据源标识（联合标定时用于区分各条试验数据） */
+  id: string;
+  /** 原始点数量 */
+  points: number;
+  /** 参与评估的有效频带数 */
+  bands: number;
+  rmse: number;
+  mae: number;
+  maxAbsBandErr: number;
+  peakFreqDevPct: number;
+}
+
+/**
+ * 在给定参数下单独评估一个数据源。
+ * 联合标定只输出整体指标，无法看出某一条数据是否偏离；
+ * 该函数用同一套参数与频带口径逐条复算，便于识别异常样件/工况。
+ */
+export function evaluateSourceMetrics(
+  dataset: CalibrationDataset,
+  strategy: CalibrationStrategy,
+  params: Record<string, number>,
+  model: ModelEval,
+): SourceMetrics | null {
+  const bands = prepareBands(dataset, strategy).filter((b) => b.included);
+  if (bands.length === 0) return null;
+  const centers = bands.map((b) => b.center);
+  const testVals = bands.map((b) => b.test);
+  const modelVals = model(dataset.inputs, params, centers);
+  const residuals = modelVals.map((v, i) => v - testVals[i]);
+  const n = residuals.length;
+  const rmse = Math.sqrt(residuals.reduce((s, e) => s + e * e, 0) / n);
+  const mae = residuals.reduce((s, e) => s + Math.abs(e), 0) / n;
+  const maxAbsBandErr = Math.max(...residuals.map(Math.abs));
+  const testPeak = peakOf(testVals, centers);
+  const modelPeak = peakOf(modelVals, centers);
+  const peakFreqDevPct =
+    Number.isFinite(testPeak.f) && testPeak.f > 0
+      ? Math.abs((modelPeak.f - testPeak.f) / testPeak.f) * 100
+      : Number.NaN;
+  return {
+    id: dataset.id,
+    points: dataset.points.length,
+    bands: n,
+    rmse,
+    mae,
+    maxAbsBandErr,
+    peakFreqDevPct,
+  };
+}

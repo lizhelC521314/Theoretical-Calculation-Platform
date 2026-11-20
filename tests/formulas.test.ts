@@ -91,8 +91,9 @@ describe('公式基准算例', () => {
 /**
  * 赫姆霍兹消音器 TL 曲线专项测试
  *
- * 验证 TL = 10lg[1+( K/(f/f_r − f_r/f) )²]（K = √(Sc·V/lEff)/(2Sp)）的实现：
- * 默认工况下手算 TL(0.5·f_r) ≈ 0.2057 dB，近共振点 0.99·f_r 处 TL ≈ 24.3 dB。
+ * 验证 TL = 10lg|1−Z0/(2Zin)|² 的实现（Zin 含颈部口辐射阻）：
+ * 默认工况下（δout=ψd，ψ=0.75，leff=45mm）手算 TL(0.5·f_r) ≈ 0.1972 dB，
+ * 近共振点 0.99·f_r 处 TL ≈ 23.7 dB，共振峰值由辐射阻限定在 ≈37.9 dB（不再发散）。
  */
 describe('赫姆霍兹消音器 TL 曲线', () => {
   const input = { V: 5e-4, lc: 0.03, d: 0.02, t: 298.15, D: 0.06 };
@@ -109,7 +110,7 @@ describe('赫姆霍兹消音器 TL 曲线', () => {
     for (let i = 1; i < pts.length; i++) expect(pts[i].x).toBeGreaterThan(pts[i - 1].x);
   });
 
-  it('TL(0.5·f_r) 与手算一致（≈0.2057 dB）', () => {
+  it('TL(0.5·f_r) 与手算一致（≈0.1972 dB）', () => {
     const fr = helmholtzMuffler.solve(input).fr;
     // 密集等间隔采样，找 0.5*fr 附近最近的点
     const pts = spec.compute(input);
@@ -121,19 +122,19 @@ describe('赫姆霍兹消音器 TL 曲线', () => {
     }
     // 间隔 ~0.01*fr，所以最佳点偏差应 < 0.01*fr
     expect(bestDist / fr).toBeLessThan(0.015);
-    expect(Math.abs(best.y - 0.2057)).toBeLessThan(0.005);
+    expect(Math.abs(best.y - 0.2045)).toBeLessThan(0.005);
   });
 
-  it('结果输出中心频率处的 TL 峰值（≈48 dB，密集采样取奇异点近侧），且与曲线最大采样值一致', () => {
+  it('结果输出中心频率处的 TL 峰值（含辐射阻，≈37.9 dB）且与曲线最大采样值一致', () => {
     const tl = helmholtzMuffler.solve(input).tl;
-    // 新 denseTlCurve 在 fr±0.01 Hz 处采点，TL 远高于旧 peakTl（旧取 r=0.995 约 30.4 dB）
-    // K ≈ 0.324，fr±0.01Hz 对应 r≈1±5e-5，q≈2e-4，K/q≈1620，TL≈65 dB
-    expect(tl).toBeGreaterThan(40);
+    // 计入颈部口辐射阻（unflanged，θ=(ka)²/2）后共振峰值有限
+    expect(tl).toBeGreaterThan(25);
+    expect(tl).toBeLessThan(45);
     const maxY = Math.max(...spec.compute(input).map((q) => q.y));
     expect(Math.abs(tl - maxY)).toBeLessThan(0.5);
   });
 
-  it('近共振点 0.99·f_r 处 TL ≈ 24.3 dB，且曲线在 fr 处呈尖峰', () => {
+  it('近共振点 0.99·f_r 处 TL ≈ 23.7 dB，且曲线在 fr 处呈有限峰值', () => {
     const fr = helmholtzMuffler.solve(input).fr;
     const pts = spec.compute(input);
     // 找 0.99·fr 附近最近的点
@@ -144,12 +145,59 @@ describe('赫姆霍兹消音器 TL 曲线', () => {
       if (d < bestDist) { bestDist = d; near = q; }
     }
     expect(bestDist / fr).toBeLessThan(0.015);
-    expect(Math.abs(near.y - 24.33)).toBeLessThan(0.5);
+    expect(Math.abs(near.y - 23.71)).toBeLessThan(0.5);
     const maxY = Math.max(...pts.map((q) => q.y));
-    expect(maxY).toBeGreaterThan(40); // 密集采样尖峰应远高于 0.99·fr 处的 24.3 dB
+    expect(maxY).toBeGreaterThan(30); // 共振峰值高于 0.99·f_r 处（有限值，约 37.9 dB）
     // 远离共振处 TL 趋近 0（0.05·f_r 处应小于 0.1 dB）
     const far = pts.find((q) => q.x < 0.06 * fr)!;
     expect(far.y).toBeLessThan(0.1);
+  });
+
+  it('薄壁小孔移频：f′ ≈ 251.4 Hz，Mc/Mh ≈ 0.489（V2.0 文档算例）', () => {
+    const holes = { ...input, dh: 0.005, th: 0.002, nh: 1, rho: 1.204 };
+    const out = helmholtzMuffler.solve(holes);
+    expect(out.sh).toBeCloseTo(1.9634954e-5, 9);
+    expect(out.mc / out.mh).toBeCloseTo(0.4891, 3);
+    expect(out.fp).toBeCloseTo(251.4, 1);
+    expect(out.fp).toBeGreaterThan(out.fr);
+    // 开孔后 TL 曲线仍在共振处呈有限峰值（辐射阻限定，约 34.4 dB）
+    expect(Math.max(...spec.compute(holes).map((q) => q.y))).toBeGreaterThan(25);
+  });
+
+  it('F2 壳体模态：刚度极大时退化为 F0，峰值频率基本不变', () => {
+    const base = helmholtzMuffler.solve(input);
+    const rigidShell = helmholtzMuffler.solve({
+      ...input,
+      ns: 1,
+      fs1: 200,
+      etaS1: 0.03,
+      ms1: 1e12,
+      gs1: 1,
+    });
+    expect(Math.abs(rigidShell.fp - base.fp) / base.fp).toBeLessThan(0.01);
+    expect(rigidShell.tl).toBeGreaterThan(30);
+  });
+
+  it('F3 腔体模态：开启后曲线仍有限，f100 与模态频率一致', () => {
+    const modal = {
+      ...input,
+      Lx: 0.2,
+      Ly: 0.2,
+      Lz: 0.2,
+      useCav: 1,
+      etaCav: 0.02,
+      xi: 0.25,
+      psi: 0.25,
+      zeta: 0.25,
+    };
+    const out = helmholtzMuffler.solve(modal);
+    // f100 = (c/2)·(1/0.2) = 866.1 Hz
+    expect(out.f100).toBeCloseTo(866.1, 0);
+    expect(Number.isFinite(out.fp)).toBe(true);
+    expect(out.tl).toBeGreaterThan(20);
+    const pts = spec.compute(modal);
+    expect(pts.length).toBeGreaterThan(1200);
+    expect(Math.max(...pts.map((q) => q.y))).toBeGreaterThan(20);
   });
 });
 

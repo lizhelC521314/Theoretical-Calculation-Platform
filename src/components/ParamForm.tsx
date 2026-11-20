@@ -28,6 +28,8 @@ interface Props {
   /** 各可绑定参数已选材料（参数 key → 材料文件路径） */
   bindings?: Record<string, string>;
   onBindingsChange?: (b: Record<string, string>) => void;
+  /** 动态下拉选项（参数 key → 选项）：用于引用历史记录等运行时数据，覆盖参数自带的 options */
+  selectOptions?: Record<string, { value: number; label: string }[]>;
 }
 
 function UnitSelect({
@@ -84,8 +86,9 @@ export function ParamForm({
   materials,
   bindings,
   onBindingsChange,
+  selectOptions,
 }: Props) {
-  const visible = formula.inputs.filter((p) => showIfMatches(p.showIf, values));
+  const visible = formula.inputs.filter((p) => !p.hidden && showIfMatches(p.showIf, values));
   const [bindError, setBindError] = useState<{ key: string; msg: string } | null>(null);
   // 切换公式时清掉上一条材料的缺失提示
   useEffect(() => setBindError(null), [formula.id]);
@@ -211,7 +214,8 @@ export function ParamForm({
   const control = (p: ParamSpec) => {
     const unitLabel = p.unitGroup ? units[p.key] ?? p.unit : p.unit;
     const v = values[p.key];
-    const isSelect = p.kind === 'select' && p.options && p.options.length > 0;
+    const opts = selectOptions?.[p.key] ?? p.options;
+    const isSelect = p.kind === 'select' && opts && opts.length > 0;
     return (
       <div className="param-input">
         {isSelect ? (
@@ -220,7 +224,7 @@ export function ParamForm({
             value={typeof v === 'number' && !Number.isNaN(v) ? v : ''}
             onChange={(e) => onValuesChange({ ...values, [p.key]: Number(e.target.value) })}
           >
-            {p.options!.map((o) => (
+            {opts!.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
@@ -297,6 +301,9 @@ export function ParamForm({
               {IS_STANDARD
                 ? rangeText(b.param) && <div className="param-range">{rangeText(b.param)}</div>
                 : b.param.description && <div className="param-desc">{b.param.description}</div>}
+              {b.param.deriveHint && (
+                <div className="param-derived">{b.param.deriveHint(values, units)}</div>
+              )}
               {outOfRange(b.param) && (
                 <div className="param-warn">
                   取值超出建议范围 {rangeText(b.param).replace('参考范围：', '')}

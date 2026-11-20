@@ -89,6 +89,8 @@ export interface CalibrationDataset {
   groupId: string;
   /** 数据哈希（原始文件 SHA256） */
   hash: string;
+  /** 联合标定时参与合并的数据源（单个数据源时缺省） */
+  sources?: Array<{ id: string; points: number }>;
 }
 
 export interface BandRecord {

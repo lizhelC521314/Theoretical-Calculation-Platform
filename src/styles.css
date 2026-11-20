@@ -1301,6 +1301,14 @@ select {
   margin-top: 4px;
   line-height: 1.6;
 }
+/* 参数派生值提示（如 ψ·d），随输入实时更新 */
+.param-derived {
+  font-size: 11.5px;
+  color: var(--blue);
+  margin-top: 3px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
 /* 标准版参数参考范围：仅此一行提示，不展开参数说明 */
 .param-range {
   font-size: 11.5px;
@@ -5899,6 +5907,34 @@ body.col-resizing .pane-divider::after {
 .ai-formula-row .tag {
   margin-left: auto;
 }
+/* 公式选择下拉（公式数量增加后避免平铺按钮过多） */
+.ai-formula-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.ai-formula-select label {
+  font-size: 12.5px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.ai-formula-select select {
+  min-width: 260px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.ai-formula-select select:focus {
+  outline: none;
+  border-color: var(--blue);
+}
 .ai-tabs {
   display: flex;
   gap: 6px;
@@ -6071,6 +6107,14 @@ body.col-resizing .pane-divider::after {
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-family: Consolas, monospace;
+}
+/* 各数据源指标：超出阈值的单元格标红 */
+.ai-table td.bad {
+  color: var(--danger);
+  font-weight: 600;
+}
+.ai-source-metrics {
+  margin-top: 10px;
 }
 .ai-table input[type='number'] {
   width: 100px;

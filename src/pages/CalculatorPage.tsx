@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormulaSpec } from '../formula/types';
 import { DOMAIN_LABEL, FORMULA_STATUS_LABEL, showIfMatches } from '../formula/types';
 import { UNIT_GROUPS, autoUnit, formatNumber, fromSI } from '../formula/units';
@@ -59,6 +59,14 @@ function useDebounced<T>(value: T, delay: number): T {
     return () => window.clearTimeout(id);
   }, [value, delay]);
   return debounced;
+}
+
+/** 历史记录时间戳（UTC ISO）转本地时间显示 */
+function formatLocalTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.replace('T', ' ').slice(0, 16);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }: Props) {
@@ -126,6 +134,98 @@ export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }
       alive = false;
     };
   }, [upstreamIds, user.id, project?.id]);
+
+  // ---------- 引用其他公式的历史计算记录（refRecord） ----------
+  /** 当前公式实际引用的公式 id（如赫姆霍兹消音器记录） */
+  const refFormulaIds = useMemo(
+    () => [...new Set(formula.inputs.filter((p) => p.refRecord).map((p) => p.refRecord!.formulaId))],
+    [formula],
+  );
+  /** 各引用公式的当前用户记录（按时间倒序） */
+  const [refRecords, setRefRecords] = useState<Record<string, HistoryEntry[]>>({});
+  const refToastRef = useRef('');
+  useEffect(() => {
+    refToastRef.current = '';
+    if (refFormulaIds.length === 0) {
+      setRefRecords({});
+      return;
+    }
+    let alive = true;
+    api.history
+      .list(user.id)
+      .then((list) => {
+        if (!alive) return;
+        const pick: Record<string, HistoryEntry[]> = {};
+        for (const id of refFormulaIds) {
+          pick[id] = list
+            .filter((h) => h.formulaId === id)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        }
+        setRefRecords(pick);
+      })
+      .catch(() => {
+        if (alive) setRefRecords({});
+      });
+    return () => {
+      alive = false;
+    };
+  }, [refFormulaIds, user.id]);
+
+  /** 记录下拉选项：value 取记录创建时间戳（跨保存稳定），label 带 f0 便于识别 */
+  const selectOptions = useMemo(() => {
+    const defs = formula.inputs.filter((p) => p.refRecord);
+    if (defs.length === 0) return undefined;
+    const out: Record<string, { value: number; label: string }[]> = {};
+    for (const p of defs) {
+      const list = refRecords[p.refRecord!.formulaId];
+      const outDef = p.refRecord!.labelOutput;
+      out[p.key] = [
+        { value: 0, label: list && list.length === 0 ? '未选择（暂无已保存的记录）' : '未选择' },
+        ...(list ?? []).map((h) => {
+          const val = outDef ? Number((h.outputs as Record<string, unknown>)?.[outDef.key]) : NaN;
+          const t = formatLocalTime(h.createdAt);
+          const summary = outDef && Number.isFinite(val)
+            ? ` · ${outDef.name}=${val.toFixed(1)}${outDef.unit ? ` ${outDef.unit}` : ''}`
+            : '';
+          return {
+            value: Date.parse(h.createdAt),
+            label: `${t}${summary}`,
+          };
+        }),
+      ];
+    }
+    return out;
+  }, [formula, refRecords]);
+
+  /** 选中记录后回填派生快照；记录失效时清空快照（solve 自动回退内置公式）并提示 */
+  useEffect(() => {
+    const defs = formula.inputs.filter((p) => p.refRecord);
+    if (defs.length === 0) return;
+    const patch: Record<string, number> = {};
+    for (const p of defs) {
+      const ts = values[p.key] ?? 0;
+      const list = refRecords[p.refRecord!.formulaId];
+      if (!list) continue; // 尚未加载完成，不做失效判断
+      const rec = ts > 0 ? list.find((h) => Date.parse(h.createdAt) === ts) : undefined;
+      let snap: Record<string, number> | null = null;
+      if (rec) {
+        const si = (rec.inputs as { inputsSI?: Record<string, number> })?.inputsSI;
+        snap = si ? p.refRecord!.derive(si) : null;
+      } else if (ts > 0) {
+        const token = `${p.key}:${ts}`;
+        if (refToastRef.current !== token) {
+          refToastRef.current = token;
+          showToast(`「${p.label}」引用的记录已失效，已回退为内置公式`);
+        }
+      }
+      for (const [rk, target] of Object.entries(p.refRecord!.snapshot)) {
+        const val = snap?.[rk];
+        const next = Number.isFinite(val) ? (val as number) : 0;
+        if (values[target] !== next) patch[target] = next;
+      }
+    }
+    if (Object.keys(patch).length > 0) setValues((prev) => ({ ...prev, ...patch }));
+  }, [values, refRecords, formula]);
 
   // 三栏宽度持久化
   const [leftW, setLeftW] = useState<number>(() => {
@@ -547,6 +647,7 @@ export function CalculatorPage({ formula, user, project, onBack, onOpenFormula }
             materials={materials}
             bindings={bindings}
             onBindingsChange={setBindings}
+            selectOptions={selectOptions}
           />
         </div>
 

@@ -1,32 +1,151 @@
 /** 声学（NVH）领域示意图（内联 SVG，随公式元数据一起交付，离线可用） */
 
 export const HELMHOLTZ_DIAGRAM = `
-<svg viewBox="0 0 520 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="亥姆霍兹消音器几何示意">
-  <!-- 主管道：宽扁矩形 -->
-  <rect x="30" y="228" width="460" height="44" fill="#ffffff" stroke="#222222" stroke-width="1.8"/>
-  <!-- 共振腔：圆形 -->
-  <circle cx="260" cy="105" r="63" fill="#ffffff" stroke="#222222" stroke-width="1.8"/>
-  <!-- 喉管：先挖掉圆周底弧，再画两条侧边 -->
-  <rect x="246" y="163" width="28" height="65" fill="#ffffff"/>
-  <line x1="246" y1="163" x2="246" y2="228" stroke="#222222" stroke-width="1.8"/>
-  <line x1="274" y1="163" x2="274" y2="228" stroke="#222222" stroke-width="1.8"/>
+<svg viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="亥姆霍兹消音器几何示意">
+  <defs>
+    <marker id="hhDim" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse">
+      <path d="M0,0 L8,4 L0,8 z" fill="#8496b3"/>
+    </marker>
+    <!-- 坐标系箭头：三色分别对应 X / Y / Z -->
+    <marker id="axisX" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0,0 L9,3.5 L0,7 z" fill="#c0392b"/></marker>
+    <marker id="axisY" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0,0 L9,3.5 L0,7 z" fill="#1e8449"/></marker>
+    <marker id="axisZ" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0,0 L9,3.5 L0,7 z" fill="#2471a3"/></marker>
+  </defs>
 
-  <!-- 部件名称：引线指向对应几何位置 -->
-  <line x1="218" y1="62" x2="166" y2="50" stroke="#8a8a8a" stroke-width="1"/>
-  <text x="162" y="54" text-anchor="end" font-size="12" fill="#222222">共振腔</text>
-  <line x1="246" y1="216" x2="196" y2="216" stroke="#8a8a8a" stroke-width="1"/>
-  <text x="192" y="220" text-anchor="end" font-size="12" fill="#222222">喉管</text>
-  <text x="392" y="256" text-anchor="middle" font-size="12" fill="#222222">主管道</text>
+  <!-- ========== 左侧：亥姆霍兹消音器基本结构（保持不变） ========== -->
+  <text x="190" y="22" text-anchor="middle" font-size="13" fill="#0b3a72" font-weight="600">亥姆霍兹消音器基本结构（F0 / F1）</text>
+  <!-- 主管道 -->
+  <rect x="30" y="228" width="320" height="44" fill="#ffffff" stroke="#222222" stroke-width="1.8"/>
+  <!-- 共振腔（圆形示意） -->
+  <circle cx="190" cy="105" r="63" fill="#ffffff" stroke="#222222" stroke-width="1.8"/>
+  <!-- 喉管 -->
+  <rect x="176" y="163" width="28" height="65" fill="#ffffff"/>
+  <line x1="176" y1="163" x2="176" y2="228" stroke="#222222" stroke-width="1.8"/>
+  <line x1="204" y1="163" x2="204" y2="228" stroke="#222222" stroke-width="1.8"/>
+  <!-- 引线与标注 -->
+  <line x1="148" y1="62" x2="96" y2="50" stroke="#8a8a8a" stroke-width="1"/>
+  <text x="92" y="54" text-anchor="end" font-size="11" fill="#222222">共振腔 V</text>
+  <line x1="176" y1="216" x2="130" y2="216" stroke="#8a8a8a" stroke-width="1"/>
+  <text x="126" y="220" text-anchor="end" font-size="11" fill="#222222">喉管 l<tspan font-size="8" dy="3">c</tspan>, d</text>
+  <text x="292" y="256" text-anchor="middle" font-size="11" fill="#222222">主管道 D</text>
+  <!-- 喉管有效长度 -->
+  <line x1="218" y1="196" x2="278" y2="196" stroke="#8a8a8a" stroke-width="1" marker-start="url(#hhDim)" marker-end="url(#hhDim)"/>
+  <text x="248" y="193" text-anchor="middle" font-size="10" fill="#555555">l<tspan font-size="7" dy="2">c</tspan> + ψd（ψ 默认 0.75）</text>
+  <!-- 薄壁小孔（可选，F1） -->
+  <g fill="#c0392b">
+    <circle cx="190" cy="92" r="2.5"/><circle cx="200" cy="96" r="2"/><circle cx="180" cy="96" r="2"/>
+  </g>
+  <line x1="190" y1="86" x2="270" y2="46" stroke="#c0392b" stroke-width="1"/>
+  <text x="274" y="44" text-anchor="start" font-size="10" fill="#c0392b">薄壁小孔（可选）</text>
 
-  <!-- 符号标注 -->
-  <text x="260" y="111" text-anchor="middle" font-size="15" fill="#222222">V</text>
-  <text x="260" y="205" text-anchor="middle" font-size="11" fill="#222222">d</text>
-  <line x1="274" y1="196" x2="330" y2="196" stroke="#8a8a8a" stroke-width="1"/>
-  <text x="334" y="200" text-anchor="start" font-size="12" fill="#222222">l<tspan font-size="9" dy="3">c</tspan></text>
-  <text x="72" y="256" text-anchor="middle" font-size="13" fill="#222222">D</text>
+  <!-- ========== 右侧：矩形腔体（带明确坐标系 + 三色尺寸线） ========== -->
+  <text x="560" y="22" text-anchor="middle" font-size="13" fill="#0b3a72" font-weight="600">矩形腔体尺寸 L<tspan font-size="9">x</tspan> / L<tspan font-size="9">y</tspan> / L<tspan font-size="9">z</tspan> 与开孔位置</text>
+  <text x="560" y="38" text-anchor="middle" font-size="9.5" fill="#666666">（原点 O 在腔体左前下角，ξ / ψ / ζ ∈ [0, 1] 分别沿 X / Y / Z 轴量）</text>
 
-  <!-- 主公式 -->
-  <text x="260" y="300" text-anchor="middle" font-size="14" fill="#c0392b" font-weight="600">f = c/(2π)·√(Sc / (V·(lc + 1.5d/2)))</text>
+  <!-- 等轴测坐标（腔体顶点）：
+       O 原点 (X=0,Y=0,Z=0) = 正面左下 (420, 290)
+       X+Lx 终点 = 正面右下 (610, 290)         [Lx=190 px]
+       Z+Lz 终点 = 正面左上 (420, 140)         [Lz=150 px]
+       X+Z 对角  = 正面右上 (610, 140)
+       Y+Ly 后端 = 顶面左后 (492, 245)          [Ly=72 px 透视]
+       X+Y 对角底 = 右后侧底 (682, 245)
+       Z+Y 对角顶 = 左后侧顶 (492, 95)
+       X+Z+Y 对角 = 右后侧顶 (682, 95)
+  -->
+
+  <!-- 背面不可见的棱（先画，在腔体下面） -->
+  <line x1="492" y1="95" x2="492" y2="245" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="420" y1="290" x2="492" y2="245" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="610" y1="290" x2="682" y2="245" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- 腔体三面（后画，盖过虚线） -->
+  <!-- 正面（主视，白） -->
+  <polygon points="420,290 420,140 610,140 610,290" fill="#ffffff" stroke="#222222" stroke-width="1.8"/>
+  <!-- 顶面（透视，浅蓝灰） -->
+  <polygon points="420,140 492,95 682,95 610,140" fill="#eaf1fb" stroke="#222222" stroke-width="1.6"/>
+  <!-- 右侧面（透视，更灰） -->
+  <polygon points="610,140 682,95 682,245 610,290" fill="#d9e4f3" stroke="#222222" stroke-width="1.6"/>
+
+  <!-- ========== 三色坐标系（原点 O + X/Y/Z 三轴带箭头） ========== -->
+  <!-- X 轴（红色，沿正面底边向右） -->
+  <line x1="420" y1="290" x2="630" y2="290" stroke="#c0392b" stroke-width="1.8" marker-end="url(#axisX)"/>
+  <!-- Y 轴（绿色，沿底面透视向后） -->
+  <line x1="420" y1="290" x2="488" y2="248" stroke="#1e8449" stroke-width="1.8" marker-end="url(#axisY)"/>
+  <!-- Z 轴（蓝色，沿正面左边向上） -->
+  <line x1="420" y1="290" x2="420" y2="128" stroke="#2471a3" stroke-width="1.8" marker-end="url(#axisZ)"/>
+  <!-- 原点 O 标记 -->
+  <circle cx="420" cy="290" r="2.5" fill="#222222"/>
+  <text x="410" y="306" text-anchor="end" font-size="12" fill="#222222" font-weight="700">O</text>
+  <!-- 三轴标签（贴在箭头旁） -->
+  <text x="635" y="286" text-anchor="start" font-size="12" fill="#c0392b" font-weight="700">X</text>
+  <text x="493" y="242" text-anchor="start" font-size="12" fill="#1e8449" font-weight="700">Y</text>
+  <text x="406" y="124" text-anchor="end" font-size="12" fill="#2471a3" font-weight="700">Z</text>
+
+  <!-- ========== 三色尺寸线（锚定在腔体具体棱上） ========== -->
+  <!-- Lx 尺寸：沿 X 向的正面底边，红色 -->
+  <!-- 把尺寸线画在腔体下方，两端锚定在 O 和正面右下顶点 (610,290) -->
+  <line x1="420" y1="318" x2="610" y2="318" stroke="#c0392b" stroke-width="1.3" marker-start="url(#axisX)" marker-end="url(#axisX)"/>
+  <line x1="420" y1="312" x2="420" y2="324" stroke="#c0392b" stroke-width="1.3"/>
+  <line x1="610" y1="312" x2="610" y2="324" stroke="#c0392b" stroke-width="1.3"/>
+  <text x="515" y="334" text-anchor="middle" font-size="14" fill="#c0392b" font-weight="700">L<tspan font-size="10" dy="3">x</tspan>  腔体长度（X 向）</text>
+
+  <!-- Lz 尺寸：沿 Z 向的正面左棱，蓝色 -->
+  <!-- 把尺寸线画在腔体左侧外，锚定在 O (420,290) 和正面左上 (420,140) -->
+  <line x1="396" y1="140" x2="396" y2="290" stroke="#2471a3" stroke-width="1.3" marker-start="url(#axisZ)" marker-end="url(#axisZ)"/>
+  <line x1="390" y1="140" x2="402" y2="140" stroke="#2471a3" stroke-width="1.3"/>
+  <line x1="390" y1="290" x2="402" y2="290" stroke="#2471a3" stroke-width="1.3"/>
+  <text x="388" y="218" text-anchor="end" font-size="14" fill="#2471a3" font-weight="700">L<tspan font-size="10" dy="3">z</tspan>  腔体高度（Z 向）</text>
+
+  <!-- Ly 尺寸：沿 Y 向的底面后棱，绿色 -->
+  <!-- 底面 Y 向的真实棱是从 O (420,290) 到后端 (492,245)，这是透视斜线 -->
+  <!-- 把尺寸线画在顶面上方，水平引出，避免和腔体线混在一起 -->
+  <line x1="492" y1="245" x2="492" y2="200" stroke="#1e8449" stroke-width="1" stroke-dasharray="3,3"/>
+  <line x1="420" y1="290" x2="420" y2="250" stroke="#1e8449" stroke-width="1" stroke-dasharray="3,3"/>
+  <line x1="420" y1="250" x2="492" y2="200" stroke="#1e8449" stroke-width="1.3" marker-start="url(#axisY)" marker-end="url(#axisY)"/>
+  <text x="456" y="192" text-anchor="middle" font-size="14" fill="#1e8449" font-weight="700">L<tspan font-size="10" dy="3">y</tspan>  腔体宽度（Y 向）</text>
+
+  <!-- ========== 开孔位置示例 ========== -->
+  <!-- 示例：孔中心在 (ξ, ψ, ζ) = (0.25, 0.25, 0.25)
+       正面投影点 = (O.x + 0.25·Lx,  O.y − 0.25·Lz)
+                  = (420 + 47.5,     290 − 37.5)
+                  = (467.5, 252.5) 取整 (468, 253)
+       顶面投影：Y 方向透视偏移 ≈ 72·0.25≈18 px，倾角 tanθ ≈ 45/72=0.625
+                  → 顶面点 = (468 + 18·cos, 95 + 18·sin) ≈ (483, 104)
+  -->
+  <!-- 正面上的开孔标记（红色圆点） -->
+  <circle cx="468" cy="253" r="5.5" fill="#c0392b" stroke="#ffffff" stroke-width="1.5"/>
+  <!-- 向顶面的虚线延伸（展示三维位置） -->
+  <line x1="468" y1="253" x2="468" y2="157" stroke="#c0392b" stroke-width="1" stroke-dasharray="3,3"/>
+  <line x1="468" y1="157" x2="487" y2="118" stroke="#c0392b" stroke-width="1" stroke-dasharray="3,3"/>
+  <line x1="487" y1="118" x2="528" y2="118" stroke="#c0392b" stroke-width="1" stroke-dasharray="3,3"/>
+  <circle cx="487" cy="118" r="3.5" fill="#c0392b"/>
+  <!-- 开孔引线（指回左下角注释区） -->
+  <line x1="468" y1="253" x2="340" y2="270" stroke="#c0392b" stroke-width="1"/>
+  <circle cx="340" cy="270" r="1.5" fill="#c0392b"/>
+
+  <!-- ========== 左下角：开孔位置计算说明 ========== -->
+  <rect x="332" y="274" width="168" height="72" rx="5" fill="#fff7f7" stroke="#c0392b" stroke-width="1"/>
+  <text x="416" y="290" text-anchor="middle" font-size="11" fill="#c0392b" font-weight="700">开孔位置计算</text>
+  <text x="416" y="306" text-anchor="middle" font-size="10" fill="#222222">孔中心 X：ξ · L<tspan font-size="7" dy="2">x</tspan></text>
+  <text x="416" y="320" text-anchor="middle" font-size="10" fill="#222222">孔中心 Y：ψ · L<tspan font-size="7" dy="2">y</tspan></text>
+  <text x="416" y="334" text-anchor="middle" font-size="10" fill="#222222">孔中心 Z：ζ · L<tspan font-size="7" dy="2">z</tspan></text>
+
+  <!-- ========== 底部：公式 + 颜色图例 ========== -->
+  <!-- 三色图例（底部横条） -->
+  <g font-size="10" fill="#555555">
+    <rect x="420" y="362" width="16" height="10" fill="#ffffff" stroke="#c0392b"/>
+    <text x="440" y="371">= X 向，红色</text>
+    <rect x="520" y="362" width="16" height="10" fill="#ffffff" stroke="#1e8449"/>
+    <text x="540" y="371">= Y 向，绿色</text>
+    <rect x="620" y="362" width="16" height="10" fill="#ffffff" stroke="#2471a3"/>
+    <text x="640" y="371">= Z 向，蓝色</text>
+  </g>
+  <!-- 腔体体积 + 模态频率公式 -->
+  <text x="560" y="348" text-anchor="middle" font-size="10.5" fill="#555555">V = L<tspan font-size="7" dy="2">x</tspan>·L<tspan font-size="7" dy="2">y</tspan>·L<tspan font-size="7" dy="2">z</tspan>，f<tspan font-size="7" dy="2">mnp</tspan> = c/2·√[(m/L<tspan font-size="7" dy="2">x</tspan>)²+(n/L<tspan font-size="7" dy="2">y</tspan>)²+(p/L<tspan font-size="7" dy="2">z</tspan>)²]</text>
+
+  <!-- ========== 左侧底部：主公式 ========== -->
+  <text x="200" y="355" text-anchor="middle" font-size="12" fill="#c0392b" font-weight="600">f<tspan font-size="8" dy="2">0</tspan> = c/(2π)·√[S<tspan font-size="8" dy="2">c</tspan> / (V · l<tspan font-size="8" dy="2">eff</tspan>)]</text>
+  <text x="200" y="370" text-anchor="middle" font-size="10.5" fill="#555555">l<tspan font-size="7" dy="2">eff</tspan> = l<tspan font-size="7" dy="2">c</tspan> + h + δ<tspan font-size="7" dy="2">out</tspan> + δ<tspan font-size="7" dy="2">in</tspan>（δ<tspan font-size="7" dy="2">out</tspan> = ψd，ψ 默认 0.75），薄壁小孔移频 f′ = f<tspan font-size="7" dy="2">0</tspan>·√(1+M<tspan font-size="7" dy="2">c</tspan>/M<tspan font-size="7" dy="2">h</tspan>)</text>
 </svg>`;
 
 export const EXPANSION_DIAGRAM = `
